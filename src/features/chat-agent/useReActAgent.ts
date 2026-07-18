@@ -54,46 +54,63 @@ export const useReActAgent = (apiKey: string, baseUrl: string, model: string, te
           currentMessages = [...currentMessages, responseMessage];
           setMessages([...currentMessages]);
 
-          const toolCall = responseMessage.tool_calls[0]; // handle first tool call for simplicity
-          
-          if (toolCall.function.name === 'tasks_complete') {
+          const newToolResults: Message[] = [];
+          let shouldBreak = false;
 
-            const toolResult: Message = {
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              name: 'tasks_complete',
-              content: 'Task completed successfully.'
-            };
-            currentMessages = [...currentMessages, toolResult];
-            setMessages([...currentMessages]);
-            break; // Exit loop
-          } else if (toolCall.function.name === 'chat') {
-            const toolResult: Message = {
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              name: 'chat',
-              content: 'Message displayed to user. Waiting for user response...'
-            };
-            currentMessages = [...currentMessages, toolResult];
-            setMessages([...currentMessages]);
-            break; // Exit loop to wait for user
-          } else if (toolCall.function.name === 'execute_terminal_command') {
-            const args = JSON.parse(toolCall.function.arguments);
-            
-            // Execute in terminal
-            let output = 'No terminal available.';
-            if (terminalRef.current) {
-              output = await terminalRef.current.runAiCommand(args.command);
+          // Handle ALL tool calls to satisfy API requirements
+          for (const toolCall of responseMessage.tool_calls) {
+            if (toolCall.function.name === 'tasks_complete') {
+              newToolResults.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                name: 'tasks_complete',
+                content: 'Task completed successfully.'
+              });
+              shouldBreak = true;
+            } else if (toolCall.function.name === 'chat') {
+              newToolResults.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                name: 'chat',
+                content: 'Message displayed to user. Waiting for user response...'
+              });
+              shouldBreak = true;
+            } else if (toolCall.function.name === 'execute_terminal_command') {
+              let args = { command: '' };
+              try {
+                args = JSON.parse(toolCall.function.arguments);
+              } catch(e) {
+                // Ignore parse error
+              }
+              
+              // Execute in terminal
+              let output = 'No terminal available or invalid command.';
+              if (terminalRef.current && args.command) {
+                output = await terminalRef.current.runAiCommand(args.command);
+              }
+              
+              newToolResults.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                name: 'execute_terminal_command',
+                content: output
+              });
+            } else {
+              // Fallback for unknown tools
+              newToolResults.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                name: toolCall.function.name,
+                content: `Error: Tool ${toolCall.function.name} is not available.`
+              });
             }
-            
-            const toolResult: Message = {
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              name: 'execute_terminal_command',
-              content: output
-            };
-            currentMessages = [...currentMessages, toolResult];
-            setMessages([...currentMessages]);
+          }
+
+          currentMessages = [...currentMessages, ...newToolResults];
+          setMessages([...currentMessages]);
+
+          if (shouldBreak) {
+            break;
           }
         } else {
           // AI didn't use a tool. Silent retry.
