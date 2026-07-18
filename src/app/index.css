@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
 :root {
-  --color-bg: #f5f5f5;
+  --color-bg: #f3f3f3;
   --color-surface: #ffffff;
   --color-text: #1a1a1a;
   --color-text-secondary: #666666;
@@ -11,24 +11,24 @@
   --color-gray-100: #f5f5f5;
   --color-gray-200: #e5e5e5;
   --color-gray-800: #222222;
-  
+
   --radius-large: 24px;
   --radius-medium: 16px;
   --radius-small: 8px;
-  
+
   --font-family: 'OpenAI Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  
+
   /* Xterm specifics */
   --xterm-bg: #000000;
   --xterm-fg: #ffffff;
-  
-  /* MD3-inspired Premium Elevation Levels */
-  --elevation-1: 0 1px 2px rgba(0,0,0,0.05);
-  --elevation-2: 0 2px 8px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.03);
-  --elevation-3: 0 4px 16px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
-  --elevation-4: 0 8px 32px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.05);
-  --elevation-5: 0 12px 48px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.06);
+
+  /* MD3-inspired Premium Elevation Levels (Shadows removed per new aesthetic) */
+  --elevation-1: none;
+  --elevation-2: none;
+  --elevation-3: none;
+  --elevation-4: none;
+  --elevation-5: none;
 }
 
 * {
@@ -59,13 +59,17 @@ button {
   cursor: pointer;
 }
 
-input, textarea {
+input,
+textarea {
   font-family: inherit;
 }
 
 /* Ensure no emojis render via system fallback by preferring our strict stack */
 /* Exclude xterm's internal textarea to avoid breaking terminal input */
-body, input, textarea:not(.xterm-helper-textarea), button {
+body,
+input,
+textarea:not(.xterm-helper-textarea),
+button {
   font-family: 'OpenAI Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
   font-size: 16px;
 }
@@ -174,6 +178,7 @@ body, input, textarea:not(.xterm-helper-textarea), button {
   flex-shrink: 0;
   height: 60px;
 }
+
 .mobile-bottom-bar button {
   flex: 1;
   text-align: center;
@@ -184,6 +189,7 @@ body, input, textarea:not(.xterm-helper-textarea), button {
   border-top: 2px solid transparent;
   transition: all 0.2s ease;
 }
+
 .mobile-bottom-bar button.active {
   color: var(--color-black);
   font-weight: 600;
@@ -195,14 +201,14 @@ body, input, textarea:not(.xterm-helper-textarea), button {
   .workspace-container {
     flex-direction: column;
   }
-  
+
   .chat-section {
     border-right: none;
     border-bottom: none;
     flex: 1;
     min-height: 0;
   }
-  
+
   .terminal-section {
     flex: 1;
     min-height: 0;
@@ -216,6 +222,7 @@ body, input, textarea:not(.xterm-helper-textarea), button {
   .workspace-container[data-active-tab="chat"] .terminal-section {
     display: none !important;
   }
+
   .workspace-container:not([data-active-tab="chat"]) .chat-section {
     display: none !important;
   }
@@ -242,10 +249,11 @@ body, input, textarea:not(.xterm-helper-textarea), button {
   z-index: 1000;
 }
 
-.context-menu, .avatar-menu {
+.context-menu,
+.avatar-menu {
   position: fixed;
   background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
+  border: none;
   border-radius: var(--radius-medium);
   box-shadow: var(--elevation-4);
   padding: 4px;
@@ -261,6 +269,7 @@ body, input, textarea:not(.xterm-helper-textarea), button {
     opacity: 0;
     transform: scale(0.95);
   }
+
   to {
     opacity: 1;
     transform: scale(1);
@@ -328,6 +337,7 @@ body, input, textarea:not(.xterm-helper-textarea), button {
       transform: translateY(100%);
       opacity: 0;
     }
+
     to {
       transform: translateY(0);
       opacity: 1;
@@ -346,33 +356,36 @@ body, input, textarea:not(.xterm-helper-textarea), button {
 
 /* ===== Glassmorphism Effects ===== */
 .glass-header {
-  background-color: color-mix(in srgb, var(--color-surface) 75%, transparent) !important;
+  background-color: color-mix(in srgb, var(--color-surface) 70%, transparent) !important;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent) !important;
+  box-shadow: none !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent) !important;
 }
 
 .glass-input {
   background-color: color-mix(in srgb, var(--color-surface) 70%, transparent) !important;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  box-shadow: var(--elevation-3) !important;
-  border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent) !important;
+  box-shadow: none !important;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent) !important;
 }
 
 .glass-btn {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  box-shadow: var(--elevation-3) !important;
+  box-shadow: none !important;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent) !important;
 }
 
 .glass-btn:not(:disabled) {
   background-color: color-mix(in srgb, var(--color-black) 75%, transparent) !important;
-  border: 1px solid rgba(255,255,255,0.15) !important;
+  border: none !important;
 }
 
 .glass-btn:disabled {
-  background-color: color-mix(in srgb, var(--color-border) 60%, transparent) !important;
-  box-shadow: var(--elevation-3) !important;
-  border: 1px solid color-mix(in srgb, var(--color-border) 30%, transparent) !important;
+  background-color: color-mix(in srgb, var(--color-surface) 70%, transparent) !important;
+  color: var(--color-text-secondary) !important;
+  box-shadow: none !important;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent) !important;
 }
