@@ -70,9 +70,14 @@ export const callLLM = async (messages: Message[], config: LLMConfig): Promise<M
   const url = `${config.baseUrl.replace(/\/$/, '')}/chat/completions`;
   const isStreaming = !!config.onUpdate;
   
+  const cleanMessages = messages.map(msg => {
+    const { _ui_streaming, ...rest } = msg as any;
+    return rest;
+  });
+
   const body = {
     model: config.model || 'deepseek-chat',
-    messages,
+    messages: cleanMessages,
     tools: TOOLS,
     tool_choice: 'auto',
     stream: isStreaming
