@@ -390,7 +390,7 @@ const FileManager: React.FC<FileManagerProps> = ({ wc }) => {
         {/* New item inline form */}
         {newItemType && (
           <div className="fm-new-dialog">
-            {newItemType === 'folder' ? <Folder size={20} color="#5B9BD5" /> : <FileText size={20} />}
+            {newItemType === 'folder' ? <Folder size={20} color="var(--color-black)" /> : <FileText size={20} color="var(--color-black)" />}
             <input
               ref={newItemInputRef}
               className="input-field"
@@ -423,7 +423,7 @@ const FileManager: React.FC<FileManagerProps> = ({ wc }) => {
         {/* Empty state */}
         {!fs.isLoading && fs.entries.length === 0 && (
           <div className="fm-empty">
-            <FolderOpen size={40} strokeWidth={1.2} />
+            <FolderOpen size={40} color="var(--color-black)" />
             <span>空文件夹</span>
             <span style={{ fontSize: 12 }}>拖拽文件到此处上传，或点击工具栏按钮新建</span>
           </div>

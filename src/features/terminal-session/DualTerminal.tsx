@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { WebContainer } from '@webcontainer/api';
 import { Terminal } from '@xterm/xterm';
-import { Loader2, Maximize2, PanelRightClose, PanelRight } from 'lucide-react';
+import { Loader2, Maximize2, Minimize2, PanelRightClose, Monitor, Terminal as TerminalIcon, Folder } from 'lucide-react';
 import TerminalView from '../../entities/container/TerminalView.tsx';
 import { getWebContainer } from '../../shared/lib/webcontainer.ts';
 import { saveSnapshot } from '../../shared/lib/persistence.ts';
@@ -16,10 +16,10 @@ interface DualTerminalProps {
   activeTab: 'ai' | 'user' | 'files';
   onTabChange: (tab: 'ai' | 'user' | 'files') => void;
   layoutState?: 'half' | 'full' | 'collapsed';
-  onLayoutCycle?: () => void;
+  onLayoutChange?: (state: 'half' | 'full' | 'collapsed') => void;
 }
 
-const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onReady, activeTab, onTabChange, layoutState = 'half', onLayoutCycle }, ref) => {
+const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onReady, activeTab, onTabChange, layoutState = 'half', onLayoutChange }, ref) => {
   const aiTermRef = useRef<Terminal | null>(null);
   const userTermRef = useRef<Terminal | null>(null);
   const [isUserTermReady, setIsUserTermReady] = useState(false);
@@ -148,48 +148,67 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
     whiteSpace: 'nowrap'
   });
 
-  // Decide icon for the button based on current layout state
-  const LayoutIcon = layoutState === 'half' ? Maximize2 : 
-                     layoutState === 'full' ? PanelRightClose : 
-                     PanelRight;
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <div className="dual-terminal-tabs" style={{ 
-        display: 'flex', 
-        gap: '8px', 
-        padding: layoutState === 'collapsed' ? '8px 0' : '8px 16px', 
-        justifyContent: layoutState === 'collapsed' ? 'center' : 'flex-start',
-        borderBottom: '1px solid var(--color-border)', 
-        alignItems: 'center', 
-        overflowX: 'hidden', 
-        flexShrink: 0 
-      }}>
-        {layoutState !== 'collapsed' && (
-          <>
-            <button style={tabStyle(activeTab === 'ai')} onClick={() => onTabChange('ai')}>
-              Sunam的电脑
-            </button>
-            <button style={tabStyle(activeTab === 'user')} onClick={() => onTabChange('user')}>
-              终端
-            </button>
-            <button style={tabStyle(activeTab === 'files')} onClick={() => onTabChange('files')}>
-              文件
-            </button>
-          </>
-        )}
-        {layoutState !== 'collapsed' && <div style={{ flex: 1 }}></div>}
-        {onLayoutCycle && (
-          <button 
-            className="desktop-only-btn" 
-            style={{ padding: '6px', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center' }} 
-            onClick={onLayoutCycle}
-            title="Toggle Layout"
-          >
-            <LayoutIcon size={18} />
+    <div style={{ display: 'flex', flexDirection: layoutState === 'collapsed' ? 'row' : 'column', height: '100%', overflow: 'hidden' }}>
+      {layoutState !== 'collapsed' ? (
+        <div className="dual-terminal-tabs" style={{ 
+          display: 'flex', 
+          gap: '8px', 
+          padding: '8px 16px', 
+          borderBottom: '1px solid var(--color-border)', 
+          alignItems: 'center', 
+          overflowX: 'auto', 
+          flexShrink: 0 
+        }}>
+          <button style={tabStyle(activeTab === 'ai')} onClick={() => onTabChange('ai')}>
+            Sunam的电脑
           </button>
-        )}
-      </div>
+          <button style={tabStyle(activeTab === 'user')} onClick={() => onTabChange('user')}>
+            终端
+          </button>
+          <button style={tabStyle(activeTab === 'files')} onClick={() => onTabChange('files')}>
+            文件
+          </button>
+          <div style={{ flex: 1 }}></div>
+          {onLayoutChange && (
+            <div style={{ display: 'flex', gap: '4px' }}>
+              {layoutState === 'half' ? (
+                <button 
+                  className="desktop-only-btn" 
+                  style={{ padding: '6px', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center' }} 
+                  onClick={() => onLayoutChange('full')}
+                  title="全屏模式"
+                >
+                  <Maximize2 size={18} />
+                </button>
+              ) : (
+                <button 
+                  className="desktop-only-btn" 
+                  style={{ padding: '6px', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center' }} 
+                  onClick={() => onLayoutChange('half')}
+                  title="半屏模式"
+                >
+                  <Minimize2 size={18} />
+                </button>
+              )}
+              <button 
+                className="desktop-only-btn" 
+                style={{ padding: '6px', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center' }} 
+                onClick={() => onLayoutChange('collapsed')}
+                title="收起"
+              >
+                <PanelRightClose size={18} />
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="desktop-only-btn" style={{ display: 'flex', flexDirection: 'column', width: '48px', height: '100%', alignItems: 'center', paddingTop: '16px', gap: '24px', backgroundColor: 'var(--color-surface)' }}>
+           <button onClick={() => { onTabChange('ai'); onLayoutChange?.('half'); }} title="Sunam的电脑" style={{ color: 'var(--color-black)', opacity: activeTab === 'ai' ? 1 : 0.4, transition: 'opacity 0.2s' }}><Monitor size={20} /></button>
+           <button onClick={() => { onTabChange('user'); onLayoutChange?.('half'); }} title="终端" style={{ color: 'var(--color-black)', opacity: activeTab === 'user' ? 1 : 0.4, transition: 'opacity 0.2s' }}><TerminalIcon size={20} /></button>
+           <button onClick={() => { onTabChange('files'); onLayoutChange?.('half'); }} title="文件" style={{ color: 'var(--color-black)', opacity: activeTab === 'files' ? 1 : 0.4, transition: 'opacity 0.2s' }}><Folder size={20} /></button>
+        </div>
+      )}
       <div style={{ flex: 1, padding: activeTab === 'files' ? '0' : '16px', position: 'relative', overflow: 'hidden', display: layoutState === 'collapsed' ? 'none' : 'block' }}>
         {!isBooted && (
           <div style={{

@@ -150,11 +150,7 @@
   width: 24px;
   height: 24px;
   flex-shrink: 0;
-  color: var(--color-text-secondary);
-}
-
-.fm-item-icon.folder {
-  color: #5B9BD5;
+  color: var(--color-black);
 }
 
 .fm-item-name {

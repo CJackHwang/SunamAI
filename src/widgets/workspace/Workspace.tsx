@@ -59,13 +59,17 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
     setInput('');
   };
 
-  const cycleLayout = () => {
-    setLayoutState(prev => {
-      if (prev === 'half') return 'full';
-      if (prev === 'full') return 'collapsed';
-      return 'half';
-    });
-  };
+  React.useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth <= 900) {
+        setLayoutState('half');
+      }
+    };
+    
+    handleResize(); // Check initially
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   return (
     <div className="workspace-container" data-active-tab={mobileActive}>
@@ -184,7 +188,13 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
         flex: layoutState === 'collapsed' ? '0 0 48px' : '1',
         minWidth: layoutState === 'collapsed' ? '48px' : '0',
         transition: 'all 0.2s ease',
-        borderLeft: layoutState === 'collapsed' ? '1px solid var(--color-border)' : 'none'
+        borderLeft: layoutState === 'collapsed' ? '1px solid var(--color-border)' : 'none',
+        ...(layoutState === 'full' ? {
+          position: 'fixed',
+          inset: 0,
+          zIndex: 100,
+          paddingTop: 0
+        } : {})
       }}>
         <DualTerminal 
           ref={terminalRef} 
@@ -195,7 +205,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
             setMobileActive(tab);
           }}
           layoutState={layoutState}
-          onLayoutCycle={cycleLayout}
+          onLayoutChange={setLayoutState}
         />
       </div>
 

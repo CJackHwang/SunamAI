@@ -50,7 +50,7 @@ const MainPage: React.FC = () => {
             onClick={() => setIsAvatarMenuOpen(!isAvatarMenuOpen)}
             style={{ borderRadius: '50%', width: '40px', height: '40px', padding: 0, border: '1px solid var(--color-border)', background: 'var(--color-surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
           >
-             <User size={20} color="var(--color-text-secondary)" />
+             <User size={20} color="var(--color-black)" />
           </button>
 
           {isAvatarMenuOpen && (
