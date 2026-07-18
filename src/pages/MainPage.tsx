@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Workspace from '../widgets/workspace/Workspace.tsx';
 import SettingsModal from '../widgets/settings/SettingsModal.tsx';
-import { Settings, User } from 'lucide-react';
+import { Settings, CircleUser } from 'lucide-react';
 
 const MainPage: React.FC = () => {
   const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('sunam_api_key') || '');
@@ -40,35 +40,19 @@ const MainPage: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', position: 'relative' }}>
           <button 
             onClick={() => setIsSettingsOpen(true)}
-            className="btn btn-secondary header-settings-btn"
-            style={{ borderRadius: '50%', width: '40px', height: '40px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            className="header-settings-btn"
+            style={{ width: '40px', height: '40px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-black)' }}
           >
-            <Settings size={20} />
+            <Settings size={22} />
           </button>
           
           <button
             onClick={() => setIsAvatarMenuOpen(!isAvatarMenuOpen)}
-            style={{ borderRadius: '50%', width: '40px', height: '40px', padding: 0, border: '1px solid var(--color-border)', background: 'var(--color-surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+            style={{ width: '40px', height: '40px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-black)' }}
           >
-             <User size={20} color="var(--color-black)" />
+            <img src="/head.jpeg" alt="Avatar" style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--color-border)' }} />
           </button>
 
-          {isAvatarMenuOpen && (
-            <>
-              {/* Click outside overlay */}
-              <div className="context-overlay" onClick={() => setIsAvatarMenuOpen(false)} />
-              <div className="avatar-menu" style={{ right: '24px', left: 'auto', top: '56px' }}>
-                <div className="context-item" style={{ color: 'var(--color-text-secondary)', cursor: 'default' }}>未登录</div>
-                <div className="context-divider mobile-only-setting" style={{ margin: '4px 8px' }} />
-                <button 
-                  className="context-item mobile-only-setting" 
-                  onClick={() => { setIsSettingsOpen(true); setIsAvatarMenuOpen(false); }}
-                >
-                  <Settings size={16} className="context-item-icon" /> 设置
-                </button>
-              </div>
-            </>
-          )}
         </div>
       </header>
 
@@ -90,6 +74,24 @@ const MainPage: React.FC = () => {
           onSave={handleSaveSettings}
           onClose={() => apiKey && setIsSettingsOpen(false)}
         />
+      )}
+
+      {isAvatarMenuOpen && (
+        <>
+          <div className="context-overlay dimmed" onClick={() => setIsAvatarMenuOpen(false)} />
+          <div className="avatar-menu" style={{ position: 'fixed', right: '24px', left: 'auto', top: '56px', zIndex: 1001 }}>
+            <button className="context-item" onClick={() => setIsAvatarMenuOpen(false)}>
+              <CircleUser size={16} className="context-item-icon" /> 登录 / 注册
+            </button>
+            <div className="context-divider mobile-only-setting" style={{ margin: '4px 8px' }} />
+            <button 
+              className="context-item mobile-only-setting" 
+              onClick={() => { setIsSettingsOpen(true); setIsAvatarMenuOpen(false); }}
+            >
+              <Settings size={16} className="context-item-icon" /> 设置
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

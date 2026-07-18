@@ -4,7 +4,7 @@ import DualTerminal from '../../features/terminal-session/DualTerminal.tsx';
 import MarkdownRenderer from '../../components/MarkdownRenderer';
 import type { DualTerminalRef } from '../../features/terminal-session/DualTerminal.tsx';
 import { useReActAgent } from '../../features/chat-agent/useReActAgent.ts';
-import { Send, Square, Terminal } from 'lucide-react';
+import { Send, Square, Terminal, Monitor, Folder, MessageSquare } from 'lucide-react';
 
 // Error boundary to catch rendering errors
 class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean, error: string }> {
@@ -214,26 +214,30 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
         <button 
           className={mobileActive === 'chat' ? 'active' : ''} 
           onClick={() => setMobileActive('chat')}
+          title="对话"
         >
-          对话
+          <MessageSquare size={24} />
         </button>
         <button 
           className={mobileActive === 'ai' ? 'active' : ''} 
           onClick={() => { setMobileActive('ai'); setTerminalTab('ai'); }}
+          title="Sunam的电脑"
         >
-          Sunam的电脑
+          <Monitor size={24} />
         </button>
         <button 
           className={mobileActive === 'user' ? 'active' : ''} 
           onClick={() => { setMobileActive('user'); setTerminalTab('user'); }}
+          title="终端"
         >
-          终端
+          <Terminal size={24} />
         </button>
         <button 
           className={mobileActive === 'files' ? 'active' : ''} 
           onClick={() => { setMobileActive('files'); setTerminalTab('files'); }}
+          title="文件"
         >
-          文件
+          <Folder size={24} />
         </button>
       </div>
     </div>
