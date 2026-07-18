@@ -1,48 +1,69 @@
 @font-face {
-  font-family: 'Anthropic Sans';
-  src: url('/fonts/AnthropicSans/AnthropicSans-Text-Regular-Static.otf') format('opentype');
+  font-family: 'OpenAI Sans';
+  src: url('/fonts/OpenAISans/OpenAI%20Sans%20Light.otf') format('opentype');
+  font-weight: 300;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'OpenAI Sans';
+  src: url('/fonts/OpenAISans/OpenAI%20Sans%20Light%20Italic.otf') format('opentype');
+  font-weight: 300;
+  font-style: italic;
+}
+
+@font-face {
+  font-family: 'OpenAI Sans';
+  src: url('/fonts/OpenAISans/OpenAI%20Sans%20Regular.otf') format('opentype');
   font-weight: 400;
   font-style: normal;
 }
 
 @font-face {
-  font-family: 'Anthropic Sans';
-  src: url('/fonts/AnthropicSans/AnthropicSans-Text-RegularItalic-Static.otf') format('opentype');
+  font-family: 'OpenAI Sans';
+  src: url('/fonts/OpenAISans/OpenAI%20Sans%20Regular%20Italic.otf') format('opentype');
   font-weight: 400;
   font-style: italic;
 }
 
 @font-face {
-  font-family: 'Anthropic Sans';
-  src: url('/fonts/AnthropicSans/AnthropicSans-Text-Medium-Static.otf') format('opentype');
+  font-family: 'OpenAI Sans';
+  src: url('/fonts/OpenAISans/OpenAI%20Sans%20Medium.otf') format('opentype');
   font-weight: 500;
   font-style: normal;
 }
 
 @font-face {
-  font-family: 'Anthropic Sans';
-  src: url('/fonts/AnthropicSans/AnthropicSans-Text-MediumItalic-Static.otf') format('opentype');
+  font-family: 'OpenAI Sans';
+  src: url('/fonts/OpenAISans/OpenAI%20Sans%20Medium%20Italic.otf') format('opentype');
   font-weight: 500;
   font-style: italic;
 }
 
 @font-face {
-  font-family: 'Anthropic Sans';
-  src: url('/fonts/AnthropicSans/AnthropicSans-Text-Semibold-Static.otf') format('opentype');
+  font-family: 'OpenAI Sans';
+  src: url('/fonts/OpenAISans/OpenAI%20Sans%20Semibold.otf') format('opentype');
   font-weight: 600;
   font-style: normal;
 }
 
 @font-face {
-  font-family: 'Anthropic Sans';
-  src: url('/fonts/AnthropicSans/AnthropicSans-Text-Bold-Static.otf') format('opentype');
+  font-family: 'OpenAI Sans';
+  src: url('/fonts/OpenAISans/OpenAI%20Sans%20Semibold%20Italic.otf') format('opentype');
+  font-weight: 600;
+  font-style: italic;
+}
+
+@font-face {
+  font-family: 'OpenAI Sans';
+  src: url('/fonts/OpenAISans/OpenAI%20Sans%20Bold.otf') format('opentype');
   font-weight: 700;
   font-style: normal;
 }
 
 @font-face {
-  font-family: 'Anthropic Sans';
-  src: url('/fonts/AnthropicSans/AnthropicSans-Text-BoldItalic-Static.otf') format('opentype');
+  font-family: 'OpenAI Sans';
+  src: url('/fonts/OpenAISans/OpenAI%20Sans%20Bold%20Italic.otf') format('opentype');
   font-weight: 700;
   font-style: italic;
 }

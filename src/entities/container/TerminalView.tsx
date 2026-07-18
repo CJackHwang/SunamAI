@@ -23,7 +23,8 @@ const TerminalView: React.FC<TerminalViewProps> = ({ onTerminalReady, readOnly =
         foreground: 'var(--xterm-fg)',
         cursor: 'var(--xterm-fg)',
       },
-      fontFamily: 'var(--font-family)'
+      fontSize: 14,
+      fontFamily: 'var(--font-mono)'
     });
     
     const fitAddon = new FitAddon();
@@ -57,7 +58,8 @@ const TerminalView: React.FC<TerminalViewProps> = ({ onTerminalReady, readOnly =
         height: '100%',
         backgroundColor: 'var(--xterm-bg)',
         padding: '16px',
-        borderRadius: 'var(--radius-large)'
+        borderRadius: 'var(--radius-large)',
+        overflow: 'hidden'
       }} 
     />
   );

@@ -16,11 +16,12 @@
   --radius-medium: 16px;
   --radius-small: 8px;
   
-  --font-family: 'Anthropic Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-family: 'OpenAI Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   
   /* Xterm specifics */
   --xterm-bg: #000000;
-  --xterm-fg: #f5f5f5;
+  --xterm-fg: #ffffff;
 }
 
 * {
@@ -56,7 +57,7 @@ input, textarea {
 
 /* Ensure no emojis render via system fallback by preferring our strict stack */
 body, input, textarea, button {
-  font-family: 'Anthropic Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+  font-family: 'OpenAI Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
 }
 
 /* Responsive Layout Classes */

@@ -16,6 +16,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
   const [activeTab, setActiveTab] = useState<'ai' | 'user'>('ai');
   const aiTermRef = useRef<Terminal | null>(null);
   const userTermRef = useRef<Terminal | null>(null);
+  const [isUserTermReady, setIsUserTermReady] = useState(false);
   const [wc, setWc] = useState<WebContainer | null>(null);
 
   useEffect(() => {
@@ -31,7 +32,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
 
   // Boot user terminal shell when WC and user term are ready
   useEffect(() => {
-    if (!wc || !userTermRef.current) return;
+    if (!wc || !isUserTermReady || !userTermRef.current) return;
     
     let process: any;
     const bootShell = async () => {
@@ -44,6 +45,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
       }));
 
       const shellWriter = process.input.getWriter();
+      
       userTermRef.current?.onData((data) => {
         shellWriter.write(data);
       });
@@ -53,14 +55,14 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
     return () => {
       if (process) process.kill();
     };
-  }, [wc]);
+  }, [wc, isUserTermReady]);
 
   React.useImperativeHandle(ref, () => ({
     runAiCommand: async (command: string): Promise<string> => {
       if (!wc || !aiTermRef.current) return 'Error: WebContainer not ready';
       
       const term = aiTermRef.current;
-      term.writeln(`\r\n$ ${command}`);
+      term.writeln(`\r\nAdmin@SunamAI ~ # ${command}`);
       
       try {
         const process = await wc.spawn('jsh', ['-c', command]);
@@ -103,10 +105,10 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
       </div>
       <div style={{ flex: 1, padding: '16px', position: 'relative', overflow: 'hidden' }}>
         <div style={{ display: activeTab === 'ai' ? 'block' : 'none', height: '100%' }}>
-          <TerminalView readOnly={true} onTerminalReady={(term) => aiTermRef.current = term} />
+          <TerminalView readOnly={true} onTerminalReady={(term) => { aiTermRef.current = term; }} />
         </div>
         <div style={{ display: activeTab === 'user' ? 'block' : 'none', height: '100%' }}>
-          <TerminalView readOnly={false} onTerminalReady={(term) => userTermRef.current = term} />
+          <TerminalView readOnly={false} onTerminalReady={(term) => { userTermRef.current = term; setIsUserTermReady(true); }} />
         </div>
       </div>
     </div>
