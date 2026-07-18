@@ -61,29 +61,18 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl }) => {
         <div style={{ padding: '24px' }}>
           <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '12px' }}>
             <input 
+              className="input-field"
+              style={{ flex: 1, borderRadius: 'var(--radius-large)', paddingLeft: '20px', paddingRight: '20px' }}
               value={input}
               onChange={e => setInput(e.target.value)}
               disabled={isRunning || !isTermReady}
               placeholder={isTermReady ? "Ask Sunam anything..." : "Booting container..."}
-              style={{
-                flex: 1,
-                padding: '16px 24px',
-                borderRadius: 'var(--radius-large)',
-                border: '1px solid var(--color-border)',
-                outline: 'none',
-                fontSize: '15px'
-              }}
             />
             <button 
               type="submit"
               disabled={isRunning || !isTermReady || !input.trim()}
-              style={{
-                padding: '0 24px',
-                borderRadius: 'var(--radius-large)',
-                backgroundColor: (isRunning || !isTermReady || !input.trim()) ? 'var(--color-border)' : 'var(--color-black)',
-                color: 'var(--color-white)',
-                fontWeight: 600
-              }}
+              className="btn btn-primary"
+              style={{ borderRadius: 'var(--radius-large)', paddingLeft: '24px', paddingRight: '24px' }}
             >
               Send
             </button>

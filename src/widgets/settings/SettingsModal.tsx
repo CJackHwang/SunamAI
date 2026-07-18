@@ -22,14 +22,7 @@ const overlayStyle: React.CSSProperties = {
 
 // Using CSS class from index.css instead of inline style for responsive width
 
-const inputStyle: React.CSSProperties = {
-  padding: '12px',
-  borderRadius: 'var(--radius-small)',
-  border: '1px solid var(--color-border)',
-  width: '100%',
-  outline: 'none',
-  fontSize: '14px'
-};
+// Using CSS classes from index.css instead of inline styles for responsive width
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBaseUrl, onSave, onClose }) => {
   const [apiKey, setApiKey] = useState(initialApiKey);
@@ -50,7 +43,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
             Base URL (OpenAI Compatible)
           </label>
           <input 
-            style={inputStyle}
+            className="input-field"
+            style={{ width: '100%' }}
             value={baseUrl}
             onChange={e => setBaseUrl(e.target.value)}
             placeholder="https://api.deepseek.com/v1"
@@ -62,7 +56,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
             API Key
           </label>
           <input 
-            style={inputStyle}
+            className="input-field"
+            style={{ width: '100%' }}
             type="password"
             value={apiKey}
             onChange={e => setApiKey(e.target.value)}
@@ -73,14 +68,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
         <button 
           onClick={() => onSave(apiKey, baseUrl)}
           disabled={!apiKey}
-          style={{
-            padding: '12px',
-            borderRadius: 'var(--radius-small)',
-            backgroundColor: apiKey ? 'var(--color-black)' : 'var(--color-border)',
-            color: 'var(--color-white)',
-            fontWeight: 600,
-            marginTop: '10px'
-          }}
+          className="btn btn-primary"
+          style={{ width: '100%', marginTop: '10px' }}
         >
           Save and Continue
         </button>

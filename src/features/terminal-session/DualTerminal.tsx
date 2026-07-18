@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { WebContainer } from '@webcontainer/api';
 import { Terminal } from '@xterm/xterm';
+import { Loader2 } from 'lucide-react';
 import TerminalView from '../../entities/container/TerminalView.tsx';
 import { getWebContainer } from '../../shared/lib/webcontainer.ts';
 
@@ -18,6 +19,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
   const userTermRef = useRef<Terminal | null>(null);
   const [isUserTermReady, setIsUserTermReady] = useState(false);
   const [wc, setWc] = useState<WebContainer | null>(null);
+  const [isBooted, setIsBooted] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -33,20 +35,27 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
   // Boot user terminal shell when WC and user term are ready
   useEffect(() => {
     if (!wc || !isUserTermReady || !userTermRef.current) return;
-    
+
     let process: any;
+    let onDataDisposable: any;
     const bootShell = async () => {
       process = await wc.spawn('jsh');
-      
+
+      let hasReceivedOutput = false;
+
       process.output.pipeTo(new WritableStream({
         write(data) {
           userTermRef.current?.write(data);
+          if (!hasReceivedOutput) {
+            hasReceivedOutput = true;
+            setIsBooted(true); // Now we only hide the loader when the shell ACTUALLY prints the prompt!
+          }
         }
       }));
 
       const shellWriter = process.input.getWriter();
-      
-      userTermRef.current?.onData((data) => {
+
+      onDataDisposable = userTermRef.current?.onData((data) => {
         shellWriter.write(data);
       });
     };
@@ -54,20 +63,34 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
 
     return () => {
       if (process) process.kill();
+      // MUST dispose the listener or it will try to write to a killed shell!
+      if (onDataDisposable) onDataDisposable.dispose();
     };
   }, [wc, isUserTermReady]);
+
+  // Refocus terminal when switching tabs so the cursor reappears
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (activeTab === 'user') {
+        userTermRef.current?.focus();
+      } else {
+        aiTermRef.current?.focus();
+      }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [activeTab]);
 
   React.useImperativeHandle(ref, () => ({
     runAiCommand: async (command: string): Promise<string> => {
       if (!wc || !aiTermRef.current) return 'Error: WebContainer not ready';
-      
+
       const term = aiTermRef.current;
-      term.writeln(`\r\nAdmin@SunamAI ~ # ${command}`);
-      
+      term.writeln(`\r\nAdmin@Sunam ~ # ${command}`);
+
       try {
         const process = await wc.spawn('jsh', ['-c', command]);
         let output = '';
-        
+
         process.output.pipeTo(new WritableStream({
           write(data) {
             term.write(data);
@@ -84,13 +107,12 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
       }
     }
   }));
-
   const tabStyle = (isActive: boolean): React.CSSProperties => ({
-    padding: '8px 16px',
+    padding: '6px 16px 10px',
     borderBottom: isActive ? '2px solid var(--color-black)' : '2px solid transparent',
     color: isActive ? 'var(--color-black)' : 'var(--color-text-secondary)',
-    fontWeight: isActive ? 600 : 400,
-    fontSize: '14px'
+    fontWeight: isActive ? 600 : 500,
+    fontSize: '15px'
   });
 
   return (
@@ -104,11 +126,36 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
         </button>
       </div>
       <div style={{ flex: 1, padding: '16px', position: 'relative', overflow: 'hidden' }}>
-        <div style={{ display: activeTab === 'ai' ? 'block' : 'none', height: '100%' }}>
-          <TerminalView readOnly={true} onTerminalReady={(term) => { aiTermRef.current = term; }} />
-        </div>
-        <div style={{ display: activeTab === 'user' ? 'block' : 'none', height: '100%' }}>
-          <TerminalView readOnly={false} onTerminalReady={(term) => { userTermRef.current = term; setIsUserTermReady(true); }} />
+        {!isBooted && (
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--color-surface)', zIndex: 10
+          }}>
+            <Loader2 className="lucide-spin" style={{ width: '32px', height: '32px', color: 'var(--color-text-secondary)', animation: 'spin 2s linear infinite' }} />
+            <span style={{ marginTop: '16px', color: 'var(--color-text-secondary)', fontSize: '14px' }}>Booting container...</span>
+            <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
+          </div>
+        )}
+
+        {/* We use absolute positioning with opacity to hide terminals instead of display:none. 
+            This completely prevents xterm.js from losing its rendering context or getting 0x0 dimensions! */}
+        <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+          <div style={{
+            position: 'absolute', inset: 0,
+            opacity: activeTab === 'ai' ? 1 : 0,
+            pointerEvents: activeTab === 'ai' ? 'auto' : 'none',
+            zIndex: activeTab === 'ai' ? 2 : 1
+          }}>
+            <TerminalView readOnly={true} onTerminalReady={(term) => { aiTermRef.current = term; }} />
+          </div>
+          <div style={{
+            position: 'absolute', inset: 0,
+            opacity: activeTab === 'user' ? 1 : 0,
+            pointerEvents: activeTab === 'user' ? 'auto' : 'none',
+            zIndex: activeTab === 'user' ? 2 : 1
+          }}>
+            <TerminalView readOnly={false} onTerminalReady={(term) => { userTermRef.current = term; setIsUserTermReady(true); }} />
+          </div>
         </div>
       </div>
     </div>

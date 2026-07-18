@@ -17,24 +17,22 @@ const MainPage: React.FC = () => {
 
   return (
     <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column' }}>
-      <header style={{ 
-        height: '60px', 
-        borderBottom: '1px solid var(--color-border)', 
-        display: 'flex', 
-        alignItems: 'center', 
+      <header style={{
+        height: '60px',
+        borderBottom: '1px solid var(--color-border)',
+        display: 'flex',
+        alignItems: 'center',
         justifyContent: 'space-between',
         padding: '0 24px',
         backgroundColor: 'var(--color-surface)'
       }}>
-        <h1 style={{ fontSize: '20px', fontWeight: 600 }}>Sunam AI</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <img src="/icon.png" alt="Sunam" style={{ width: '32px', height: '32px', objectFit: 'contain', borderRadius: '4px' }} />
+          <h1 style={{ fontSize: '24px', fontWeight: 600, lineHeight: 1, letterSpacing: '-0.5px', transform: 'translateY(-4px)' }}>Sunam</h1>
+        </div>
         <button 
           onClick={() => setIsSettingsOpen(true)}
-          style={{
-            padding: '8px 16px',
-            borderRadius: 'var(--radius-small)',
-            border: '1px solid var(--color-border)',
-            backgroundColor: 'var(--color-bg)'
-          }}
+          className="btn btn-secondary"
         >
           Settings
         </button>
@@ -51,9 +49,9 @@ const MainPage: React.FC = () => {
       </main>
 
       {isSettingsOpen && (
-        <SettingsModal 
-          initialApiKey={apiKey} 
-          initialBaseUrl={baseUrl} 
+        <SettingsModal
+          initialApiKey={apiKey}
+          initialBaseUrl={baseUrl}
           onSave={handleSaveSettings}
           onClose={() => apiKey && setIsSettingsOpen(false)}
         />
