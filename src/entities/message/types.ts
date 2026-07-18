@@ -6,6 +6,9 @@ export interface Message {
   name?: string;
   tool_call_id?: string;
   tool_calls?: ToolCall[];
+  reasoning_content?: string;
+  _ui_streaming?: boolean;
+  _ui_retryCount?: number;
 }
 
 export interface ToolCall {

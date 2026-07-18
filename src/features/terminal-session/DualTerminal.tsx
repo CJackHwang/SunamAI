@@ -24,16 +24,20 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
   const [wc, setWc] = useState<WebContainer | null>(null);
   const [isBooted, setIsBooted] = useState(false);
 
+  // Store onReady in a ref to prevent infinite loops if parent passes inline function
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+
   useEffect(() => {
     let mounted = true;
     getWebContainer().then(instance => {
       if (mounted) {
         setWc(instance);
-        onReady?.();
+        onReadyRef.current?.();
       }
     });
     return () => { mounted = false; };
-  }, [onReady]);
+  }, []);
 
   // Boot user terminal shell when WC and user term are ready
   useEffect(() => {

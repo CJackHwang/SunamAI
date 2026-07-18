@@ -164,6 +164,7 @@ button {
   width: 400px;
   max-width: 90vw;
   box-shadow: var(--elevation-5);
+  border: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -253,7 +254,7 @@ button {
 .avatar-menu {
   position: fixed;
   background-color: var(--color-surface);
-  border: none;
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-medium);
   box-shadow: var(--elevation-4);
   padding: 4px;
