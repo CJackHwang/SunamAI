@@ -50,6 +50,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
   
   const [terminalTab, setTerminalTab] = useState<'ai' | 'user' | 'files'>('ai');
   const [mobileActive, setMobileActive] = useState<'chat' | 'ai' | 'user' | 'files'>('chat');
+  const [layoutState, setLayoutState] = useState<'half' | 'full' | 'collapsed'>('half');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,10 +59,18 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
     setInput('');
   };
 
+  const cycleLayout = () => {
+    setLayoutState(prev => {
+      if (prev === 'half') return 'full';
+      if (prev === 'full') return 'collapsed';
+      return 'half';
+    });
+  };
+
   return (
     <div className="workspace-container" data-active-tab={mobileActive}>
       {/* Chat Section */}
-      <div className="chat-section">
+      <div className="chat-section" style={{ display: layoutState === 'full' ? 'none' : 'flex' }}>
         <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: '24px', paddingTop: '84px', paddingBottom: '120px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {messages.map((msg, idx) => {
             if (msg.role === 'tool') return null; // Hide tool messages, render them inside the assistant message
@@ -171,7 +180,12 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
       </div>
       
       {/* Terminal Section */}
-      <div className="terminal-section">
+      <div className="terminal-section" style={{ 
+        flex: layoutState === 'collapsed' ? '0 0 48px' : '1',
+        minWidth: layoutState === 'collapsed' ? '48px' : '0',
+        transition: 'all 0.2s ease',
+        borderLeft: layoutState === 'collapsed' ? '1px solid var(--color-border)' : 'none'
+      }}>
         <DualTerminal 
           ref={terminalRef} 
           onReady={() => setIsTermReady(true)}
@@ -180,6 +194,8 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
             setTerminalTab(tab);
             setMobileActive(tab);
           }}
+          layoutState={layoutState}
+          onLayoutCycle={cycleLayout}
         />
       </div>
 

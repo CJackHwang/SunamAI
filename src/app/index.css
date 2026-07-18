@@ -194,7 +194,8 @@ button {
 .mobile-bottom-bar button.active {
   color: var(--color-black);
   font-weight: 600;
-  border-top: 2px solid var(--color-black);
+  font-size: 15px;
+  border-top: 2px solid transparent;
 }
 
 /* Tablet & Mobile Breakpoint */
@@ -240,6 +241,10 @@ button {
 
   .mobile-only-setting {
     display: flex !important;
+  }
+
+  .desktop-only-btn {
+    display: none !important;
   }
 }
 

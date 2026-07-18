@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { WebContainer } from '@webcontainer/api';
 import { Terminal } from '@xterm/xterm';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Maximize2, PanelRightClose, PanelRight } from 'lucide-react';
 import TerminalView from '../../entities/container/TerminalView.tsx';
 import { getWebContainer } from '../../shared/lib/webcontainer.ts';
 import { saveSnapshot } from '../../shared/lib/persistence.ts';
@@ -15,9 +15,11 @@ interface DualTerminalProps {
   onReady?: () => void;
   activeTab: 'ai' | 'user' | 'files';
   onTabChange: (tab: 'ai' | 'user' | 'files') => void;
+  layoutState?: 'half' | 'full' | 'collapsed';
+  onLayoutCycle?: () => void;
 }
 
-const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onReady, activeTab, onTabChange }, ref) => {
+const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onReady, activeTab, onTabChange, layoutState = 'half', onLayoutCycle }, ref) => {
   const aiTermRef = useRef<Terminal | null>(null);
   const userTermRef = useRef<Terminal | null>(null);
   const [isUserTermReady, setIsUserTermReady] = useState(false);
@@ -138,26 +140,57 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
   }));
   const tabStyle = (isActive: boolean): React.CSSProperties => ({
     padding: '6px 16px 10px',
-    borderBottom: isActive ? '2px solid var(--color-black)' : '2px solid transparent',
+    borderBottom: '2px solid transparent',
     color: isActive ? 'var(--color-black)' : 'var(--color-text-secondary)',
     fontWeight: isActive ? 600 : 500,
-    fontSize: '15px'
+    fontSize: isActive ? '16px' : '15px',
+    transition: 'all 0.2s ease',
+    whiteSpace: 'nowrap'
   });
 
+  // Decide icon for the button based on current layout state
+  const LayoutIcon = layoutState === 'half' ? Maximize2 : 
+                     layoutState === 'full' ? PanelRightClose : 
+                     PanelRight;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div className="dual-terminal-tabs" style={{ display: 'flex', gap: '16px', padding: '8px 16px', borderBottom: '1px solid var(--color-border)' }}>
-        <button style={tabStyle(activeTab === 'ai')} onClick={() => onTabChange('ai')}>
-          Sunam的电脑
-        </button>
-        <button style={tabStyle(activeTab === 'user')} onClick={() => onTabChange('user')}>
-          终端
-        </button>
-        <button style={tabStyle(activeTab === 'files')} onClick={() => onTabChange('files')}>
-          文件
-        </button>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <div className="dual-terminal-tabs" style={{ 
+        display: 'flex', 
+        gap: '8px', 
+        padding: layoutState === 'collapsed' ? '8px 0' : '8px 16px', 
+        justifyContent: layoutState === 'collapsed' ? 'center' : 'flex-start',
+        borderBottom: '1px solid var(--color-border)', 
+        alignItems: 'center', 
+        overflowX: 'hidden', 
+        flexShrink: 0 
+      }}>
+        {layoutState !== 'collapsed' && (
+          <>
+            <button style={tabStyle(activeTab === 'ai')} onClick={() => onTabChange('ai')}>
+              Sunam的电脑
+            </button>
+            <button style={tabStyle(activeTab === 'user')} onClick={() => onTabChange('user')}>
+              终端
+            </button>
+            <button style={tabStyle(activeTab === 'files')} onClick={() => onTabChange('files')}>
+              文件
+            </button>
+          </>
+        )}
+        {layoutState !== 'collapsed' && <div style={{ flex: 1 }}></div>}
+        {onLayoutCycle && (
+          <button 
+            className="desktop-only-btn" 
+            style={{ padding: '6px', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center' }} 
+            onClick={onLayoutCycle}
+            title="Toggle Layout"
+          >
+            <LayoutIcon size={18} />
+          </button>
+        )}
       </div>
-      <div style={{ flex: 1, padding: activeTab === 'files' ? '0' : '16px', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ flex: 1, padding: activeTab === 'files' ? '0' : '16px', position: 'relative', overflow: 'hidden', display: layoutState === 'collapsed' ? 'none' : 'block' }}>
         {!isBooted && (
           <div style={{
             position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
