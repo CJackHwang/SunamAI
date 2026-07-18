@@ -1,0 +1,114 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+:root {
+  --color-bg: #f5f5f5;
+  --color-surface: #ffffff;
+  --color-text: #1a1a1a;
+  --color-text-secondary: #666666;
+  --color-border: #e0e0e0;
+  --color-black: #000000;
+  --color-white: #ffffff;
+  --color-gray-100: #f5f5f5;
+  --color-gray-200: #e5e5e5;
+  --color-gray-800: #222222;
+  
+  --radius-large: 24px;
+  --radius-medium: 16px;
+  --radius-small: 8px;
+  
+  --font-family: 'Anthropic Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  
+  /* Xterm specifics */
+  --xterm-bg: #000000;
+  --xterm-fg: #f5f5f5;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+}
+
+button {
+  font-family: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+input, textarea {
+  font-family: inherit;
+}
+
+/* Ensure no emojis render via system fallback by preferring our strict stack */
+body, input, textarea, button {
+  font-family: 'Anthropic Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+}
+
+/* Responsive Layout Classes */
+.workspace-container {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  flex-direction: row;
+}
+
+.chat-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--color-border);
+  background-color: var(--color-bg);
+  min-width: 0;
+}
+
+.terminal-section {
+  flex: 1;
+  background-color: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.settings-modal-content {
+  background-color: var(--color-surface);
+  padding: 32px;
+  border-radius: var(--radius-large);
+  width: 400px;
+  max-width: 90vw;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Tablet & Mobile Breakpoint */
+@media (max-width: 900px) {
+  .workspace-container {
+    flex-direction: column;
+  }
+  
+  .chat-section {
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+    flex: 0 0 50%; /* Chat takes top 50% */
+  }
+  
+  .terminal-section {
+    flex: 0 0 50%; /* Terminal takes bottom 50% */
+  }
+}
