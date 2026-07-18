@@ -1,0 +1,352 @@
+/* ===== File Manager Layout ===== */
+.fm-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: var(--color-bg);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ===== Toolbar ===== */
+.fm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  flex-shrink: 0;
+}
+
+.fm-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-small);
+  color: var(--color-text);
+  transition: background-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.fm-toolbar-btn:hover {
+  background-color: var(--color-gray-100);
+}
+
+.fm-toolbar-btn:disabled {
+  color: var(--color-border);
+  cursor: not-allowed;
+}
+
+.fm-toolbar-btn:disabled:hover {
+  background-color: transparent;
+}
+
+/* ===== Breadcrumb ===== */
+.fm-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding: 4px 0;
+}
+
+.fm-breadcrumb::-webkit-scrollbar {
+  display: none;
+}
+
+.fm-breadcrumb-segment {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  padding: 4px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.fm-breadcrumb-segment:hover {
+  color: var(--color-text);
+  background-color: var(--color-gray-100);
+}
+
+.fm-breadcrumb-segment.active {
+  color: var(--color-text);
+  font-weight: 600;
+  cursor: default;
+}
+
+.fm-breadcrumb-segment.active:hover {
+  background-color: transparent;
+}
+
+.fm-breadcrumb-sep {
+  color: var(--color-border);
+  font-size: 12px;
+  flex-shrink: 0;
+  margin: 0 1px;
+}
+
+/* ===== File List ===== */
+.fm-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.fm-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  gap: 8px;
+}
+
+/* ===== File Item ===== */
+.fm-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-medium);
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+  position: relative;
+  min-height: 48px; /* Touch target minimum */
+}
+
+.fm-item:hover {
+  background-color: var(--color-gray-100);
+}
+
+.fm-item:active {
+  background-color: var(--color-gray-200);
+}
+
+.fm-item.selected {
+  background-color: rgba(0, 0, 0, 0.06);
+}
+
+.fm-item.drag-over {
+  background-color: rgba(0, 122, 255, 0.08);
+  outline: 2px dashed rgba(0, 122, 255, 0.4);
+  outline-offset: -2px;
+}
+
+.fm-item-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.fm-item-icon.folder {
+  color: #5B9BD5;
+}
+
+.fm-item-name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.fm-item-size {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+
+
+
+/* ===== Drop Zone ===== */
+.fm-drop-active {
+  position: relative;
+}
+
+.fm-drop-active::after {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border: 2px dashed rgba(0, 122, 255, 0.5);
+  border-radius: var(--radius-medium);
+  background-color: rgba(0, 122, 255, 0.04);
+  pointer-events: none;
+  animation: fm-drop-pulse 1.2s ease-in-out infinite;
+  z-index: 5;
+}
+
+@keyframes fm-drop-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.fm-drop-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 6;
+  pointer-events: none;
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(0, 122, 255, 0.8);
+}
+
+/* ===== New Item Dialog (inline) ===== */
+.fm-new-dialog {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  margin: 4px 0;
+}
+
+/* ===== Mobile Upload Button ===== */
+.fm-upload-fab {
+  display: none;
+}
+
+/* ===== Swipe Actions (mobile) ===== */
+.fm-swipe-wrapper {
+  position: relative;
+  overflow: hidden;
+}
+
+.fm-swipe-actions {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: stretch;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.fm-swipe-wrapper.swiped .fm-swipe-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.fm-swipe-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+}
+
+.fm-swipe-action.rename {
+  background-color: #5B9BD5;
+}
+
+.fm-swipe-action.delete {
+  background-color: #e53e3e;
+}
+
+/* ===== Loading Skeleton ===== */
+.fm-skeleton {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  min-height: 48px;
+}
+
+.fm-skeleton-icon {
+  width: 24px;
+  height: 24px;
+  background: var(--color-gray-100);
+  border-radius: 4px;
+  animation: fm-shimmer 1.5s ease-in-out infinite;
+}
+
+.fm-skeleton-text {
+  height: 14px;
+  border-radius: 4px;
+  background: var(--color-gray-100);
+  animation: fm-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes fm-shimmer {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ===== Error Banner ===== */
+.fm-error {
+  padding: 10px 16px;
+  background-color: #fff5f5;
+  color: #e53e3e;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #fed7d7;
+}
+
+/* ===== Mobile Adaptations ===== */
+@media (max-width: 900px) {
+  .fm-toolbar {
+    padding: 8px 12px;
+  }
+
+  .fm-item {
+    padding: 12px;
+    min-height: 52px;
+  }
+
+  .fm-item-size {
+    display: none;
+  }
+
+
+
+  .fm-upload-fab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    bottom: max(20px, env(safe-area-inset-bottom, 20px));
+    right: 20px;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background-color: var(--color-black);
+    color: var(--color-white);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+    z-index: 10;
+    transition: transform 0.15s ease;
+  }
+
+  .fm-upload-fab:active {
+    transform: scale(0.92);
+  }
+}

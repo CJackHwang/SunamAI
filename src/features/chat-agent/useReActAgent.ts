@@ -13,7 +13,7 @@ If you output text without calling a tool, it will be treated as an error and yo
 Keep your text responses concise and professional.
 CRITICAL: DO NOT use any emojis in your text output. Emojis are strictly prohibited globally in this UI.`;
 
-export const useReActAgent = (apiKey: string, baseUrl: string, terminalRef: React.RefObject<DualTerminalRef>) => {
+export const useReActAgent = (apiKey: string, baseUrl: string, model: string, terminalRef: React.RefObject<DualTerminalRef | null>) => {
   const [messages, setMessages] = useState<Message[]>([
     { role: 'system', content: SYSTEM_PROMPT }
   ]);
@@ -27,7 +27,7 @@ export const useReActAgent = (apiKey: string, baseUrl: string, terminalRef: Reac
     
     try {
       while (true) {
-        const responseMessage = await callLLM(currentMessages, { apiKey, baseUrl });
+        const responseMessage = await callLLM(currentMessages, { apiKey, baseUrl, model });
         currentMessages = [...currentMessages, responseMessage];
         setMessages([...currentMessages]);
 

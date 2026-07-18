@@ -52,14 +52,14 @@ const TerminalView: React.FC<TerminalViewProps> = ({ onTerminalReady, readOnly =
 
     try {
       fitAddon.fit();
-    } catch (e) {
+    } catch {
       // Ignore fit errors when container is hidden
     }
 
     const resizeObserver = new ResizeObserver(() => {
       try {
         fitAddon.fit();
-      } catch (e) {
+      } catch {
         // Ignore
       }
     });

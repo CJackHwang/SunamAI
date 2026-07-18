@@ -3,7 +3,8 @@ import React, { useState } from 'react';
 interface SettingsModalProps {
   initialApiKey: string;
   initialBaseUrl: string;
-  onSave: (apiKey: string, baseUrl: string) => void;
+  initialModel: string;
+  onSave: (apiKey: string, baseUrl: string, model: string) => void;
   onClose: () => void;
 }
 
@@ -24,9 +25,42 @@ const overlayStyle: React.CSSProperties = {
 
 // Using CSS classes from index.css instead of inline styles for responsive width
 
-const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBaseUrl, onSave, onClose }) => {
+const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBaseUrl, initialModel, onSave, onClose }) => {
   const [apiKey, setApiKey] = useState(initialApiKey);
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
+  const [model, setModel] = useState(initialModel);
+  const [modelsList, setModelsList] = useState<string[]>([]);
+  const [isFetchingModels, setIsFetchingModels] = useState(false);
+
+  const handleFetchModels = async () => {
+    if (!apiKey || !baseUrl) return;
+    setIsFetchingModels(true);
+    try {
+      const url = `${baseUrl.replace(/\/$/, '')}/models`;
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.data && Array.isArray(data.data)) {
+          const ids = data.data.map((m: any) => m.id);
+          setModelsList(ids);
+          if (ids.length > 0 && !ids.includes(model)) {
+            setModel(ids[0]);
+          }
+        }
+      } else {
+        alert('Failed to fetch models');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error fetching models');
+    } finally {
+      setIsFetchingModels(false);
+    }
+  };
 
   return (
     <div style={overlayStyle} onClick={(e) => {
@@ -65,9 +99,45 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
           />
         </div>
 
+        <div>
+          <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
+            Model
+          </label>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {modelsList.length > 0 ? (
+              <select
+                className="input-field"
+                style={{ flex: 1 }}
+                value={model}
+                onChange={e => setModel(e.target.value)}
+              >
+                {modelsList.map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            ) : (
+              <input 
+                className="input-field"
+                style={{ flex: 1 }}
+                value={model}
+                onChange={e => setModel(e.target.value)}
+                placeholder="deepseek-v4-flash"
+              />
+            )}
+            <button 
+              onClick={handleFetchModels}
+              disabled={isFetchingModels || !apiKey || !baseUrl}
+              className="btn btn-secondary"
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              {isFetchingModels ? 'Fetching...' : 'Fetch Models'}
+            </button>
+          </div>
+        </div>
+
         <button 
-          onClick={() => onSave(apiKey, baseUrl)}
-          disabled={!apiKey}
+          onClick={() => onSave(apiKey, baseUrl, model)}
+          disabled={!apiKey || !model}
           className="btn btn-primary"
           style={{ width: '100%', marginTop: '10px' }}
         >

@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react';
 import TerminalView from '../../entities/container/TerminalView.tsx';
 import { getWebContainer } from '../../shared/lib/webcontainer.ts';
 import { saveSnapshot } from '../../shared/lib/persistence.ts';
+import FileManager from '../file-manager/FileManager.tsx';
 
 export interface DualTerminalRef {
   runAiCommand: (command: string) => Promise<string>;
@@ -12,10 +13,11 @@ export interface DualTerminalRef {
 
 interface DualTerminalProps {
   onReady?: () => void;
+  activeTab: 'ai' | 'user' | 'files';
+  onTabChange: (tab: 'ai' | 'user' | 'files') => void;
 }
 
-const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onReady }, ref) => {
-  const [activeTab, setActiveTab] = useState<'ai' | 'user'>('ai');
+const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onReady, activeTab, onTabChange }, ref) => {
   const aiTermRef = useRef<Terminal | null>(null);
   const userTermRef = useRef<Terminal | null>(null);
   const [isUserTermReady, setIsUserTermReady] = useState(false);
@@ -140,15 +142,18 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ display: 'flex', gap: '16px', padding: '8px 16px', borderBottom: '1px solid var(--color-border)' }}>
-        <button style={tabStyle(activeTab === 'ai')} onClick={() => setActiveTab('ai')}>
+      <div className="dual-terminal-tabs" style={{ display: 'flex', gap: '16px', padding: '8px 16px', borderBottom: '1px solid var(--color-border)' }}>
+        <button style={tabStyle(activeTab === 'ai')} onClick={() => onTabChange('ai')}>
           Sunam的电脑
         </button>
-        <button style={tabStyle(activeTab === 'user')} onClick={() => setActiveTab('user')}>
+        <button style={tabStyle(activeTab === 'user')} onClick={() => onTabChange('user')}>
           终端
         </button>
+        <button style={tabStyle(activeTab === 'files')} onClick={() => onTabChange('files')}>
+          文件
+        </button>
       </div>
-      <div style={{ flex: 1, padding: '16px', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ flex: 1, padding: activeTab === 'files' ? '0' : '16px', position: 'relative', overflow: 'hidden' }}>
         {!isBooted && (
           <div style={{
             position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
@@ -178,6 +183,14 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
             zIndex: activeTab === 'user' ? 2 : 1
           }}>
             <TerminalView readOnly={false} onTerminalReady={(term) => { userTermRef.current = term; setIsUserTermReady(true); }} />
+          </div>
+          <div style={{
+            position: 'absolute', inset: 0,
+            opacity: activeTab === 'files' ? 1 : 0,
+            pointerEvents: activeTab === 'files' ? 'auto' : 'none',
+            zIndex: activeTab === 'files' ? 2 : 1
+          }}>
+            {isBooted && <FileManager wc={wc} />}
           </div>
         </div>
       </div>
