@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm';
 import { Loader2 } from 'lucide-react';
 import TerminalView from '../../entities/container/TerminalView.tsx';
 import { getWebContainer } from '../../shared/lib/webcontainer.ts';
+import { saveSnapshot } from '../../shared/lib/persistence.ts';
 
 export interface DualTerminalRef {
   runAiCommand: (command: string) => Promise<string>;
@@ -68,6 +69,24 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
     };
   }, [wc, isUserTermReady]);
 
+  // Auto-save filesystem snapshot every 30s while container is running
+  useEffect(() => {
+    if (!wc || !isBooted) return;
+
+    const interval = setInterval(() => {
+      saveSnapshot(wc);
+    }, 30_000);
+
+    // Also save once when the page is about to unload
+    const handleBeforeUnload = () => { saveSnapshot(wc); };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [wc, isBooted]);
+
   // Refocus terminal when switching tabs so the cursor reappears
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -100,6 +119,10 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
 
         const exitCode = await process.exit;
         term.writeln(`\r\n[Process exited with code ${exitCode}]`);
+
+        // Save snapshot after each AI command execution
+        saveSnapshot(wc);
+
         return output || '[No Output]';
       } catch (err) {
         term.writeln(`\r\n[Execution Error]: ${err}`);
@@ -122,7 +145,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
           Sunam的电脑
         </button>
         <button style={tabStyle(activeTab === 'user')} onClick={() => setActiveTab('user')}>
-          User Terminal
+          终端
         </button>
       </div>
       <div style={{ flex: 1, padding: '16px', position: 'relative', overflow: 'hidden' }}>
