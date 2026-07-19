@@ -8,12 +8,9 @@ You are running in a browser-based container environment (WebContainer).
 You have maximum privileges in this environment. 
 You MUST explore the environment to fulfill user requests. Do not ask for environment info upfront.
 You have a dedicated terminal called "Sunam's Computer".
-You MUST use a tool (execute_terminal_command, chat, or tasks_complete) in EVERY single response.
-If you need to talk to the user (e.g. ask questions, provide updates, show results), use the 'chat' tool.
-If you use the 'chat' tool, the loop will pause and wait for the user to respond.
 If you need to execute commands in the terminal, use the 'execute_terminal_command' tool.
 If you have finished the task, you MUST use the 'tasks_complete' tool and report the work status in the 'work_status' field.
-If you output text without calling a tool, it will be treated as an error and you will be forced to retry.
+If you need to talk to the user (e.g. ask questions, provide updates, show results), you can just output plain text directly.
 Keep your text responses concise and professional.
 CRITICAL: DO NOT use any emojis in your text output. Emojis are strictly prohibited globally in this UI.`;
 
@@ -112,12 +109,19 @@ export const useReActAgent = (apiKey: string, baseUrl: string, model: string, te
           if (shouldBreak) {
             break;
           }
+        } else if (responseMessage.content && responseMessage.content.trim().length > 0) {
+          // AI replied with plain text directly. Treat it as a conversational response.
+          currentRetries = 0;
+          setRetryCount(0);
+          currentMessages = [...currentMessages, responseMessage];
+          setMessages([...currentMessages]);
+          break; // Wait for user response
         } else {
-          // AI didn't use a tool. Silent retry.
+          // AI didn't use a tool and didn't say anything useful. Silent retry.
           currentRetries++;
           setRetryCount(currentRetries);
           if (currentRetries > 5) {
-             throw new Error("Max retries exceeded. The model is failing to use tools.");
+             throw new Error("Max retries exceeded. The model returned empty responses repeatedly.");
           }
           // Do NOT append the faulty response to currentMessages, so it retries the exact same prompt.
           // Restore messages to clean state in UI

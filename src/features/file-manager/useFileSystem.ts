@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { WebContainer } from '@webcontainer/api';
 
 export interface FileEntry {
@@ -64,18 +64,54 @@ export function useFileSystem(wc: WebContainer | null) {
 
       setEntries(fileEntries);
       setCurrentPath(dirPath);
-    } catch (err) {
-      setError(`Failed to read directory: ${err}`);
-      setEntries([]);
+    } catch (err: any) {
+      const errMsg = err?.message || String(err);
+      if (errMsg.includes('ENOENT') && dirPath !== '/') {
+        // If current directory was deleted, fallback to parent
+        const parent = dirPath.substring(0, dirPath.lastIndexOf('/')) || '/';
+        setTimeout(() => navigateTo(parent), 0);
+      } else {
+        setError(`Failed to read directory: ${err}`);
+        setEntries([]);
+      }
     } finally {
       setIsLoading(false);
     }
   }, [wc]);
 
+
   /** Refresh the current directory listing */
   const refresh = useCallback(() => {
     navigateTo(currentPathRef.current);
   }, [navigateTo]);
+
+  /** Watch for file changes in the current directory */
+  useEffect(() => {
+    if (!wc || currentPath === '') return;
+    
+    let watcher: any = null;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    try {
+      watcher = wc.fs.watch(currentPath, () => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          if (currentPathRef.current === currentPath) {
+            refresh();
+          }
+        }, 500); // 500ms debounce
+      });
+    } catch (err) {
+      console.warn('Failed to watch directory:', err);
+    }
+
+    return () => {
+      clearTimeout(timeoutId);
+      if (watcher && typeof watcher.close === 'function') {
+        watcher.close();
+      }
+    };
+  }, [wc, currentPath, refresh]);
 
   /** Go up one directory level */
   const goUp = useCallback(() => {

@@ -139,6 +139,9 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
     }
   }));
   const tabStyle = (isActive: boolean): React.CSSProperties => ({
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
     padding: '6px 16px 10px',
     borderBottom: '2px solid transparent',
     color: isActive ? 'var(--color-black)' : 'var(--color-text-secondary)',
@@ -161,13 +164,16 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
           flexShrink: 0 
         }}>
           <button style={tabStyle(activeTab === 'ai')} onClick={() => onTabChange('ai')}>
-            Sunam的电脑
+            <Monitor size={18} />
+            <span className="hide-on-narrow">Sunam的电脑</span>
           </button>
           <button style={tabStyle(activeTab === 'user')} onClick={() => onTabChange('user')}>
-            终端
+            <TerminalIcon size={18} />
+            <span className="hide-on-narrow">终端</span>
           </button>
           <button style={tabStyle(activeTab === 'files')} onClick={() => onTabChange('files')}>
-            文件
+            <Folder size={18} />
+            <span className="hide-on-narrow">文件</span>
           </button>
           <div style={{ flex: 1 }}></div>
           {onLayoutChange && (
@@ -203,10 +209,16 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
           )}
         </div>
       ) : (
-        <div className="desktop-only-btn" style={{ display: 'flex', flexDirection: 'column', width: '48px', height: '100%', alignItems: 'center', paddingTop: '16px', gap: '24px', backgroundColor: 'var(--color-surface)' }}>
-           <button onClick={() => { onTabChange('ai'); onLayoutChange?.('half'); }} title="Sunam的电脑" style={{ color: 'var(--color-black)', opacity: activeTab === 'ai' ? 1 : 0.4, transition: 'opacity 0.2s' }}><Monitor size={20} /></button>
-           <button onClick={() => { onTabChange('user'); onLayoutChange?.('half'); }} title="终端" style={{ color: 'var(--color-black)', opacity: activeTab === 'user' ? 1 : 0.4, transition: 'opacity 0.2s' }}><TerminalIcon size={20} /></button>
-           <button onClick={() => { onTabChange('files'); onLayoutChange?.('half'); }} title="文件" style={{ color: 'var(--color-black)', opacity: activeTab === 'files' ? 1 : 0.4, transition: 'opacity 0.2s' }}><Folder size={20} /></button>
+        <div className="desktop-only-btn" style={{ display: 'flex', flexDirection: 'column', width: '56px', height: '100%', alignItems: 'center', paddingTop: '16px', gap: '2px', backgroundColor: 'var(--color-surface)' }}>
+           <button className={`right-sidebar-btn ${activeTab === 'ai' ? 'active' : ''}`} onClick={() => { onTabChange('ai'); onLayoutChange?.('half'); }} title="Sunam的电脑">
+             <Monitor size={20} />
+           </button>
+           <button className={`right-sidebar-btn ${activeTab === 'user' ? 'active' : ''}`} onClick={() => { onTabChange('user'); onLayoutChange?.('half'); }} title="终端">
+             <TerminalIcon size={20} />
+           </button>
+           <button className={`right-sidebar-btn ${activeTab === 'files' ? 'active' : ''}`} onClick={() => { onTabChange('files'); onLayoutChange?.('half'); }} title="文件">
+             <Folder size={20} />
+           </button>
         </div>
       )}
       <div style={{ flex: 1, padding: activeTab === 'files' ? '0' : '16px', position: 'relative', overflow: 'hidden', display: layoutState === 'collapsed' ? 'none' : 'block' }}>

@@ -23,6 +23,27 @@ interface WorkspaceProps {
   model: string;
 }
 
+/** 
+ * Safely extracts the 'message' field from incomplete JSON during streaming.
+ * This enables real-time Markdown rendering without exposing raw JSON syntax.
+ */
+function extractChatContent(argsString: string): string {
+  if (!argsString) return '';
+  try {
+    return JSON.parse(argsString).message || '';
+  } catch (e) {
+    // If JSON is incomplete (streaming), extract the string using Regex
+    const match = argsString.match(/"message"\s*:\s*"([\s\S]*)/);
+    if (match) {
+      let content = match[1];
+      // Best-effort unescaping for markdown content
+      content = content.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+      return content;
+    }
+    return ''; // Return empty string instead of raw JSON if not matched yet
+  }
+}
+
 const ThinkingProcess: React.FC<{ content: string }> = ({ content }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -102,15 +123,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
                 msg.tool_calls[0].function.name === 'chat' ? (
                   <div style={{ fontSize: '14.5px' }}>
                     <ErrorBoundary>
-                      <MarkdownRenderer content={
-                        (function() {
-                          try {
-                            return JSON.parse(msg.tool_calls[0].function.arguments).message || '';
-                          } catch (e) {
-                            return msg.tool_calls[0].function.arguments;
-                          }
-                        })()
-                      } />
+                      <MarkdownRenderer content={extractChatContent(msg.tool_calls[0].function.arguments)} />
                     </ErrorBoundary>
                   </div>
                 ) : (
@@ -183,12 +196,11 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
         </div>
       </div>
       
-      {/* Terminal Section */}
       <div className="terminal-section" style={{ 
-        flex: layoutState === 'collapsed' ? '0 0 48px' : '1',
-        minWidth: layoutState === 'collapsed' ? '48px' : '0',
+        flex: layoutState === 'collapsed' ? '0 0 56px' : '1',
+        minWidth: layoutState === 'collapsed' ? '56px' : '0',
         transition: 'all 0.2s ease',
-        borderLeft: layoutState === 'collapsed' ? '1px solid var(--color-border)' : 'none',
+        borderLeft: 'none',
         ...(layoutState === 'full' ? {
           position: 'fixed',
           inset: 0,
