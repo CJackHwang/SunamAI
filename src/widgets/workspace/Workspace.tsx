@@ -4,16 +4,16 @@ import DualTerminal from '../../features/terminal-session/DualTerminal.tsx';
 import MarkdownRenderer from '../../components/MarkdownRenderer';
 import type { DualTerminalRef } from '../../features/terminal-session/DualTerminal.tsx';
 import { useReActAgent } from '../../features/chat-agent/useReActAgent.ts';
-import { Send, Square, Terminal, Monitor, Folder, MessageSquare } from 'lucide-react';
+import { Send, Square, Terminal, Monitor, Folder, MessageSquare, PanelLeft } from 'lucide-react';
 
 // Error boundary to catch rendering errors
 class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean, error: string }> {
   constructor(props: any) { super(props); this.state = { hasError: false, error: '' }; }
   static getDerivedStateFromError(error: Error) { return { hasError: true, error: error.toString() }; }
   componentDidCatch(error: Error, errorInfo: ErrorInfo) { console.error("Error Boundary caught:", error, errorInfo); }
-  render() { 
-    if (this.state.hasError) return <div style={{ color: 'red' }}>Error: {this.state.error}</div>; 
-    return this.props.children; 
+  render() {
+    if (this.state.hasError) return <div style={{ color: 'red' }}>Error: {this.state.error}</div>;
+    return this.props.children;
   }
 }
 
@@ -21,6 +21,8 @@ interface WorkspaceProps {
   apiKey: string;
   baseUrl: string;
   model: string;
+  setModel: (model: string) => void;
+  onMobileSidebarToggle?: () => void;
 }
 
 /** 
@@ -63,12 +65,13 @@ const ThinkingProcess: React.FC<{ content: string }> = ({ content }) => {
   );
 };
 
-const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
+const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model, setModel, onMobileSidebarToggle }) => {
   const terminalRef = useRef<DualTerminalRef>(null);
   const { messages, startTask, stopTask, isRunning, retryCount } = useReActAgent(apiKey, baseUrl, model, terminalRef);
   const [input, setInput] = useState('');
   const [isTermReady, setIsTermReady] = useState(false);
-  
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+
   const [terminalTab, setTerminalTab] = useState<'ai' | 'user' | 'files'>('ai');
   const [mobileActive, setMobileActive] = useState<'chat' | 'ai' | 'user' | 'files'>('chat');
   const [layoutState, setLayoutState] = useState<'half' | 'full' | 'collapsed'>('half');
@@ -86,7 +89,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
         setLayoutState('half');
       }
     };
-    
+
     handleResize(); // Check initially
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -96,70 +99,121 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
     <div className="workspace-container" data-active-tab={mobileActive}>
       {/* Chat Section */}
       <div className="chat-section" style={{ display: layoutState === 'full' ? 'none' : 'flex' }}>
-        <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: '24px', paddingTop: '84px', paddingBottom: '120px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <header style={{
+          height: '60px',
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 16px',
+          flexShrink: 0,
+          backgroundColor: 'transparent',
+          position: 'absolute',
+          top: 0, left: 0, right: 0,
+          zIndex: 50
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative', marginTop: '-22px', marginLeft: '-12px' }}>
+            <button className="mobile-sidebar-toggle sidebar-icon-btn" style={{ display: 'none' }} onClick={onMobileSidebarToggle}>
+              <PanelLeft size={20} />
+            </button>
+            <button
+              className="model-selector-btn"
+              onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '18px',
+                fontWeight: 600,
+                color: 'var(--color-text)',
+                padding: '8px 12px',
+                borderRadius: 'var(--radius-small)',
+                transition: 'background-color 0.2s',
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer'
+              }}
+            >
+              {model}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-text-secondary)' }}><path d="m6 9 6 6 6-6" /></svg>
+            </button>
+
+            {isModelMenuOpen && (
+              <>
+                <div className="context-overlay" onClick={() => setIsModelMenuOpen(false)} style={{ backgroundColor: 'transparent' }} />
+                <div className="context-menu" style={{ position: 'absolute', top: '100%', left: '0', marginTop: '4px' }}>
+                  <button className="context-item" onClick={() => { setModel('Sunam 1.14 Homo'); localStorage.setItem('sunam_model', 'Sunam 1.14 Homo'); setIsModelMenuOpen(false); }}>Sunam 1.14 Homo</button>
+                  <button className="context-item" onClick={() => { setModel('Sunam 1.14 Saki'); localStorage.setItem('sunam_model', 'Sunam 1.14 Saki'); setIsModelMenuOpen(false); }}>Sunam 1.14 Saki</button>
+                  <button className="context-item" onClick={() => { setModel('Sunam 5.14 Homo'); localStorage.setItem('sunam_model', 'Sunam 5.14 Homo'); setIsModelMenuOpen(false); }}>Sunam 5.14 Homo</button>
+                  <button className="context-item" onClick={() => { setModel('Sunam 5.14 Saki'); localStorage.setItem('sunam_model', 'Sunam 5.14 Saki'); setIsModelMenuOpen(false); }}>Sunam 5.14 Saki</button>
+                  <button className="context-item" onClick={() => { setModel('Sunam NEGA 69B'); localStorage.setItem('sunam_model', 'Sunam NEGA 69B'); setIsModelMenuOpen(false); }}>Sunam NEGA 69B</button>
+                </div>
+              </>
+            )}
+          </div>
+        </header>
+        <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: '24px', paddingTop: '84px', paddingBottom: '100px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {messages.map((msg, idx) => {
             if (msg.role === 'tool') return null; // Hide tool messages, render them inside the assistant message
             if (msg.role === 'user' && msg.content.startsWith('SYSTEM ERROR:')) return null;
-            
+
             const toolOutputs = msg.tool_calls ? messages.slice(idx + 1).filter(m => m.role === 'tool' && msg.tool_calls!.some(tc => tc.id === m.tool_call_id)) : [];
-            
+
             return (
-            <div key={idx} style={{
-              alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-              backgroundColor: msg.role === 'user' ? 'var(--color-black)' : 'var(--color-surface)',
-              color: msg.role === 'user' ? 'var(--color-white)' : 'var(--color-text)',
-              padding: '16px 20px',
-              borderRadius: 'var(--radius-large)',
-              maxWidth: msg.role === 'user' ? '80%' : '100%',
-              border: msg.role === 'user' ? 'none' : '1px solid var(--color-border)',
-              wordBreak: 'break-word',
-              /* Markdown renderer handles formatting for AI, user messages keep pre-wrap */
-              whiteSpace: msg.role === 'user' ? 'pre-wrap' : 'normal',
-              lineHeight: '1.6'
-            }}>
-              {msg.reasoning_content && <ThinkingProcess content={msg.reasoning_content} />}
-              
-              {msg.tool_calls ? (
-                msg.tool_calls[0].function.name === 'chat' ? (
-                  <div style={{ fontSize: '14.5px' }}>
-                    <ErrorBoundary>
-                      <MarkdownRenderer content={extractChatContent(msg.tool_calls[0].function.arguments)} />
-                    </ErrorBoundary>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div style={{ fontSize: '13px', color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 500 }}>
-                      <Terminal size={14} /> 
-                      Executing: {msg.tool_calls[0].function.name}
+              <div key={idx} style={{
+                alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                backgroundColor: msg.role === 'user' ? 'var(--color-black)' : 'var(--color-surface)',
+                color: msg.role === 'user' ? 'var(--color-white)' : 'var(--color-text)',
+                padding: '16px 20px',
+                borderRadius: 'var(--radius-large)',
+                maxWidth: msg.role === 'user' ? '80%' : '100%',
+                border: msg.role === 'user' ? 'none' : '1px solid var(--color-border)',
+                wordBreak: 'break-word',
+                /* Markdown renderer handles formatting for AI, user messages keep pre-wrap */
+                whiteSpace: msg.role === 'user' ? 'pre-wrap' : 'normal',
+                lineHeight: '1.6'
+              }}>
+                {msg.reasoning_content && <ThinkingProcess content={msg.reasoning_content} />}
+
+                {msg.tool_calls ? (
+                  msg.tool_calls[0].function.name === 'chat' ? (
+                    <div style={{ fontSize: '14.5px' }}>
+                      <ErrorBoundary>
+                        <MarkdownRenderer content={extractChatContent(msg.tool_calls[0].function.arguments)} />
+                      </ErrorBoundary>
                     </div>
-                    {msg.tool_calls[0].function.arguments && (
-                      <pre style={{ fontSize: '12px', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-bg)', padding: '8px', borderRadius: '4px', overflowX: 'auto', margin: 0 }}>
-                        {msg.tool_calls[0].function.arguments}
-                      </pre>
-                    )}
-                    
-                    {toolOutputs.length > 0 && (
-                      <div style={{ marginTop: '4px', fontSize: '12px', borderTop: '1px solid var(--color-border)', paddingTop: '8px' }}>
-                        <div style={{ color: 'var(--color-text-secondary)', fontWeight: 600, marginBottom: '4px' }}>Result</div>
-                        <div style={{ color: 'var(--color-text)', whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto', backgroundColor: 'var(--color-gray-100)', padding: '8px', borderRadius: '4px' }}>
-                          {toolOutputs[0].content}
-                        </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ fontSize: '13px', color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 500 }}>
+                        <Terminal size={14} />
+                        Executing: {msg.tool_calls[0].function.name}
                       </div>
+                      {msg.tool_calls[0].function.arguments && (
+                        <pre style={{ fontSize: '12px', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-bg)', padding: '8px', borderRadius: '4px', overflowX: 'auto', margin: 0 }}>
+                          {msg.tool_calls[0].function.arguments}
+                        </pre>
+                      )}
+
+                      {toolOutputs.length > 0 && (
+                        <div style={{ marginTop: '4px', fontSize: '12px', borderTop: '1px solid var(--color-border)', paddingTop: '8px' }}>
+                          <div style={{ color: 'var(--color-text-secondary)', fontWeight: 600, marginBottom: '4px' }}>Result</div>
+                          <div style={{ color: 'var(--color-text)', whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto', backgroundColor: 'var(--color-gray-100)', padding: '8px', borderRadius: '4px' }}>
+                            {toolOutputs[0].content}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                ) : (
+                  <div style={{ fontSize: '14.5px' }}>
+                    {msg.role === 'user' ? (
+                      msg.content
+                    ) : (
+                      <ErrorBoundary>
+                        <MarkdownRenderer content={msg.content} />
+                      </ErrorBoundary>
                     )}
                   </div>
-                )
-              ) : (
-                <div style={{ fontSize: '14.5px' }}>
-                  {msg.role === 'user' ? (
-                    msg.content
-                  ) : (
-                    <ErrorBoundary>
-                      <MarkdownRenderer content={msg.content} />
-                    </ErrorBoundary>
-                  )}
-                </div>
-              )}
-            </div>
+                )}
+              </div>
             );
           })}
           {isRunning && (
@@ -173,9 +227,9 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
             </div>
           )}
         </div>
-        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '24px', pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '12px 24px', pointerEvents: 'none' }}>
           <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '12px', alignItems: 'center', pointerEvents: 'auto' }}>
-            <input 
+            <input
               className="input-field glass-input"
               style={{ flex: 1, borderRadius: 'var(--radius-large)', padding: '0 20px 6px 20px', height: '44px' }}
               value={input}
@@ -183,7 +237,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
               disabled={isRunning || !isTermReady}
               placeholder={isTermReady ? "Ask Sunam anything..." : "Booting container..."}
             />
-            <button 
+            <button
               type={isRunning ? "button" : "submit"}
               onClick={isRunning ? stopTask : undefined}
               disabled={!isRunning && (!isTermReady || !input.trim())}
@@ -195,8 +249,8 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
           </form>
         </div>
       </div>
-      
-      <div className="terminal-section" style={{ 
+
+      <div className="terminal-section" style={{
         flex: layoutState === 'collapsed' ? '0 0 56px' : '1',
         minWidth: layoutState === 'collapsed' ? '56px' : '0',
         transition: 'all 0.2s ease',
@@ -208,8 +262,8 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
           paddingTop: 0
         } : {})
       }}>
-        <DualTerminal 
-          ref={terminalRef} 
+        <DualTerminal
+          ref={terminalRef}
           onReady={() => setIsTermReady(true)}
           activeTab={terminalTab}
           onTabChange={(tab) => {
@@ -223,29 +277,29 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model }) => {
 
       {/* Mobile Bottom Bar */}
       <div className="mobile-bottom-bar">
-        <button 
-          className={mobileActive === 'chat' ? 'active' : ''} 
+        <button
+          className={mobileActive === 'chat' ? 'active' : ''}
           onClick={() => setMobileActive('chat')}
           title="对话"
         >
           <MessageSquare size={24} />
         </button>
-        <button 
-          className={mobileActive === 'ai' ? 'active' : ''} 
+        <button
+          className={mobileActive === 'ai' ? 'active' : ''}
           onClick={() => { setMobileActive('ai'); setTerminalTab('ai'); }}
           title="Sunam的电脑"
         >
           <Monitor size={24} />
         </button>
-        <button 
-          className={mobileActive === 'user' ? 'active' : ''} 
+        <button
+          className={mobileActive === 'user' ? 'active' : ''}
           onClick={() => { setMobileActive('user'); setTerminalTab('user'); }}
           title="终端"
         >
           <Terminal size={24} />
         </button>
-        <button 
-          className={mobileActive === 'files' ? 'active' : ''} 
+        <button
+          className={mobileActive === 'files' ? 'active' : ''}
           onClick={() => { setMobileActive('files'); setTerminalTab('files'); }}
           title="文件"
         >

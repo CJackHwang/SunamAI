@@ -50,9 +50,6 @@ export function useWorkspaceStore() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
-  const updateState = useCallback((updates: Partial<WorkspaceState>) => {
-    setState((prev) => ({ ...prev, ...updates }));
-  }, []);
 
   // --- Session Methods ---
   const createSession = useCallback(() => {

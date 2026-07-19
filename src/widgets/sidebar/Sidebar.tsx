@@ -4,6 +4,8 @@ import { useWorkspaceStore } from '../../shared/store/useWorkspaceStore';
 
 interface SidebarProps {
   onOpenSettings?: () => void;
+  isMobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
 type ContextMenuState = {
@@ -19,9 +21,18 @@ type EditingState = {
   text: string;
 } | null;
 
-export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings }) => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  
+export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, onCloseMobile }) => {
+  const [_isCollapsed, setIsCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 900);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 900);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const isCollapsed = isMobile ? false : _isCollapsed;
+
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [editing, setEditing] = useState<EditingState>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -73,154 +84,157 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings }) => {
   }, [editing]);
 
   return (
-    <div className={`sidebar ${isCollapsed ? 'collapsed' : 'expanded'}`}>
-      {/* Header */}
-      <div className="sidebar-header">
+    <>
+      {isMobileOpen && (
         <div 
-          className={`sidebar-logo-toggle ${!isCollapsed ? 'expanded-mode' : ''}`}
-          onClick={() => isCollapsed && setIsCollapsed(false)}
-          title={isCollapsed ? "Expand Sidebar" : ""}
-          style={{ cursor: isCollapsed ? 'pointer' : 'default', backgroundColor: 'transparent' }}
-        >
-          <img src="/icon.png" alt="Sunam" className="logo-default" />
-          {isCollapsed && (
-            <div className="logo-hover">
-              <PanelLeft size={20} />
-            </div>
+          className="mobile-overlay" 
+          style={{ position: 'fixed', inset: 0, zIndex: 999, backgroundColor: 'rgba(0,0,0,0.5)' }} 
+          onClick={onCloseMobile} 
+        />
+      )}
+      <div className={`sidebar ${isCollapsed ? 'collapsed' : 'expanded'} ${isMobileOpen ? 'mobile-open' : ''}`}>
+        {/* Header */}
+        <div className="sidebar-header">
+          <div 
+            className={`sidebar-logo-toggle ${!isCollapsed ? 'expanded-mode' : ''}`}
+            onClick={() => isCollapsed && setIsCollapsed(false)}
+            title={isCollapsed ? "Expand Sidebar" : ""}
+            style={{ cursor: isCollapsed ? 'pointer' : 'default', backgroundColor: 'transparent' }}
+          >
+            <img src="/icon.png" alt="Sunam" className="logo-default" />
+            {isCollapsed && (
+              <div className="logo-hover">
+                <PanelLeft size={20} />
+              </div>
+            )}
+          </div>
+          {!isCollapsed && (
+            <>
+              <span className="sidebar-title" style={{ fontSize: '24px', fontWeight: 600, lineHeight: 1, letterSpacing: '-0.5px', transform: 'translateY(-2px)' }}>
+                Sunam
+              </span>
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <button 
+                  className="sidebar-icon-btn"
+                  title="搜索历史对话"
+                  style={{ padding: '4px' }}
+                >
+                  <Search size={18} />
+                </button>
+                <button 
+                  className="sidebar-toggle-btn desktop-only-btn"
+                  onClick={() => setIsCollapsed(true)}
+                  title="Collapse Sidebar"
+                >
+                  <PanelLeftClose size={20} />
+                </button>
+              </div>
+            </>
           )}
         </div>
-        {!isCollapsed && (
-          <>
-            <span className="sidebar-title" style={{ fontSize: '24px', fontWeight: 600, lineHeight: 1, letterSpacing: '-0.5px', transform: 'translateY(-2px)' }}>
-              Sunam
-            </span>
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <button 
-                className="sidebar-icon-btn"
-                title="搜索历史对话"
-                style={{ padding: '4px' }}
-              >
+
+        <div className="sidebar-content">
+          {/* Actions */}
+          <div className="sidebar-section">
+            <button className="sidebar-action-btn" onClick={createSession}>
+              <SquarePen size={18} />
+              {!isCollapsed && <span>新建任务</span>}
+            </button>
+            
+            {isCollapsed && (
+              <button className="sidebar-action-btn" title="搜索历史对话" style={{ marginTop: '8px' }}>
                 <Search size={18} />
               </button>
-              <button 
-                className="sidebar-toggle-btn"
-                onClick={() => setIsCollapsed(true)}
-                title="Collapse Sidebar"
-              >
-                <PanelLeftClose size={20} />
-              </button>
-            </div>
-          </>
-        )}
-      </div>
+            )}
+          </div>
 
-      <div className="sidebar-content">
-        {/* Actions */}
-        <div className="sidebar-section">
-          <button className="sidebar-action-btn" onClick={createSession}>
-            <SquarePen size={18} />
-            {!isCollapsed && <span>新建任务</span>}
-          </button>
-          
-          {isCollapsed && (
-            <button className="sidebar-action-btn" title="搜索历史对话" style={{ marginTop: '8px' }}>
-              <Search size={18} />
-            </button>
+          {/* Containers Section (Moved Up) */}
+          {!isCollapsed && (
+            <div className="sidebar-section">
+              <div className="sidebar-section-title">
+                容器
+                <button className="sidebar-icon-btn" onClick={createContainer} title="新建容器">
+                  <Plus size={14} />
+                </button>
+              </div>
+              <div className="sidebar-list">
+                {sortedContainers.map(container => (
+                  <div 
+                    key={container.id} 
+                    className={`sidebar-item ${activeContainerId === container.id ? 'active' : ''}`}
+                    onClick={() => selectContainer(container.id)}
+                    onContextMenu={(e) => handleContextMenu(e, 'container', container.id)}
+                  >
+                    <Box size={16} style={{ color: container.pinned ? 'var(--color-black)' : 'inherit' }} />
+                    {editing?.id === container.id ? (
+                      <input 
+                        ref={editInputRef}
+                        className="item-text"
+                        style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', padding: 0 }}
+                        value={editing.text}
+                        onChange={e => setEditing({ ...editing, text: e.target.value })}
+                        onBlur={handleRenameSubmit}
+                        onKeyDown={e => e.key === 'Enter' && handleRenameSubmit()}
+                        onClick={e => e.stopPropagation()}
+                      />
+                    ) : (
+                      <span className="item-text">{container.name}</span>
+                    )}
+                    <button 
+                      className="item-action" 
+                      onClick={(e) => { e.stopPropagation(); handleContextMenu(e, 'container', container.id); }}
+                    >
+                      <MoreHorizontal size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* History Section (Renamed to 历史对话, hidden when collapsed) */}
+          {!isCollapsed && (
+            <div className="sidebar-section">
+              <div className="sidebar-section-title">历史对话</div>
+              <div className="sidebar-list">
+                {sortedSessions.map(session => (
+                  <div 
+                    key={session.id} 
+                    className={`sidebar-item ${activeSessionId === session.id ? 'active' : ''}`}
+                    onClick={() => selectSession(session.id)}
+                    onContextMenu={(e) => handleContextMenu(e, 'session', session.id)}
+                  >
+                    <History size={16} style={{ color: session.pinned ? 'var(--color-black)' : 'inherit' }} />
+                    {editing?.id === session.id ? (
+                      <input 
+                        ref={editInputRef}
+                        className="item-text"
+                        style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', padding: 0 }}
+                        value={editing.text}
+                        onChange={e => setEditing({ ...editing, text: e.target.value })}
+                        onBlur={handleRenameSubmit}
+                        onKeyDown={e => e.key === 'Enter' && handleRenameSubmit()}
+                        onClick={e => e.stopPropagation()}
+                      />
+                    ) : (
+                      <span className="item-text">{session.title}</span>
+                    )}
+                    <button 
+                      className="item-action" 
+                      onClick={(e) => { e.stopPropagation(); handleContextMenu(e, 'session', session.id); }}
+                    >
+                      <MoreHorizontal size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 
-        {/* Containers Section (Moved Up) */}
-        {!isCollapsed && (
-          <div className="sidebar-section">
-            <div className="sidebar-section-title">
-              容器
-              <button className="sidebar-icon-btn" onClick={createContainer} title="新建容器">
-                <Plus size={14} />
-              </button>
-            </div>
-            <div className="sidebar-list">
-              {sortedContainers.map(container => (
-                <div 
-                  key={container.id} 
-                  className={`sidebar-item ${activeContainerId === container.id ? 'active' : ''}`}
-                  onClick={() => selectContainer(container.id)}
-                  onContextMenu={(e) => handleContextMenu(e, 'container', container.id)}
-                >
-                  <Box size={16} style={{ color: container.pinned ? 'var(--color-black)' : 'inherit' }} />
-                  {editing?.id === container.id ? (
-                    <input 
-                      ref={editInputRef}
-                      className="item-text"
-                      style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', padding: 0 }}
-                      value={editing.text}
-                      onChange={e => setEditing({ ...editing, text: e.target.value })}
-                      onBlur={handleRenameSubmit}
-                      onKeyDown={e => e.key === 'Enter' && handleRenameSubmit()}
-                      onClick={e => e.stopPropagation()}
-                    />
-                  ) : (
-                    <span className="item-text">{container.name}</span>
-                  )}
-                  <button 
-                    className="item-action" 
-                    onClick={(e) => { e.stopPropagation(); handleContextMenu(e, 'container', container.id); }}
-                  >
-                    <MoreHorizontal size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* History Section (Renamed to 历史对话, hidden when collapsed) */}
-        {!isCollapsed && (
-          <div className="sidebar-section">
-            <div className="sidebar-section-title">历史对话</div>
-            <div className="sidebar-list">
-              {sortedSessions.map(session => (
-                <div 
-                  key={session.id} 
-                  className={`sidebar-item ${activeSessionId === session.id ? 'active' : ''}`}
-                  onClick={() => selectSession(session.id)}
-                  onContextMenu={(e) => handleContextMenu(e, 'session', session.id)}
-                >
-                  <History size={16} style={{ color: session.pinned ? 'var(--color-black)' : 'inherit' }} />
-                  {editing?.id === session.id ? (
-                    <input 
-                      ref={editInputRef}
-                      className="item-text"
-                      style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', padding: 0 }}
-                      value={editing.text}
-                      onChange={e => setEditing({ ...editing, text: e.target.value })}
-                      onBlur={handleRenameSubmit}
-                      onKeyDown={e => e.key === 'Enter' && handleRenameSubmit()}
-                      onClick={e => e.stopPropagation()}
-                    />
-                  ) : (
-                    <span className="item-text">{session.title}</span>
-                  )}
-                  <button 
-                    className="item-action" 
-                    onClick={(e) => { e.stopPropagation(); handleContextMenu(e, 'session', session.id); }}
-                  >
-                    <MoreHorizontal size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Footer */}
-      <div className="sidebar-footer">
-        <div className="sidebar-user" style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: isCollapsed ? 'center' : 'space-between'
-        }}>
-          <div style={{ 
+        {/* Footer */}
+        <div className="sidebar-footer">
+          <div className="sidebar-user" style={{ 
             display: 'flex', 
             alignItems: 'center', 
             justifyContent: isCollapsed ? 'center' : 'flex-start',
@@ -248,7 +262,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings }) => {
       {/* Context Menu */}
       {contextMenu && (
         <>
-          <div className="context-overlay" onClick={closeContextMenu} style={{ backgroundColor: 'transparent' }} />
+          <div className={`context-overlay ${isMobile ? 'dimmed' : ''}`} onClick={closeContextMenu} />
           <div 
             className="context-menu" 
             style={{ 
@@ -300,6 +314,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings }) => {
           </div>
         </>
       )}
-    </div>
+    </>
   );
 };

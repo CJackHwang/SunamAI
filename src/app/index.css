@@ -443,7 +443,7 @@ button {
   background-color: var(--color-surface);
   border-right: 1px solid var(--color-border);
   height: 100vh;
-  transition: width 0.2s cubic-bezier(0.2, 0, 0, 1);
+  transition: width 0.2s cubic-bezier(0.2, 0, 0, 1), transform 0.3s cubic-bezier(0.2, 0, 0, 1);
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -536,7 +536,7 @@ button {
 }
 
 .sidebar-toggle-btn:hover {
-  background-color: var(--color-bg);
+  background-color: var(--color-gray-200);
   color: var(--color-black);
 }
 
@@ -578,7 +578,7 @@ button {
   display: flex;
 }
 .sidebar-icon-btn:hover {
-  background-color: var(--color-bg);
+  background-color: var(--color-gray-200);
   color: var(--color-black);
 }
 
@@ -588,7 +588,7 @@ button {
   gap: 12px;
   padding: 8px 12px;
   border-radius: var(--radius-medium);
-  background-color: var(--color-gray-100);
+  background-color: transparent;
   border: none;
   cursor: pointer;
   color: var(--color-text);
@@ -630,6 +630,44 @@ button {
 
 .sidebar-action-btn:hover {
   background-color: var(--color-gray-200);
+}
+
+.terminal-icon-btn {
+  padding: 6px;
+  border-radius: var(--radius-small);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.1s;
+}
+.terminal-icon-btn:hover {
+  background-color: var(--color-gray-200);
+  color: var(--color-black);
+}
+
+.terminal-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  font-size: 15px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  border-radius: var(--radius-small) var(--radius-small) 0 0;
+  background-color: transparent;
+}
+.terminal-tab-btn.active {
+  color: var(--color-black);
+  font-weight: 600;
+  font-size: 16px;
+}
+.terminal-tab-btn:hover:not(.active) {
+  background-color: var(--color-gray-100);
+  color: var(--color-black);
 }
 
 .sidebar-list {
@@ -688,6 +726,9 @@ button {
 }
 
 .sidebar-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 4px 8px;
   border-top: 1px solid var(--color-border);
   flex-shrink: 0;

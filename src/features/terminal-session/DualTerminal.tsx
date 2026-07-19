@@ -138,18 +138,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
       }
     }
   }));
-  const tabStyle = (isActive: boolean): React.CSSProperties => ({
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    padding: '6px 16px 10px',
-    borderBottom: '2px solid transparent',
-    color: isActive ? 'var(--color-black)' : 'var(--color-text-secondary)',
-    fontWeight: isActive ? 600 : 500,
-    fontSize: isActive ? '16px' : '15px',
-    transition: 'all 0.2s ease',
-    whiteSpace: 'nowrap'
-  });
+
 
   return (
     <div style={{ display: 'flex', flexDirection: layoutState === 'collapsed' ? 'row' : 'column', height: '100%', overflow: 'hidden' }}>
@@ -163,16 +152,16 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
           overflowX: 'auto', 
           flexShrink: 0 
         }}>
-          <button style={tabStyle(activeTab === 'ai')} onClick={() => onTabChange('ai')}>
-            <Monitor size={18} />
+          <button className={`terminal-tab-btn ${activeTab === 'ai' ? 'active' : ''}`} onClick={() => onTabChange('ai')}>
+            <Monitor size={18} className="show-on-narrow" />
             <span className="hide-on-narrow">Sunam的电脑</span>
           </button>
-          <button style={tabStyle(activeTab === 'user')} onClick={() => onTabChange('user')}>
-            <TerminalIcon size={18} />
+          <button className={`terminal-tab-btn ${activeTab === 'user' ? 'active' : ''}`} onClick={() => onTabChange('user')}>
+            <TerminalIcon size={18} className="show-on-narrow" />
             <span className="hide-on-narrow">终端</span>
           </button>
-          <button style={tabStyle(activeTab === 'files')} onClick={() => onTabChange('files')}>
-            <Folder size={18} />
+          <button className={`terminal-tab-btn ${activeTab === 'files' ? 'active' : ''}`} onClick={() => onTabChange('files')}>
+            <Folder size={18} className="show-on-narrow" />
             <span className="hide-on-narrow">文件</span>
           </button>
           <div style={{ flex: 1 }}></div>
@@ -180,8 +169,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
             <div style={{ display: 'flex', gap: '4px' }}>
               {layoutState === 'half' ? (
                 <button 
-                  className="desktop-only-btn" 
-                  style={{ padding: '6px', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center' }} 
+                  className="desktop-only-btn terminal-icon-btn" 
                   onClick={() => onLayoutChange('full')}
                   title="全屏模式"
                 >
@@ -189,8 +177,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
                 </button>
               ) : (
                 <button 
-                  className="desktop-only-btn" 
-                  style={{ padding: '6px', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center' }} 
+                  className="desktop-only-btn terminal-icon-btn" 
                   onClick={() => onLayoutChange('half')}
                   title="半屏模式"
                 >
@@ -198,8 +185,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
                 </button>
               )}
               <button 
-                className="desktop-only-btn" 
-                style={{ padding: '6px', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center' }} 
+                className="desktop-only-btn terminal-icon-btn" 
                 onClick={() => onLayoutChange('collapsed')}
                 title="收起"
               >
