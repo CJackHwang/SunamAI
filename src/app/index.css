@@ -374,6 +374,22 @@ button {
   white-space: nowrap;
 }
 
+.chat-message.streaming .streaming-answer::after,
+.thinking-process.streaming .thinking-content::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: -0.12em;
+  background: currentColor;
+  animation: streaming-caret 0.8s steps(1) infinite;
+}
+
+@keyframes streaming-caret {
+  50% { opacity: 0; }
+}
+
 .task-list-popover {
   width: 100%;
   pointer-events: auto;

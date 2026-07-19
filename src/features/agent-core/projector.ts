@@ -33,7 +33,12 @@ export function sanitizeToolTranscript(messages: Message[]): Message[] {
 }
 
 export function projectMessages(events: AgentEvent[]): Message[] {
-  return sanitizeToolTranscript(events.filter((event): event is Extract<AgentEvent, { kind: 'message' }> => event.kind === 'message').map((event) => event.message));
+  return events.filter((event): event is Extract<AgentEvent, { kind: 'message' }> => event.kind === 'message').map((event) => event.message);
+}
+
+/** Strict transcript for an OpenAI-compatible model request, not for UI rendering. */
+export function projectModelMessages(events: AgentEvent[]): Message[] {
+  return sanitizeToolTranscript(projectMessages(events));
 }
 
 export function projectLatestTask(events: AgentEvent[], run?: AgentRun): TaskContract | null {

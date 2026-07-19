@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AgentEventEmitter } from '@/features/agent-core/events';
-import { projectLatestTask, projectMessages, projectProgress, projectRunEvents, sanitizeToolTranscript } from '@/features/agent-core/projector';
+import { projectLatestTask, projectMessages, projectModelMessages, projectProgress, projectRunEvents, sanitizeToolTranscript } from '@/features/agent-core/projector';
 import type { AgentEvent, AgentRun, TaskContract } from '@/features/agent-core/types';
 
 const task: TaskContract = { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: false, plan: [], evidence: [], changedWorkspace: false, verified: false, verificationEvidence: [] };
@@ -43,5 +43,15 @@ describe('agent event projections', () => {
     const secondTool = { role: 'tool' as const, content: 'two result', tool_call_id: 'two' };
     expect(sanitizeToolTranscript([assistant, partialTool, secondTool, nextUser])).toEqual([assistant, partialTool, secondTool, nextUser]);
     expect(sanitizeToolTranscript([partialTool, nextUser])).toEqual([nextUser]);
+  });
+
+  it('keeps an in-flight tool call visible in the UI while excluding it from model history', () => {
+    const inFlight: AgentEvent[] = [{
+      id: 'r-1:1', kind: 'message', sessionId: 's-1', runId: 'r-1', sequence: 1, createdAt: 1,
+      message: { role: 'assistant', content: '', reasoning_content: 'I should inspect first.', tool_calls: [{ id: 'pending', type: 'function', function: { name: 'workspace_tree', arguments: '{}' } }] },
+    }];
+    expect(projectMessages(inFlight)).toHaveLength(1);
+    expect(projectMessages(inFlight)[0]?.reasoning_content).toBe('I should inspect first.');
+    expect(projectModelMessages(inFlight)).toEqual([]);
   });
 });

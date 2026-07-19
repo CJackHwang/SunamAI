@@ -34,7 +34,7 @@ interface WorkspaceProps {
 function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, updateSessionStatus }: WorkspaceProps) {
   const { t } = useI18n();
   const { runtime, webcontainer, isReady: isRuntimeReady, error: runtimeError, getContainerRoot } = useWorkspaceRuntime();
-  const { events, messages, activeRun, latestRun, streamingContent, startTask, resumeTask, stopTask } = useAgentV2(apiKey, baseUrl, apiModel, sunamModel, runtime, activeSessionId, activeContainerId, updateSessionStatus);
+  const { events, messages, activeRun, latestRun, streamingContent, streamingReasoning, startTask, resumeTask, stopTask } = useAgentV2(apiKey, baseUrl, apiModel, sunamModel, runtime, activeSessionId, activeContainerId, updateSessionStatus);
   const { sessions, containers, createSession, createContainer, renameSession } = useWorkspaceStore();
   const isRunning = Boolean(activeRun);
   const [input, setInput] = useState('');
@@ -46,7 +46,7 @@ function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel
   const [terminalTab, setTerminalTab] = useState<TerminalTab>('ai');
   const [mobileActive, setMobileActive] = useState<'chat' | TerminalTab>('chat');
   const [layoutState, setLayoutState] = useState<TerminalLayout>('half');
-  const { containerRef, isAtBottom, onScroll, scrollToBottom } = useChatAutoScroll([messages, isRunning, composerHeight]);
+  const { containerRef, isAtBottom, onScroll, scrollToBottom } = useChatAutoScroll([messages, isRunning, streamingContent, streamingReasoning, composerHeight]);
   const activeContainer = containers.find((container) => container.id === activeContainerId) ?? null;
 
   useEffect(() => {
@@ -88,7 +88,7 @@ function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel
     <div className="workspace-container" data-active-tab={mobileActive}>
       <div className="chat-section" style={{ display: layoutState === 'full' ? 'none' : 'flex' }}>
         <ModelSelector model={sunamModel} isOpen={isModelMenuOpen} onToggle={() => setIsModelMenuOpen((open) => !open)} onSelect={(model) => { setSunamModel(model); setIsModelMenuOpen(false); }} onMobileSidebarToggle={onMobileSidebarToggle} />
-        <ChatMessageList messages={messages} isRunning={isRunning} retryCount={0} containerRef={containerRef} onScroll={onScroll} bottomInset={composerHeight + 16} />
+        <ChatMessageList messages={messages} isRunning={isRunning} retryCount={0} containerRef={containerRef} onScroll={onScroll} bottomInset={composerHeight + 16} streamingContent={streamingContent} streamingReasoning={streamingReasoning} />
         <ChatComposer input={input} attachments={attachments} attachmentError={attachmentError} isRunning={Boolean(isRunning)} isTerminalReady={isTerminalReady} isAtBottom={isAtBottom} taskList={<RunBoard run={activeRun ?? latestRun} events={events} liveOutput={streamingContent} onResume={() => resumeTask(latestRun)} />} onFilesSelected={(files) => { void readChatAttachments(files).then((next) => { setAttachments((current) => [...current, ...next].slice(0, 8)); setAttachmentError(null); }).catch((error) => setAttachmentError(error instanceof Error ? error.message : String(error))); }} onRemoveAttachment={(index) => setAttachments((current) => current.filter((_attachment, candidateIndex) => candidateIndex !== index))} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} onHeightChange={setComposerHeight} />
       </div>
       <div className="terminal-section" style={{ flex: layoutState === 'collapsed' ? '0 0 56px' : '1', minWidth: layoutState === 'collapsed' ? '56px' : '0', transition: 'flex-basis var(--motion-base) var(--motion-ease), min-width var(--motion-base) var(--motion-ease)', borderLeft: 'none', ...(layoutState === 'full' ? { position: 'fixed', inset: 0, zIndex: 100, paddingTop: 0 } : {}) }}>

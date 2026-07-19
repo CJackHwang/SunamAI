@@ -16,11 +16,11 @@ export const ChatMessage = memo(function ChatMessage({ message, toolOutputs }: C
   const { t } = useI18n();
   if (message.role === 'tool' || (message.role === 'user' && message.content.startsWith('SYSTEM ERROR:'))) return null;
   return (
-    <div className="motion-fade-in" style={{
+    <div className={`motion-fade-in chat-message ${message._ui_streaming ? 'streaming' : ''}`} style={{
       alignSelf: message.role === 'user' ? 'flex-end' : 'flex-start', backgroundColor: message.role === 'user' ? 'var(--color-black)' : 'var(--color-surface)', color: message.role === 'user' ? 'var(--color-white)' : 'var(--color-text)', padding: '16px 20px', borderRadius: 'var(--radius-large)', maxWidth: message.role === 'user' ? '80%' : '100%', border: message.role === 'user' ? 'none' : '1px solid var(--color-border)', wordBreak: 'break-word', whiteSpace: message.role === 'user' ? 'pre-wrap' : 'normal', lineHeight: '1.6',
     }}>
-      {message.reasoning_content && <ThinkingProcess content={message.reasoning_content} />}
-      {message.content.trim() && message.role !== 'user' && <div style={{ fontSize: '14.5px', marginBottom: message.tool_calls ? '12px' : '0' }}><RenderErrorBoundary label={t('common.error')}><MarkdownRenderer content={message.content} /></RenderErrorBoundary></div>}
+      {message.reasoning_content && <ThinkingProcess content={message.reasoning_content} streaming={message._ui_streaming} />}
+      {message.content.trim() && message.role !== 'user' && <div className="streaming-answer" style={{ fontSize: '14.5px', marginBottom: message.tool_calls ? '12px' : '0' }}><RenderErrorBoundary label={t('common.error')}><MarkdownRenderer content={message.content} /></RenderErrorBoundary></div>}
       {message.role === 'user' && !message.tool_calls && <><div style={{ fontSize: '14.5px' }}>{message._ui_displayContent ?? message.content}</div>{message._ui_attachments && message._ui_attachments.length > 0 && <div className="message-attachments">{message._ui_attachments.map((attachment, index) => <span key={`${attachment.name}-${index}`}><FileText size={13} />{attachment.name}</span>)}</div>}</>}
       {message.tool_calls && <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>{message.tool_calls.map((call) => {
         const output = toolOutputs.find((candidate) => candidate.tool_call_id === call.id);

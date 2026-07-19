@@ -21,7 +21,9 @@ describe('LLM protocol', () => {
 
   it('parses split SSE events, streams updates, and combines tool arguments', async () => {
     const updates: string[] = [];
+    const reasoningUpdates: string[] = [];
     const message = await consumeChatStream(stream([
+      'data: {"choices":[{"delta":{"reasoning_content":"First inspect"}}]}\n',
       'data: {"choices":[{"delta":{"content":"Hel',
       'lo"}}]}\n',
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"arguments":"{\\"message\\":\\"A"}}]}}]}\n',
@@ -30,8 +32,9 @@ describe('LLM protocol', () => {
       'not an event\n',
       'data: {bad}\n',
       'data: {"choices":[{}]}\n',
-    ]), (partial) => updates.push(partial.content));
+    ]), (partial) => { updates.push(partial.content); reasoningUpdates.push(partial.reasoning_content ?? ''); });
     expect(updates).toContain('Hello');
+    expect(reasoningUpdates).toContain('First inspect');
     expect(message).toMatchObject({ role: 'assistant', content: 'Hello', tool_calls: [{ id: 'call-1', function: { name: 'report_progress', arguments: '{"message":"AB"}' } }] });
   });
 

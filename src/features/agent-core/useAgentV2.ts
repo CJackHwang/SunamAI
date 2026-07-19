@@ -6,7 +6,7 @@ import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 import { AgentEngine } from './engine';
 import { AgentEventStore } from './eventStore';
 import { OpenAIChatModelClient } from './modelClient';
-import { projectMessages } from './projector';
+import { projectMessages, projectModelMessages } from './projector';
 import type { AgentEvent, AgentRun } from './types';
 
 type UpdateSessionStatus = (id: string, status: SessionStatus) => void;
@@ -45,6 +45,7 @@ export function useAgentV2(
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [streamingContent, setStreamingContent] = useState('');
+  const [streamingReasoning, setStreamingReasoning] = useState('');
   const sessionRef = useRef(activeSessionId);
   sessionRef.current = activeSessionId;
 
@@ -54,6 +55,7 @@ export function useAgentV2(
       setEvents([]);
       setRuns([]);
       setStreamingContent('');
+      setStreamingReasoning('');
       return () => { mounted = false; };
     }
     void (async () => {
@@ -75,6 +77,7 @@ export function useAgentV2(
           return mergeSessionRecords(restoredRuns, previous, activeSessionId).sort((left, right) => right.updatedAt - left.updatedAt);
         });
         setStreamingContent('');
+        setStreamingReasoning('');
       }
     })();
     return () => { mounted = false; };
@@ -82,13 +85,19 @@ export function useAgentV2(
 
   const appendEvent = useCallback((event: AgentEvent) => {
     if (event.transient) {
-      if (event.kind === 'assistant_delta' && event.sessionId === sessionRef.current) setStreamingContent(event.content);
+      if (event.kind === 'assistant_delta' && event.sessionId === sessionRef.current) {
+        setStreamingContent(event.content);
+        setStreamingReasoning(event.reasoningContent);
+      }
       return;
     }
     if (event.sessionId === sessionRef.current) {
       setEvents((previous) => previous.some((candidate) => candidate.id === event.id) ? previous : [...previous, event]);
     }
-    if (event.kind === 'message' && event.message.role === 'assistant' && event.sessionId === sessionRef.current) setStreamingContent('');
+    if (event.kind === 'message' && event.message.role === 'assistant' && event.sessionId === sessionRef.current) {
+      setStreamingContent('');
+      setStreamingReasoning('');
+    }
   }, []);
 
   const updateRun = useCallback((run: AgentRun) => {
@@ -106,10 +115,11 @@ export function useAgentV2(
     const containerId = overrideContainerId ?? activeContainerId;
     if (!sessionId || !containerId || !runtime || !userPrompt.trim()) return;
     if (sessionId === sessionRef.current) setStreamingContent('');
+    if (sessionId === sessionRef.current) setStreamingReasoning('');
     controllersRef.current.get(sessionId)?.abort();
     const controller = new AbortController();
     controllersRef.current.set(sessionId, controller);
-    const initialMessages: Message[] = inheritedMessages ?? (sessionId === sessionRef.current ? projectMessages(events) : []);
+    const initialMessages: Message[] = inheritedMessages ?? (sessionId === sessionRef.current ? projectModelMessages(events) : []);
     const engine = new AgentEngine({
       sessionId,
       containerId,
@@ -139,7 +149,7 @@ export function useAgentV2(
     const target = run ?? runs.find((candidate) => candidate.phase === 'interrupted') ?? runs[0] ?? null;
     if (!target) return;
     void storeRef.current.latestCheckpoint(target.id).then((checkpoint) => {
-      const inherited = checkpoint?.messages ?? (target.sessionId === sessionRef.current ? projectMessages(events) : []);
+      const inherited = checkpoint?.messages ?? (target.sessionId === sessionRef.current ? projectModelMessages(events) : []);
       const checkpointSummary = checkpoint?.summary ?? target.summary ?? 'reassess the interrupted task';
       const prompt = `Continue from checkpoint: ${checkpointSummary}. Inspect the current workspace, preserve truthful evidence, and finish only after verification.`;
       launchTask(prompt, target.sessionId, target.containerId, inherited);
@@ -154,5 +164,5 @@ export function useAgentV2(
   const activeRun = useMemo(() => runs.find((run) => ['preparing', 'planning', 'acting', 'observing', 'verifying', 'cancelling'].includes(run.phase)) ?? null, [runs]);
   const latestRun = runs[0] ?? null;
 
-  return { events, runs, messages, activeRun, latestRun, streamingContent, startTask, resumeTask, stopTask };
+  return { events, runs, messages, activeRun, latestRun, streamingContent, streamingReasoning, startTask, resumeTask, stopTask };
 }

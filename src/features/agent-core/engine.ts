@@ -161,12 +161,29 @@ export class AgentEngine {
   private async completeModelRequest(messages: Message[]): Promise<Awaited<ReturnType<AgentModelClient['complete']>> > {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
+      let streamedContent = '';
+      let streamedReasoning = '';
       try {
-        return await this.options.client.complete(sanitizeToolTranscript(messages), {
+        const response = await this.options.client.complete(sanitizeToolTranscript(messages), {
           signal: this.options.signal,
           tools: this.registry.getApiDefinitions(),
-          onDelta: (content) => { void this.emitter.emit('assistant_delta', { content, transient: true }); },
+          onDelta: (message) => {
+            streamedContent = message.content;
+            streamedReasoning = message.reasoning_content ?? '';
+            void this.emitter.emit('assistant_delta', { content: streamedContent, reasoningContent: streamedReasoning, transient: true });
+          },
         });
+        // Some compatible providers expose reasoning only in SSE deltas and omit
+        // it from the final object. Preserve what the user already saw instead
+        // of replacing the streaming bubble with a lossy persisted message.
+        return {
+          ...response,
+          message: {
+            ...response.message,
+            content: response.message.content || streamedContent,
+            reasoning_content: response.message.reasoning_content || streamedReasoning || undefined,
+          },
+        };
       } catch (error) {
         if (isAbort(error)) throw error;
         lastError = error;

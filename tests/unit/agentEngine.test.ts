@@ -25,6 +25,19 @@ class ScriptedClient implements AgentModelClient {
   }
 }
 
+class DeltaOnlyReasoningClient implements AgentModelClient {
+  private index = 0;
+
+  async complete(_messages: Parameters<AgentModelClient['complete']>[0], options: Parameters<AgentModelClient['complete']>[1]): Promise<AgentModelResponse> {
+    this.index += 1;
+    if (this.index === 1) {
+      options.onDelta({ content: '', reasoning_content: 'This streamed reasoning must survive.' });
+      return tool('inspect', 'workspace_tree', { max_depth: 1 });
+    }
+    return tool('finish', 'complete_task', { summary: 'Inspected.', evidence: ['Workspace tree inspected.'] });
+  }
+}
+
 class FakeRuntime implements AgentWorkspaceRuntime {
   readonly files = new Map<string, string>();
   readonly commands: string[] = [];
@@ -64,6 +77,14 @@ class FailingVerificationRuntime extends FakeRuntime {
 }
 
 describe('Agent Core v2', () => {
+  it('persists reasoning that a provider returns only through streaming deltas', async () => {
+    const events: AgentEvent[] = [];
+    const engine = new AgentEngine({ sessionId: 's-reasoning', containerId: 'c-reasoning', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Inspect this.', initialMessages: [], client: new DeltaOnlyReasoningClient(), runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+    await engine.execute();
+    const assistant = events.find((event) => event.kind === 'message' && event.message.role === 'assistant' && event.message.tool_calls?.[0]?.id === 'inspect');
+    expect(assistant).toMatchObject({ kind: 'message', message: { reasoning_content: 'This streamed reasoning must survive.' } });
+  });
+
   it('blocks premature completion, verifies a workspace change, and records a completed Run', async () => {
     const runtime = new FakeRuntime();
     const events: AgentEvent[] = [];
