@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { SquarePen, History, Box, Plus, PanelLeftClose, PanelLeft, MoreHorizontal, Settings, Pin, Trash2, Edit2, Search, Loader2, Sparkles } from 'lucide-react';
+import { SquarePen, History, Box, Plus, PanelLeftClose, PanelLeft, Settings, Pin, Trash2, Edit2, Search, Sparkles } from 'lucide-react';
 import { useWorkspaceStore } from '../../shared/store/useWorkspaceStore';
+import { WorkspaceResourceList } from '@/features/session/ui/WorkspaceResourceList';
+import { generateAutoTitle } from '@/features/session/titleService';
+import { loadMessages } from '@/entities/message/repository';
+import { readAppSettings } from '@/shared/lib/settings';
+import { useI18n } from '@/shared/i18n';
 
 interface SidebarProps {
   onOpenSettings?: () => void;
@@ -22,6 +27,7 @@ type EditingState = {
 } | null;
 
 export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, onCloseMobile }) => {
+  const { t } = useI18n();
   const [_isCollapsed, setIsCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 900);
 
@@ -80,50 +86,30 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
 
   const handleGenerateTitle = async (type: 'session' | 'container', id: string) => {
     closeContextMenu();
-    setGeneratingTitleId(id);
-
-    const apiKey = localStorage.getItem('sunam_api_key') || '';
-    const baseUrl = localStorage.getItem('sunam_base_url') || 'https://api.deepseek.com/v1';
-    const apiModel = localStorage.getItem('sunam_api_model') || 'deepseek-v4-flash';
+    const { apiKey, baseUrl, apiModel } = readAppSettings();
 
     if (!apiKey) {
-      alert('请先配置 API Key');
+      alert(t('sidebar.apiKeyRequired'));
       return;
     }
+    setGeneratingTitleId(id);
 
-    let input = '';
+    let input: string;
     if (type === 'session') {
-      const messagesStr = localStorage.getItem(`sunam_messages_${id}`);
-      if (messagesStr) {
-        try {
-          const msgs = JSON.parse(messagesStr);
-          const firstUserMsg = msgs.find((m: any) => m.role === 'user');
-          if (firstUserMsg) {
-            input = firstUserMsg.content;
-          }
-        } catch (e) {}
-      }
-      if (!input) input = '无有效对话记录，请随意发挥。';
+      input = loadMessages(id).find((message) => message.role === 'user')?.content || '无有效对话记录，请随意发挥。';
     } else {
       input = '这是一个容器的自动重命名，请随意起名。';
     }
 
     try {
-      const { callLLM } = await import('../../shared/api/llm.ts');
-      const res = await callLLM(
-        [{ role: 'user', content: `请根据以下提示总结一个标题，字数不超过15个字。这个标题必须非常离谱，字面意义上符合但是内核完全曲解用户的请求。直接输出标题文本，不要包含任何多余的标点符号或解释说明。提示：${input}` }],
-        { apiKey, baseUrl, model: apiModel }
-      );
-      if (res.content) {
-        if (type === 'session') {
-          renameSession(id, res.content.trim().replace(/^"|"$/g, ''));
-        } else {
-          renameContainer(id, res.content.trim().replace(/^"|"$/g, ''));
-        }
+      const title = await generateAutoTitle(input, { apiKey, baseUrl, model: apiModel });
+      if (title) {
+        if (type === 'session') renameSession(id, title);
+        else renameContainer(id, title);
       }
-    } catch (e) {
-      console.error(e);
-      alert('生成标题失败');
+    } catch (error) {
+      console.error(error);
+      alert(t('sidebar.renameFailed'));
     } finally {
       setGeneratingTitleId(null);
     }
@@ -168,7 +154,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <button 
                   className="sidebar-icon-btn"
-                  title="搜索历史对话"
+                  title={t('sidebar.search')}
                   style={{ padding: '4px' }}
                 >
                   <Search size={18} />
@@ -176,7 +162,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
                 <button 
                   className="sidebar-toggle-btn desktop-only-btn"
                   onClick={() => setIsCollapsed(true)}
-                  title="Collapse Sidebar"
+                  title={t('sidebar.collapse')}
                 >
                   <PanelLeftClose size={20} />
                 </button>
@@ -193,11 +179,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
               if (!activeContainerId) createContainer();
             }}>
               <SquarePen size={18} />
-              {!isCollapsed && <span>新建任务</span>}
+              {!isCollapsed && <span>{t('sidebar.newTask')}</span>}
             </button>
             
             {isCollapsed && (
-              <button className="sidebar-action-btn" title="搜索历史对话" style={{ marginTop: '8px' }}>
+              <button className="sidebar-action-btn" title={t('sidebar.search')} style={{ marginTop: '8px' }}>
                 <Search size={18} />
               </button>
             )}
@@ -207,97 +193,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
           {!isCollapsed && (
             <div className="sidebar-section">
               <div className="sidebar-section-title">
-                容器
-                <button className="sidebar-icon-btn" onClick={() => { if (window.confirm("确定要新建一个独立容器吗？")) createContainer(); }} title="新建容器">
+                {t('sidebar.containers')}
+                <button className="sidebar-icon-btn" onClick={() => { if (window.confirm(t('sidebar.confirmNewContainer'))) createContainer(); }} title={t('sidebar.newContainer')}>
                   <Plus size={14} />
                 </button>
               </div>
-              <div className="sidebar-list">
-                {sortedContainers.length === 0 ? (
-                  <div style={{ fontSize: '13px', color: 'var(--color-text-tertiary, #999)', textAlign: 'center', padding: '12px 0' }}>暂无可用容器</div>
-                ) : (
-                  sortedContainers.map(container => (
-                    <div 
-                      key={container.id} 
-                      className={`sidebar-item ${activeContainerId === container.id ? 'active' : ''}`}
-                      onClick={() => selectContainer(container.id)}
-                      onContextMenu={(e) => handleContextMenu(e, 'container', container.id)}
-                    >
-                      <Box size={16} style={{ flexShrink: 0, color: container.pinned ? 'var(--color-black)' : 'inherit' }} />
-                      {container.pinned && <Pin size={12} fill="currentColor" style={{ flexShrink: 0, marginLeft: '-4px', marginRight: '4px', opacity: 0.8 }} />}
-                      {editing?.id === container.id ? (
-                        <input 
-                          ref={editInputRef}
-                          className="item-text"
-                          style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', padding: 0, minWidth: 0 }}
-                          value={editing.text}
-                          onChange={e => setEditing({ ...editing, text: e.target.value })}
-                          onBlur={handleRenameSubmit}
-                          onKeyDown={e => e.key === 'Enter' && handleRenameSubmit()}
-                          onClick={e => e.stopPropagation()}
-                        />
-                      ) : (
-                        <span className="item-text">{container.name}</span>
-                      )}
-                      {generatingTitleId === container.id && <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-secondary)' }} />}
-                      <button 
-                        className="item-action" 
-                        onClick={(e) => { e.stopPropagation(); handleContextMenu(e, 'container', container.id); }}
-                      >
-                        <MoreHorizontal size={14} />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
+              <WorkspaceResourceList items={sortedContainers} activeId={activeContainerId} isCollapsed={isCollapsed} emptyLabel={t('sidebar.noContainers')} generatingId={generatingTitleId} editing={editing?.type === 'container' ? editing : null} icon={Box} onSelect={selectContainer} onOpenContext={(event, id) => handleContextMenu(event, 'container', id)} onEditChange={(_id, text) => setEditing((current) => current ? { ...current, text } : current)} onEditSubmit={handleRenameSubmit} editInputRef={editInputRef} />
             </div>
           )}
 
           {/* History Section (Renamed to 历史对话, hidden when collapsed) */}
           {!isCollapsed && (
             <div className="sidebar-section">
-              <div className="sidebar-section-title">历史对话</div>
-              <div className="sidebar-list">
-                {sortedSessions.length === 0 ? (
-                  <div style={{ fontSize: '13px', color: 'var(--color-text-tertiary, #999)', textAlign: 'center', padding: '12px 0' }}>暂无对话记录</div>
-                ) : (
-                  sortedSessions.map(session => (
-                    <div 
-                      key={session.id} 
-                      className={`sidebar-item ${activeSessionId === session.id ? 'active' : ''}`}
-                      onClick={() => selectSession(session.id)}
-                      onContextMenu={(e) => handleContextMenu(e, 'session', session.id)}
-                    >
-                      <History size={16} style={{ flexShrink: 0, color: session.pinned ? 'var(--color-black)' : 'inherit' }} />
-                      {session.pinned && <Pin size={12} fill="currentColor" style={{ flexShrink: 0, marginLeft: '-4px', marginRight: '4px', opacity: 0.8 }} />}
-                      {editing?.id === session.id ? (
-                        <input 
-                          ref={editInputRef}
-                          className="item-text"
-                          style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', padding: 0, minWidth: 0 }}
-                          value={editing.text}
-                          onChange={e => setEditing({ ...editing, text: e.target.value })}
-                          onBlur={handleRenameSubmit}
-                          onKeyDown={e => e.key === 'Enter' && handleRenameSubmit()}
-                          onClick={e => e.stopPropagation()}
-                        />
-                      ) : (
-                        <span className="item-text">{session.title}</span>
-                      )}
-                      {generatingTitleId === session.id && <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-secondary)' }} />}
-                      {session.status === 'running' && <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-primary)' }} />}
-                      {session.status === 'completed_unread' && <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />}
-                      {session.status === 'failed_unread' && <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }} />}
-                      <button 
-                        className="item-action" 
-                        onClick={(e) => { e.stopPropagation(); handleContextMenu(e, 'session', session.id); }}
-                      >
-                        <MoreHorizontal size={14} />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
+              <div className="sidebar-section-title">{t('sidebar.history')}</div>
+              <WorkspaceResourceList items={sortedSessions} activeId={activeSessionId} isCollapsed={isCollapsed} emptyLabel={t('sidebar.noSessions')} generatingId={generatingTitleId} editing={editing?.type === 'session' ? editing : null} icon={History} onSelect={selectSession} onOpenContext={(event, id) => handleContextMenu(event, 'session', id)} onEditChange={(_id, text) => setEditing((current) => current ? { ...current, text } : current)} onEditSubmit={handleRenameSubmit} editInputRef={editInputRef} />
             </div>
           )}
         </div>
@@ -314,13 +223,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
             width: isCollapsed ? '100%' : 'auto'
           }}>
             <img src="/head.jpeg" alt="Avatar" className="sidebar-avatar" />
-            {!isCollapsed && <span className="sidebar-username">User</span>}
+            {!isCollapsed && <span className="sidebar-username">{t('sidebar.user')}</span>}
           </div>
           {!isCollapsed && (
             <button 
               className="sidebar-icon-btn" 
               onClick={onOpenSettings} 
-              title="全局设置"
+              title={t('sidebar.settings')}
               style={{ padding: '6px', marginRight: '-4px' }}
             >
               <Settings size={18} />
@@ -356,14 +265,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
               }}
             >
               <Edit2 size={16} className="context-item-icon" />
-              重命名
+              {t('sidebar.rename')}
             </button>
             <button 
               className="context-item" 
               onClick={() => handleGenerateTitle(contextMenu.type, contextMenu.id)}
             >
               <Sparkles size={16} className="context-item-icon" />
-              生成标题
+              {t('sidebar.generateTitle')}
             </button>
             <button 
               className="context-item" 
@@ -379,7 +288,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
                 const item = isSession 
                   ? sessions.find(s => s.id === contextMenu.id)
                   : containers.find(c => c.id === contextMenu.id);
-                return item?.pinned ? '取消置顶' : '置顶';
+                return item?.pinned ? t('sidebar.unpin') : t('sidebar.pin');
               })()}
             </button>
             <div className="context-divider" />
@@ -387,7 +296,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
               className="context-item danger" 
               onClick={() => {
                 const isSession = contextMenu.type === 'session';
-                if (!isSession && !window.confirm("确定要删除该容器及其所有数据吗？")) {
+                if (!isSession && !window.confirm(t('sidebar.confirmDeleteContainer'))) {
                   closeContextMenu();
                   return;
                 }
@@ -397,7 +306,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
               }}
             >
               <Trash2 size={16} className="context-item-icon" />
-              删除
+              {t('sidebar.delete')}
             </button>
           </div>
         </>

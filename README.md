@@ -1,32 +1,32 @@
-# React + TypeScript + Vite
+# Sunam
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Sunam 是一个运行在浏览器中的 Agent Coding Assistant。它使用 WebContainer 提供隔离终端和文件系统，并通过 OpenAI-compatible Chat Completions API 与模型通信。
 
-Currently, two official plugins are available:
+## 开发
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm ci
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+WebContainer 依赖 COEP/COOP 响应头；本项目的 Vite 与 Vercel 配置已包含所需头部。建议在 Chromium 系浏览器中完成真实运行时冒烟。
+
+## 质量命令
+
+```bash
+npm run typecheck
+npm run lint
+npm test
+npm run test:coverage
+npm run build
+npm run check:bundle
+npm run test:e2e
+npm run test:runtime
+npm run check
+```
+
+`check:bundle` 将首次关键 UI 的 gzip JavaScript 限制为 180 KiB；终端、WebContainer、文件管理、人格提示和代码高亮均为按需资源。
+
+`test:runtime` 不会发送模型请求，但会在 Chromium 中启动真实 WebContainer；它是发布前 WebContainer 环境检查，不纳入无外网保证的常规 CI。
+
+更多的架构边界、兼容性保证和发布验收项见 [docs/architecture.md](docs/architecture.md) 与 [docs/refactor-acceptance.md](docs/refactor-acceptance.md)。

@@ -1,36 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
-import type { Message } from '../../entities/message/types';
-
-const STORAGE_PREFIX = 'sunam_messages_';
+import { useCallback, useEffect, useState } from 'react';
+import { loadMessages, saveMessages } from '@/entities/message/repository';
+import type { Message } from '@/entities/message/types';
 
 export function useMessageStore(sessionId: string | null) {
   const [messages, setMessages] = useState<Message[]>([]);
 
-  // Load messages from localStorage when sessionId changes
   useEffect(() => {
-    if (!sessionId) {
-      setMessages([]);
-      return;
-    }
-    const saved = localStorage.getItem(`${STORAGE_PREFIX}${sessionId}`);
-    if (saved) {
-      try {
-        setMessages(JSON.parse(saved));
-      } catch (e) {
-        console.error('Failed to parse messages', e);
-        setMessages([]);
-      }
-    } else {
-      setMessages([]);
-    }
+    setMessages(sessionId ? loadMessages(sessionId) : []);
   }, [sessionId]);
 
-  const updateMessages = useCallback((newMessages: Message[] | ((prev: Message[]) => Message[])) => {
-    setMessages(prev => {
-      const updated = typeof newMessages === 'function' ? newMessages(prev) : newMessages;
-      if (sessionId) {
-        localStorage.setItem(`${STORAGE_PREFIX}${sessionId}`, JSON.stringify(updated));
-      }
+  const updateMessages = useCallback((nextMessages: Message[] | ((previous: Message[]) => Message[])) => {
+    setMessages((previous) => {
+      const updated = typeof nextMessages === 'function' ? nextMessages(previous) : nextMessages;
+      if (sessionId) saveMessages(sessionId, updated);
       return updated;
     });
   }, [sessionId]);

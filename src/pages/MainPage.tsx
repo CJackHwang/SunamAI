@@ -1,22 +1,22 @@
-import React, { useState } from 'react';
-import Workspace from '../widgets/workspace/Workspace.tsx';
+import React, { lazy, Suspense, useState } from 'react';
 import SettingsModal from '../widgets/settings/SettingsModal.tsx';
 import { Sidebar } from '../widgets/sidebar/Sidebar.tsx';
 import { useWorkspaceStore } from '../shared/store/useWorkspaceStore.ts';
+import { readAppSettings, saveConnectionSettings, saveSunamModel } from '@/shared/lib/settings';
+import type { SunamModel } from '@/shared/config/models';
+import { useI18n, type Locale } from '@/shared/i18n';
+
+const Workspace = lazy(() => import('../widgets/workspace/Workspace.tsx'));
 
 const MainPage: React.FC = () => {
-  const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('sunam_api_key') || '');
-  const [baseUrl, setBaseUrl] = useState<string>(() => localStorage.getItem('sunam_base_url') || 'https://api.deepseek.com/v1');
-  const [apiModel, setApiModel] = useState<string>(() => localStorage.getItem('sunam_api_model') || 'deepseek-v4-flash');
+  const [initialSettings] = useState(readAppSettings);
+  const [apiKey, setApiKey] = useState(initialSettings.apiKey);
+  const [baseUrl, setBaseUrl] = useState(initialSettings.baseUrl);
+  const [apiModel, setApiModel] = useState(initialSettings.apiModel);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const { activeSessionId, activeContainerId, updateSessionStatus } = useWorkspaceStore();
-  
-  const [sunamModel, setSunamModel] = useState<string>(() => {
-    const saved = localStorage.getItem('sunam_model');
-    const validModels = ['Sunam 1.14 Homo', 'Sunam 1.14 Saki', 'Sunam 5.14 Homo', 'Sunam 5.14 Saki', 'Sunam NEGA 69B'];
-    if (saved && validModels.includes(saved)) return saved;
-    return 'Sunam 1.14 Homo';
-  });
+  const { locale, setLocale, t } = useI18n();
+  const [sunamModel, setSunamModel] = useState<SunamModel>(initialSettings.sunamModel);
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(!apiKey);
 
@@ -24,10 +24,13 @@ const MainPage: React.FC = () => {
     setApiKey(key);
     setBaseUrl(url);
     setApiModel(newApiModel);
-    localStorage.setItem('sunam_api_key', key);
-    localStorage.setItem('sunam_base_url', url);
-    localStorage.setItem('sunam_api_model', newApiModel);
+    saveConnectionSettings({ apiKey: key, baseUrl: url, apiModel: newApiModel });
     setIsSettingsOpen(false);
+  };
+
+  const handleSunamModelChange = (model: SunamModel) => {
+    setSunamModel(model);
+    saveSunamModel(model);
   };
 
 
@@ -43,20 +46,22 @@ const MainPage: React.FC = () => {
         {/* Main Workspace Area */}
         <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
           {apiKey ? (
-            <Workspace 
-              apiKey={apiKey} 
-              baseUrl={baseUrl} 
-              apiModel={apiModel}
-              sunamModel={sunamModel} 
-              setSunamModel={setSunamModel} 
-              onMobileSidebarToggle={() => setIsMobileOpen(true)}
-              activeSessionId={activeSessionId}
-              activeContainerId={activeContainerId}
-              updateSessionStatus={updateSessionStatus}
-            />
+            <Suspense fallback={<div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>{t('common.loading')}</div>}>
+              <Workspace
+                apiKey={apiKey}
+                baseUrl={baseUrl}
+                apiModel={apiModel}
+                sunamModel={sunamModel}
+                setSunamModel={handleSunamModelChange}
+                onMobileSidebarToggle={() => setIsMobileOpen(true)}
+                activeSessionId={activeSessionId}
+                activeContainerId={activeContainerId}
+                updateSessionStatus={updateSessionStatus}
+              />
+            </Suspense>
           ) : (
             <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
-              <p>请先配置 API Key 以开始使用。</p>
+              <p>{t('main.configureApiKey')}</p>
             </div>
           )}
         </div>
@@ -67,6 +72,8 @@ const MainPage: React.FC = () => {
           initialApiKey={apiKey}
           initialBaseUrl={baseUrl}
           initialModel={apiModel}
+          locale={locale}
+          onLocaleChange={(nextLocale: Locale) => setLocale(nextLocale)}
           onSave={handleSaveSettings}
           onClose={() => apiKey && setIsSettingsOpen(false)}
         />

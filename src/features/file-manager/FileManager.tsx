@@ -1,50 +1,21 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { WebContainer } from '@webcontainer/api';
-import {
-  Folder, FileText, ChevronRight, ArrowLeft, RefreshCw,
-  FilePlus, FolderPlus, Trash2, Pencil, Download, Eye,
-  Upload, MoreVertical, X, AlertCircle, FolderOpen
-} from 'lucide-react';
-import { useFileSystem, type FileEntry } from './useFileSystem.ts';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent, type TouchEvent } from 'react';
+import type { WebContainer } from '@webcontainer/api';
+import { AlertCircle, Upload, X } from 'lucide-react';
+import type { FileEntry } from '@/entities/file/types';
+import { useI18n } from '@/shared/i18n';
+import { IMAGE_EXTENSIONS, getExtension, TEXT_EXTENSIONS } from './fileUtils';
+import { useFileSystem } from './useFileSystem';
+import { FileManagerToolbar } from './FileManagerToolbar';
+import { FileEntryList } from './FileEntryList';
+import { FileContextMenu, type FileContextMenuState } from './FileContextMenu';
 import './FileManager.css';
 
-interface FileManagerProps {
-  wc: WebContainer | null;
-  rootDir?: string;
-}
+interface FileManagerProps { wc: WebContainer | null; rootDir?: string; }
 
-// File extensions that can be previewed
-const TEXT_EXTENSIONS = new Set([
-  'txt', 'md', 'json', 'js', 'ts', 'jsx', 'tsx', 'css', 'html', 'xml',
-  'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'sh', 'bash', 'zsh',
-  'py', 'rb', 'go', 'rs', 'java', 'c', 'cpp', 'h', 'hpp', 'cs',
-  'swift', 'kt', 'php', 'sql', 'graphql', 'vue', 'svelte',
-  'env', 'gitignore', 'dockerignore', 'editorconfig', 'prettierrc',
-  'eslintrc', 'babelrc', 'lock', 'log',
-]);
-
-const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp']);
-
-function getExtension(name: string): string {
-  const parts = name.split('.');
-  if (parts.length < 2) return '';
-  return parts[parts.length - 1].toLowerCase();
-}
-
-function formatSize(bytes: number): string {
-  if (bytes === 0) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-const FileManager: React.FC<FileManagerProps> = ({ wc, rootDir = '/' }) => {
+export default function FileManager({ wc, rootDir = '/' }: FileManagerProps) {
+  const { t, format } = useI18n();
   const fs = useFileSystem(wc, rootDir);
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-    entry: FileEntry;
-  } | null>(null);
+  const [contextMenu, setContextMenu] = useState<FileContextMenuState | null>(null);
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
   const [renamingEntry, setRenamingEntry] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -60,469 +31,96 @@ const FileManager: React.FC<FileManagerProps> = ({ wc, rootDir = '/' }) => {
   const newItemInputRef = useRef<HTMLInputElement>(null);
   const isLongPressing = useRef(false);
 
-  // Initial load is now handled inside useFileSystem when rootDir changes
-
-  // Focus rename input when renaming
   useEffect(() => {
-    if (renamingEntry && renameInputRef.current) {
-      renameInputRef.current.focus();
-      // Select filename without extension
-      const dotIdx = renameValue.lastIndexOf('.');
-      renameInputRef.current.setSelectionRange(0, dotIdx > 0 ? dotIdx : renameValue.length);
-    }
+    if (!renamingEntry || !renameInputRef.current) return;
+    renameInputRef.current.focus();
+    const dotIndex = renameValue.lastIndexOf('.');
+    renameInputRef.current.setSelectionRange(0, dotIndex > 0 ? dotIndex : renameValue.length);
   }, [renamingEntry, renameValue]);
-
-  // Focus new item input
-  useEffect(() => {
-    if (newItemType && newItemInputRef.current) {
-      newItemInputRef.current.focus();
-    }
-  }, [newItemType]);
-
-  // ===== Event Handlers =====
+  useEffect(() => { if (newItemType) newItemInputRef.current?.focus(); }, [newItemType]);
 
   const handleDownload = useCallback(async (entry: FileEntry) => {
     try {
-      const data = await fs.readFileRaw(entry.name);
-      const blob = new Blob([new Uint8Array(data)]);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = entry.name;
-      a.click();
+      const url = URL.createObjectURL(new Blob([new Uint8Array(await fs.readFileRaw(entry.name))]));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = entry.name;
+      anchor.click();
       URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error('Download failed:', err);
-    }
+    } catch (error) { console.error('Download failed:', error); }
   }, [fs]);
-
   const handlePreview = useCallback(async (entry: FileEntry) => {
-    const ext = getExtension(entry.name);
-
-    if (TEXT_EXTENSIONS.has(ext) || entry.name.startsWith('.')) {
-      // Preview text files
-      try {
-        const content = await fs.readFile(entry.name);
-        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
+    const extension = getExtension(entry.name);
+    try {
+      if (TEXT_EXTENSIONS.has(extension) || entry.name.startsWith('.')) {
+        const url = URL.createObjectURL(new Blob([await fs.readFile(entry.name)], { type: 'text/plain;charset=utf-8' }));
         window.open(url, '_blank');
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
-      } catch {
-        handleDownload(entry);
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+        return;
       }
-    } else if (IMAGE_EXTENSIONS.has(ext)) {
-      // Preview images
-      try {
-        const data = await fs.readFileRaw(entry.name);
-        const mimeType = ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
-        const blob = new Blob([new Uint8Array(data)], { type: mimeType });
-        const url = URL.createObjectURL(blob);
+      if (IMAGE_EXTENSIONS.has(extension)) {
+        const type = extension === 'svg' ? 'image/svg+xml' : `image/${extension === 'jpg' ? 'jpeg' : extension}`;
+        const url = URL.createObjectURL(new Blob([new Uint8Array(await fs.readFileRaw(entry.name))], { type }));
         window.open(url, '_blank');
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
-      } catch {
-        handleDownload(entry);
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+        return;
       }
-    } else {
-      // Unsupported format — ask to download
-      if (confirm(`无法预览 "${entry.name}"，是否下载此文件？`)) {
-        handleDownload(entry);
-      }
-    }
-  }, [fs, handleDownload]);
-
-  const handleItemClick = useCallback((e: React.MouseEvent, entry: FileEntry) => {
-    e.stopPropagation();
-    if (isLongPressing.current) {
-      isLongPressing.current = false;
+    } catch {
+      await handleDownload(entry);
       return;
     }
-    if (renamingEntry) return;
-    setSelectedItem(entry.name);
-  }, [renamingEntry]);
-
-  const handleItemDoubleClick = useCallback((e: React.MouseEvent, entry: FileEntry) => {
-    e.stopPropagation();
-    if (renamingEntry) return;
-
-    if (entry.isDirectory) {
-      const newPath = fs.currentPath === '/' ? `/${entry.name}` : `${fs.currentPath}/${entry.name}`;
-      fs.navigateTo(newPath);
-      setSelectedItem(null);
-    } else {
-      handlePreview(entry);
-    }
-  }, [fs, renamingEntry, handlePreview]);
-
-  // Context menu (right-click or long-press)
-  const handleContextMenu = useCallback((e: React.MouseEvent, entry: FileEntry) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setContextMenu({ x: e.clientX, y: e.clientY, entry });
-  }, []);
-
-  const handleLongPressStart = useCallback((e: React.TouchEvent, entry: FileEntry) => {
-    isLongPressing.current = false;
-    longPressTimer.current = setTimeout(() => {
-      isLongPressing.current = true;
-      const touch = e.touches[0];
-      setContextMenu({ x: touch.clientX, y: touch.clientY, entry });
-    }, 400);
-  }, []);
-
-  const handleLongPressEnd = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  }, []);
-
-  const closeContextMenu = useCallback(() => {
-    setContextMenu(null);
-  }, []);
-
-  // Rename
-  const startRename = useCallback((entry: FileEntry) => {
-    setRenamingEntry(entry.name);
-    setRenameValue(entry.name);
-    closeContextMenu();
-  }, [closeContextMenu]);
-
+    if (window.confirm(format('files.previewUnsupported', { name: entry.name }))) await handleDownload(entry);
+  }, [format, fs, handleDownload]);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  const startRename = useCallback((entry: FileEntry) => { setRenamingEntry(entry.name); setRenameValue(entry.name); closeContextMenu(); }, [closeContextMenu]);
   const confirmRename = useCallback(async () => {
-    if (renamingEntry && renameValue.trim() && renameValue !== renamingEntry) {
-      await fs.rename(renamingEntry, renameValue.trim());
-    }
+    if (renamingEntry && renameValue.trim() && renameValue !== renamingEntry) await fs.rename(renamingEntry, renameValue.trim());
     setRenamingEntry(null);
     setRenameValue('');
-  }, [renamingEntry, renameValue, fs]);
-
-  // Delete
+  }, [fs, renameValue, renamingEntry]);
+  const cancelRename = () => { setRenamingEntry(null); setRenameValue(''); };
   const handleDelete = useCallback(async (entry: FileEntry) => {
     closeContextMenu();
-    const type = entry.isDirectory ? '文件夹' : '文件';
-    if (confirm(`确定删除${type} "${entry.name}" 吗？`)) {
-      await fs.remove(entry.name);
-    }
-  }, [fs, closeContextMenu]);
-
-  // New file/folder
+    const type = entry.isDirectory ? t('files.folder') : t('files.file');
+    if (window.confirm(format('files.confirmDelete', { type, name: entry.name }))) await fs.remove(entry.name);
+  }, [closeContextMenu, format, fs, t]);
   const confirmNewItem = useCallback(async () => {
-    if (!newItemName.trim()) {
-      setNewItemType(null);
-      return;
-    }
-    if (newItemType === 'file') {
-      await fs.createFile(newItemName.trim());
-    } else if (newItemType === 'folder') {
-      await fs.createDir(newItemName.trim());
-    }
+    if (!newItemName.trim()) { setNewItemType(null); return; }
+    if (newItemType === 'file') await fs.createFile(newItemName.trim());
+    if (newItemType === 'folder') await fs.createDir(newItemName.trim());
     setNewItemType(null);
     setNewItemName('');
-  }, [newItemType, newItemName, fs]);
+  }, [fs, newItemName, newItemType]);
+  const cancelNewItem = () => { setNewItemType(null); setNewItemName(''); };
+  const handleItemClick = (event: MouseEvent, entry: FileEntry) => {
+    event.stopPropagation();
+    if (isLongPressing.current) { isLongPressing.current = false; return; }
+    if (!renamingEntry) setSelectedItem(entry.name);
+  };
+  const handleItemDoubleClick = (event: MouseEvent, entry: FileEntry) => {
+    event.stopPropagation();
+    if (renamingEntry) return;
+    if (entry.isDirectory) { void fs.navigateTo(fs.currentPath === '/' ? `/${entry.name}` : `${fs.currentPath}/${entry.name}`); setSelectedItem(null); }
+    else void handlePreview(entry);
+  };
+  const openContextMenu = (event: MouseEvent, entry: FileEntry) => { event.preventDefault(); event.stopPropagation(); setContextMenu({ x: event.clientX, y: event.clientY, entry }); };
+  const handleLongPressStart = (event: TouchEvent, entry: FileEntry) => {
+    isLongPressing.current = false;
+    longPressTimer.current = setTimeout(() => { isLongPressing.current = true; const touch = event.touches[0]; setContextMenu({ x: touch.clientX, y: touch.clientY, entry }); }, 400);
+  };
+  const handleLongPressEnd = () => { if (longPressTimer.current) clearTimeout(longPressTimer.current); longPressTimer.current = null; };
+  const handleDragEnter = (event: DragEvent) => { event.preventDefault(); dragCounter.current += 1; if (event.dataTransfer.types.includes('Files')) setIsDragOver(true); };
+  const handleDragLeave = (event: DragEvent) => { event.preventDefault(); dragCounter.current -= 1; if (dragCounter.current === 0) setIsDragOver(false); };
+  const handleDrop = async (event: DragEvent) => { event.preventDefault(); dragCounter.current = 0; setIsDragOver(false); if (event.dataTransfer.files.length) await fs.uploadFiles(event.dataTransfer.files); };
+  const handleFolderDrop = async (event: DragEvent, folderName: string) => { event.preventDefault(); event.stopPropagation(); setDragOverFolder(null); const source = event.dataTransfer.getData('text/plain'); if (source && source !== folderName) await fs.moveFile(source, fs.currentPath === '/' ? `/${folderName}` : `${fs.currentPath}/${folderName}`); };
+  const handleFileInputChange = async (event: ChangeEvent<HTMLInputElement>) => { if (event.target.files?.length) { await fs.uploadFiles(event.target.files); event.target.value = ''; } };
 
-  // Drag & Drop — external files upload
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    dragCounter.current++;
-    if (e.dataTransfer.types.includes('Files')) {
-      setIsDragOver(true);
-    }
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    dragCounter.current--;
-    if (dragCounter.current === 0) {
-      setIsDragOver(false);
-    }
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-  }, []);
-
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    dragCounter.current = 0;
-    setIsDragOver(false);
-
-    if (e.dataTransfer.files.length > 0) {
-      await fs.uploadFiles(e.dataTransfer.files);
-    }
-  }, [fs]);
-
-  // Internal drag: move file into folder
-  const handleInternalDragStart = useCallback((e: React.DragEvent, entry: FileEntry) => {
-    e.dataTransfer.setData('text/plain', entry.name);
-    e.dataTransfer.effectAllowed = 'move';
-  }, []);
-
-  const handleFolderDragOver = useCallback((e: React.DragEvent, folderName: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = 'move';
-    setDragOverFolder(folderName);
-  }, []);
-
-  const handleFolderDragLeave = useCallback(() => {
-    setDragOverFolder(null);
-  }, []);
-
-  const handleFolderDrop = useCallback(async (e: React.DragEvent, folderName: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOverFolder(null);
-
-    const sourceName = e.dataTransfer.getData('text/plain');
-    if (sourceName && sourceName !== folderName) {
-      const destDir = fs.currentPath === '/' ? `/${folderName}` : `${fs.currentPath}/${folderName}`;
-      await fs.moveFile(sourceName, destDir);
-    }
-  }, [fs]);
-
-  // Upload button (mobile)
-  const handleUploadClick = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
-
-  const handleFileInputChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      await fs.uploadFiles(e.target.files);
-      e.target.value = '';
-    }
-  }, [fs]);
-
-  // ===== Breadcrumb =====
-  const rootName = rootDir !== '/' ? rootDir.replace(/^\//, '') : 'sunam';
-  const relativePath = fs.currentPath.startsWith(rootDir) && rootDir !== '/' ? fs.currentPath.slice(rootDir.length) : fs.currentPath;
-  const breadcrumbSegments = relativePath === '' || relativePath === '/'
-    ? ['/']
-    : ['/', ...relativePath.split('/').filter(Boolean)];
-
-  // ===== Render =====
-  return (
-    <div
-      className={`fm-container ${isDragOver ? 'fm-drop-active' : ''}`}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-    >
-      {/* Hidden file input for upload */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        style={{ display: 'none' }}
-        onChange={handleFileInputChange}
-      />
-
-      {/* Toolbar */}
-      <div className="fm-toolbar">
-        <button
-          className="fm-toolbar-btn"
-          onClick={fs.goUp}
-          disabled={fs.currentPath === '/'}
-          title="返回上级"
-        >
-          <ArrowLeft size={18} />
-        </button>
-
-        {/* Breadcrumb */}
-        <div className="fm-breadcrumb">
-          {breadcrumbSegments.map((segment, idx) => {
-            const path = idx === 0 ? rootDir : (rootDir === '/' ? '' : rootDir) + '/' + breadcrumbSegments.slice(1, idx + 1).join('/');
-            const isLast = idx === breadcrumbSegments.length - 1;
-
-            return (
-              <React.Fragment key={path}>
-                {idx > 0 && <ChevronRight size={12} className="fm-breadcrumb-sep" />}
-                <button
-                  className={`fm-breadcrumb-segment ${isLast ? 'active' : ''}`}
-                  onClick={() => !isLast && fs.navigateTo(path)}
-                >
-                  {segment === '/' ? rootName : segment}
-                </button>
-              </React.Fragment>
-            );
-          })}
-        </div>
-
-        <button className="fm-toolbar-btn" onClick={fs.refresh} title="刷新">
-          <RefreshCw size={16} />
-        </button>
-        <button className="fm-toolbar-btn" onClick={() => { setNewItemType('file'); setNewItemName(''); }} title="新建文件">
-          <FilePlus size={18} />
-        </button>
-        <button className="fm-toolbar-btn" onClick={() => { setNewItemType('folder'); setNewItemName(''); }} title="新建文件夹">
-          <FolderPlus size={18} />
-        </button>
-        <button className="fm-toolbar-btn" onClick={handleUploadClick} title="上传文件">
-          <Upload size={18} />
-        </button>
-      </div>
-
-      {/* Error banner */}
-      {fs.error && (
-        <div className="fm-error">
-          <AlertCircle size={14} />
-          {fs.error}
-          <button style={{ marginLeft: 'auto' }} onClick={() => {}}>
-            <X size={14} />
-          </button>
-        </div>
-      )}
-
-      {/* Drop zone overlay */}
-      {isDragOver && (
-        <div className="fm-drop-label">
-          <Upload size={24} style={{ marginRight: 8 }} />
-          释放文件以上传到当前目录
-        </div>
-      )}
-
-      {/* File list */}
-      <div className="fm-list" ref={listRef} onClick={() => setSelectedItem(null)}>
-        {newItemType && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 12px' }}>
-            <input
-              ref={newItemInputRef}
-              className="input-field"
-              style={{ flex: 1, minWidth: 0, height: '36px', padding: '0 12px' }}
-              value={newItemName}
-              onChange={e => setNewItemName(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') confirmNewItem();
-                if (e.key === 'Escape') { setNewItemType(null); setNewItemName(''); }
-              }}
-              placeholder={newItemType === 'folder' ? '文件夹名称' : '文件名称'}
-            />
-            <button className="btn btn-primary" style={{ height: '36px', padding: '0 16px' }} onClick={confirmNewItem}>创建</button>
-            <button className="btn btn-secondary" style={{ height: '36px', padding: '0 16px' }} onClick={() => { setNewItemType(null); setNewItemName(''); }}>取消</button>
-          </div>
-        )}
-
-        {/* Loading state */}
-        {fs.isLoading && fs.entries.length === 0 && (
-          <>
-            {[1, 2, 3, 4, 5].map(i => (
-              <div key={i} className="fm-skeleton">
-                <div className="fm-skeleton-icon" />
-                <div className="fm-skeleton-text" style={{ width: `${40 + Math.random() * 40}%` }} />
-              </div>
-            ))}
-          </>
-        )}
-
-        {/* Empty state */}
-        {!fs.isLoading && fs.entries.length === 0 && (
-          <div className="fm-empty">
-            <FolderOpen size={40} color="var(--color-black)" />
-            <span>空文件夹</span>
-            <span style={{ fontSize: 12 }}>拖拽文件到此处上传，或点击工具栏按钮新建</span>
-          </div>
-        )}
-
-        {/* File entries */}
-        {fs.entries.map(entry => (
-          <div
-            key={entry.name}
-            className={`fm-item ${dragOverFolder === entry.name ? 'drag-over' : ''} ${selectedItem === entry.name ? 'selected' : ''}`}
-            onClick={(e) => handleItemClick(e, entry)}
-            onDoubleClick={(e) => handleItemDoubleClick(e, entry)}
-            onContextMenu={(e) => handleContextMenu(e, entry)}
-            onTouchStart={(e) => handleLongPressStart(e, entry)}
-            onTouchEnd={handleLongPressEnd}
-            onTouchMove={handleLongPressEnd}
-            draggable={!renamingEntry}
-            onDragStart={(e) => handleInternalDragStart(e, entry)}
-            {...(entry.isDirectory ? {
-              onDragOver: (e: React.DragEvent) => handleFolderDragOver(e, entry.name),
-              onDragLeave: handleFolderDragLeave,
-              onDrop: (e: React.DragEvent) => handleFolderDrop(e, entry.name),
-            } : {})}
-          >
-            {/* Icon */}
-            <div className={`fm-item-icon ${entry.isDirectory ? 'folder' : ''}`}>
-              {entry.isDirectory ? <Folder size={22} /> : <FileText size={22} />}
-            </div>
-
-            {/* Name (or rename input) */}
-            {renamingEntry === entry.name ? (
-              <input
-                ref={renameInputRef}
-                className="input-field"
-                style={{ flex: 1, minWidth: 0, height: '32px', padding: '0 10px' }}
-                value={renameValue}
-                onChange={e => setRenameValue(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') confirmRename();
-                  if (e.key === 'Escape') { setRenamingEntry(null); setRenameValue(''); }
-                }}
-                onBlur={confirmRename}
-                onClick={e => e.stopPropagation()}
-              />
-            ) : (
-              <span className="fm-item-name">{entry.name}</span>
-            )}
-
-            {/* Size */}
-            {!entry.isDirectory && (
-              <span className="fm-item-size">{formatSize(entry.size)}</span>
-            )}
-
-            {/* Mobile: more button */}
-            <button
-              className="fm-toolbar-btn"
-              style={{ width: 32, height: 32, display: 'none' }}
-              onClick={(e) => {
-                e.stopPropagation();
-                const rect = (e.target as HTMLElement).getBoundingClientRect();
-                setContextMenu({ x: rect.right, y: rect.bottom, entry });
-              }}
-            >
-              <MoreVertical size={16} />
-            </button>
-          </div>
-        ))}
-      </div>
-
-      {/* Context Menu */}
-      {contextMenu && (
-        <>
-          <div className="context-overlay" onClick={closeContextMenu} onContextMenu={e => { e.preventDefault(); closeContextMenu(); }} />
-          <div
-            className="context-menu"
-            style={{
-              left: `min(${contextMenu.x}px, calc(100vw - 200px))`,
-              top: `min(${contextMenu.y}px, calc(100vh - 250px))`,
-            }}
-          >
-            {!contextMenu.entry.isDirectory && (
-              <>
-                <button className="context-item" onClick={() => { handlePreview(contextMenu.entry); closeContextMenu(); }}>
-                  <Eye size={16} className="context-item-icon" />
-                  预览
-                </button>
-                <button className="context-item" onClick={() => { handleDownload(contextMenu.entry); closeContextMenu(); }}>
-                  <Download size={16} className="context-item-icon" />
-                  下载
-                </button>
-                <div className="context-divider" />
-              </>
-            )}
-            <button className="context-item" onClick={() => startRename(contextMenu.entry)}>
-              <Pencil size={16} className="context-item-icon" />
-              重命名
-            </button>
-            <button className="context-item danger" onClick={() => handleDelete(contextMenu.entry)}>
-              <Trash2 size={16} className="context-item-icon" />
-              删除
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-};
-
-export default FileManager;
+  return <div className={`fm-container ${isDragOver ? 'fm-drop-active' : ''}`} onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
+    <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }} onChange={handleFileInputChange} />
+    <FileManagerToolbar rootDir={rootDir} currentPath={fs.currentPath} onGoUp={fs.goUp} onNavigate={(path) => { void fs.navigateTo(path); }} onRefresh={fs.refresh} onCreateFile={() => { setNewItemType('file'); setNewItemName(''); }} onCreateFolder={() => { setNewItemType('folder'); setNewItemName(''); }} onUpload={() => fileInputRef.current?.click()} />
+    {fs.error && <div className="fm-error"><AlertCircle size={14} />{fs.error}<button style={{ marginLeft: 'auto' }} onClick={fs.clearError}><X size={14} /></button></div>}
+    {isDragOver && <div className="fm-drop-label"><Upload size={24} style={{ marginRight: 8 }} />{t('files.dropToUpload')}</div>}
+    <FileEntryList entries={fs.entries} isLoading={fs.isLoading} selectedItem={selectedItem} dragOverFolder={dragOverFolder} renamingEntry={renamingEntry} renameValue={renameValue} newItemType={newItemType} newItemName={newItemName} listRef={listRef} renameInputRef={renameInputRef} newItemInputRef={newItemInputRef} onClearSelection={() => setSelectedItem(null)} onItemClick={handleItemClick} onItemDoubleClick={handleItemDoubleClick} onContextMenu={openContextMenu} onLongPressStart={handleLongPressStart} onLongPressEnd={handleLongPressEnd} onDragStart={(event, entry) => { event.dataTransfer.setData('text/plain', entry.name); event.dataTransfer.effectAllowed = 'move'; }} onFolderDragOver={(event, name) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setDragOverFolder(name); }} onFolderDragLeave={() => setDragOverFolder(null)} onFolderDrop={handleFolderDrop} onRenameChange={setRenameValue} onRenameConfirm={() => { void confirmRename(); }} onRenameCancel={cancelRename} onNewNameChange={setNewItemName} onNewConfirm={() => { void confirmNewItem(); }} onNewCancel={cancelNewItem} />
+    <FileContextMenu menu={contextMenu} onClose={closeContextMenu} onPreview={(entry) => { void handlePreview(entry); }} onDownload={(entry) => { void handleDownload(entry); }} onRename={startRename} onDelete={(entry) => { void handleDelete(entry); }} />
+  </div>;
+}

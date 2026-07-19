@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { fileURLToPath, URL } from 'node:url'
 
 import { VitePWA } from 'vite-plugin-pwa'
 
@@ -28,6 +29,11 @@ function coepPlugin(): Plugin {
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
   plugins: [
     react(),
     coepPlugin(),
@@ -54,5 +60,8 @@ export default defineConfig({
   server: {
     port: 7891,
     strictPort: true,
+  },
+  build: {
+    target: 'es2023',
   },
 })

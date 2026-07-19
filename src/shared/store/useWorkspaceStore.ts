@@ -1,188 +1,113 @@
-import { useSyncExternalStore, useCallback } from 'react';
+import { useSyncExternalStore } from 'react';
+import { loadWorkspaceState, saveWorkspaceState } from '@/entities/workspace/repository';
+import type { Container, Session, SessionStatus, WorkspaceState } from '@/entities/workspace/types';
 
-export interface Session {
-  id: string;
-  title: string;
-  updatedAt: number;
-  pinned?: boolean;
-  status?: 'idle' | 'running' | 'completed_unread' | 'failed_unread';
+export type { Container, Session, WorkspaceState } from '@/entities/workspace/types';
+
+interface WorkspaceStore {
+  subscribe: (listener: () => void) => () => void;
+  getSnapshot: () => WorkspaceState;
+  createSession: () => string;
+  renameSession: (id: string, title: string) => void;
+  deleteSession: (id: string) => void;
+  togglePinSession: (id: string) => void;
+  updateSessionStatus: (id: string, status: SessionStatus) => void;
+  selectSession: (id: string) => void;
+  createContainer: () => string;
+  renameContainer: (id: string, name: string) => void;
+  deleteContainer: (id: string) => void;
+  togglePinContainer: (id: string) => void;
+  selectContainer: (id: string) => void;
 }
 
-export interface Container {
-  id: string;
-  name: string;
-  updatedAt: number;
-  pinned?: boolean;
-}
-
-interface WorkspaceState {
-  sessions: Session[];
-  containers: Container[];
-  activeSessionId: string | null;
-  activeContainerId: string | null;
-}
-
-const STORAGE_KEY = 'sunam_workspace_state';
-
-const getInitialState = (): WorkspaceState => {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    try {
-      return JSON.parse(saved);
-    } catch (e) {
-      console.error('Failed to parse workspace state', e);
-    }
-  }
-  const initTs = Date.now();
-  const defaultSessionId = `s-${initTs.toString(36)}`;
-  const defaultContainerId = `c-${initTs.toString(36)}`;
-  return {
-    sessions: [{ id: defaultSessionId, title: '新建对话', updatedAt: initTs }],
-    containers: [{ id: defaultContainerId, name: '默认容器', updatedAt: initTs }],
-    activeSessionId: defaultSessionId,
-    activeContainerId: defaultContainerId,
+export function createWorkspaceStore(
+  initialState: WorkspaceState = loadWorkspaceState(),
+  persist: (state: WorkspaceState) => void = saveWorkspaceState,
+  now: () => number = Date.now,
+): WorkspaceStore {
+  let state = initialState;
+  const listeners = new Set<() => void>();
+  const subscribe = (listener: () => void) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
   };
-};
+  const setState = (updater: (previous: WorkspaceState) => WorkspaceState) => {
+    const nextState = updater(state);
+    if (nextState === state) return;
+    state = nextState;
+    persist(state);
+    listeners.forEach((listener) => listener());
+  };
+  return {
+    subscribe,
+    getSnapshot: () => state,
+    createSession: () => {
+      const timestamp = now();
+      const session: Session = { id: `s-${timestamp.toString(36)}`, title: '新对话', updatedAt: timestamp };
+      setState((previous) => ({ ...previous, sessions: [session, ...previous.sessions], activeSessionId: session.id }));
+      return session.id;
+    },
+    renameSession: (id, title) => setState((previous) => ({
+      ...previous,
+      sessions: previous.sessions.map((session) => session.id === id ? { ...session, title, updatedAt: now() } : session),
+    })),
+    deleteSession: (id) => setState((previous) => {
+      const sessions = previous.sessions.filter((session) => session.id !== id);
+      return { ...previous, sessions, activeSessionId: previous.activeSessionId === id ? sessions[0]?.id ?? null : previous.activeSessionId };
+    }),
+    togglePinSession: (id) => setState((previous) => ({
+      ...previous,
+      sessions: previous.sessions.map((session) => session.id === id ? { ...session, pinned: !session.pinned, updatedAt: now() } : session),
+    })),
+    updateSessionStatus: (id, status) => setState((previous) => ({
+      ...previous,
+      sessions: previous.sessions.map((session) => session.id === id ? { ...session, status } : session),
+    })),
+    selectSession: (id) => setState((previous) => ({
+      ...previous,
+      activeSessionId: id,
+      sessions: previous.sessions.map((session) => session.id === id && (session.status === 'completed_unread' || session.status === 'failed_unread')
+        ? { ...session, status: 'idle' }
+        : session),
+    })),
+    createContainer: () => {
+      const timestamp = now();
+      const container: Container = { id: `c-${timestamp.toString(36)}`, name: '新容器', updatedAt: timestamp };
+      setState((previous) => ({ ...previous, containers: [container, ...previous.containers], activeContainerId: container.id }));
+      return container.id;
+    },
+    renameContainer: (id, name) => setState((previous) => ({
+      ...previous,
+      containers: previous.containers.map((container) => container.id === id ? { ...container, name, updatedAt: now() } : container),
+    })),
+    deleteContainer: (id) => setState((previous) => {
+      const containers = previous.containers.filter((container) => container.id !== id);
+      return { ...previous, containers, activeContainerId: previous.activeContainerId === id ? containers[0]?.id ?? null : previous.activeContainerId };
+    }),
+    togglePinContainer: (id) => setState((previous) => ({
+      ...previous,
+      containers: previous.containers.map((container) => container.id === id ? { ...container, pinned: !container.pinned, updatedAt: now() } : container),
+    })),
+    selectContainer: (id) => setState((previous) => ({ ...previous, activeContainerId: id })),
+  };
+}
 
-// Global state variables
-let globalState: WorkspaceState = getInitialState();
-const listeners = new Set<() => void>();
-
-const subscribe = (listener: () => void) => {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-};
-
-const getSnapshot = () => globalState;
-
-const setState = (updater: (prev: WorkspaceState) => WorkspaceState) => {
-  const next = updater(globalState);
-  if (next !== globalState) {
-    globalState = next;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(globalState));
-    listeners.forEach((l) => l());
-  }
-};
+const workspaceStore = createWorkspaceStore();
 
 export function useWorkspaceStore() {
-  const state = useSyncExternalStore(subscribe, getSnapshot);
-
-  const createSession = useCallback(() => {
-    const ts = Date.now();
-    const newSession: Session = {
-      id: `s-${ts.toString(36)}`,
-      title: '新对话',
-      updatedAt: ts,
-    };
-    setState((prev) => ({
-      ...prev,
-      sessions: [newSession, ...prev.sessions],
-      activeSessionId: newSession.id,
-    }));
-    return newSession.id;
-  }, []);
-
-  const renameSession = useCallback((id: string, newTitle: string) => {
-    setState((prev) => ({
-      ...prev,
-      sessions: prev.sessions.map((s) => (s.id === id ? { ...s, title: newTitle, updatedAt: Date.now() } : s)),
-    }));
-  }, []);
-
-  const deleteSession = useCallback((id: string) => {
-    setState((prev) => {
-      const filtered = prev.sessions.filter((s) => s.id !== id);
-      return {
-        ...prev,
-        sessions: filtered,
-        activeSessionId: prev.activeSessionId === id ? (filtered[0]?.id || null) : prev.activeSessionId,
-      };
-    });
-  }, []);
-
-  const togglePinSession = useCallback((id: string) => {
-    setState((prev) => ({
-      ...prev,
-      sessions: prev.sessions.map((s) => (s.id === id ? { ...s, pinned: !s.pinned, updatedAt: Date.now() } : s)),
-    }));
-  }, []);
-
-  const updateSessionStatus = useCallback((id: string, status: Session['status']) => {
-    setState((prev) => ({
-      ...prev,
-      sessions: prev.sessions.map((s) => (s.id === id ? { ...s, status } : s)),
-    }));
-  }, []);
-
-  const selectSession = useCallback((id: string) => {
-    setState((prev) => {
-      // Clear unread status when selecting
-      const updatedSessions = prev.sessions.map((s) => {
-        if (s.id === id && (s.status === 'completed_unread' || s.status === 'failed_unread')) {
-          return { ...s, status: 'idle' as const };
-        }
-        return s;
-      });
-      return { ...prev, activeSessionId: id, sessions: updatedSessions };
-    });
-  }, []);
-
-  const createContainer = useCallback(() => {
-    const ts = Date.now();
-    const newContainer: Container = {
-      id: `c-${ts.toString(36)}`,
-      name: '新容器',
-      updatedAt: ts,
-    };
-    setState((prev) => ({
-      ...prev,
-      containers: [newContainer, ...prev.containers],
-      activeContainerId: newContainer.id,
-    }));
-    return newContainer.id;
-  }, []);
-
-  const renameContainer = useCallback((id: string, newName: string) => {
-    setState((prev) => ({
-      ...prev,
-      containers: prev.containers.map((c) => (c.id === id ? { ...c, name: newName, updatedAt: Date.now() } : c)),
-    }));
-  }, []);
-
-  const deleteContainer = useCallback((id: string) => {
-    setState((prev) => {
-      const filtered = prev.containers.filter((c) => c.id !== id);
-      return {
-        ...prev,
-        containers: filtered,
-        activeContainerId: prev.activeContainerId === id ? (filtered[0]?.id || null) : prev.activeContainerId,
-      };
-    });
-  }, []);
-
-  const togglePinContainer = useCallback((id: string) => {
-    setState((prev) => ({
-      ...prev,
-      containers: prev.containers.map((c) => (c.id === id ? { ...c, pinned: !c.pinned, updatedAt: Date.now() } : c)),
-    }));
-  }, []);
-
-  const selectContainer = useCallback((id: string) => {
-    setState((prev) => ({ ...prev, activeContainerId: id }));
-  }, []);
-
+  const state = useSyncExternalStore(workspaceStore.subscribe, workspaceStore.getSnapshot);
   return {
     ...state,
-    createSession,
-    renameSession,
-    deleteSession,
-    togglePinSession,
-    updateSessionStatus,
-    selectSession,
-    createContainer,
-    renameContainer,
-    deleteContainer,
-    togglePinContainer,
-    selectContainer,
+    createSession: workspaceStore.createSession,
+    renameSession: workspaceStore.renameSession,
+    deleteSession: workspaceStore.deleteSession,
+    togglePinSession: workspaceStore.togglePinSession,
+    updateSessionStatus: workspaceStore.updateSessionStatus,
+    selectSession: workspaceStore.selectSession,
+    createContainer: workspaceStore.createContainer,
+    renameContainer: workspaceStore.renameContainer,
+    deleteContainer: workspaceStore.deleteContainer,
+    togglePinContainer: workspaceStore.togglePinContainer,
+    selectContainer: workspaceStore.selectContainer,
   };
 }

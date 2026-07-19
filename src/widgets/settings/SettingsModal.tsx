@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
+import { listModels } from '@/shared/api/models';
+import { SUPPORTED_LOCALES, type Locale, useI18n } from '@/shared/i18n';
 
 interface SettingsModalProps {
   initialApiKey: string;
   initialBaseUrl: string;
   initialModel: string;
+  locale: Locale;
+  onLocaleChange: (locale: Locale) => Promise<void>;
   onSave: (apiKey: string, baseUrl: string, model: string) => void;
   onClose: () => void;
 }
@@ -25,7 +29,8 @@ const overlayStyle: React.CSSProperties = {
 
 // Using CSS classes from index.css instead of inline styles for responsive width
 
-const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBaseUrl, initialModel, onSave, onClose }) => {
+const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBaseUrl, initialModel, locale, onLocaleChange, onSave, onClose }) => {
+  const { t } = useI18n();
   const [apiKey, setApiKey] = useState(initialApiKey);
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [model, setModel] = useState(initialModel);
@@ -36,27 +41,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
     if (!apiKey || !baseUrl) return;
     setIsFetchingModels(true);
     try {
-      const url = `${baseUrl.replace(/\/$/, '')}/models`;
-      const res = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`
-        }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.data && Array.isArray(data.data)) {
-          const ids = data.data.map((m: any) => m.id);
-          setModelsList(ids);
-          if (ids.length > 0 && !ids.includes(model)) {
-            setModel(ids[0]);
-          }
-        }
-      } else {
-        alert('获取模型列表失败');
+      const ids = await listModels(apiKey, baseUrl);
+      setModelsList(ids);
+      if (ids.length > 0 && !ids.includes(model)) {
+        setModel(ids[0]);
       }
-    } catch (err) {
-      console.error(err);
-      alert('获取模型时出错');
+    } catch (error) {
+      console.error(error);
+      alert(t('settings.fetchModelsError'));
     } finally {
       setIsFetchingModels(false);
     }
@@ -70,11 +62,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
       }
     }}>
       <div className="settings-modal-content">
-        <h2 style={{ fontSize: '24px', fontWeight: 600 }}>配置</h2>
+        <h2 style={{ fontSize: '24px', fontWeight: 600 }}>{t('settings.title')}</h2>
         
         <div>
           <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
-            接口地址 (OpenAI Compatible)
+            {t('settings.baseUrl')}
           </label>
           <input 
             className="input-field"
@@ -87,7 +79,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
 
         <div>
           <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
-            API 密钥
+            {t('settings.apiKey')}
           </label>
           <input 
             className="input-field"
@@ -101,7 +93,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
 
         <div>
           <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
-            模型
+            {t('settings.model')}
           </label>
           <div style={{ display: 'flex', gap: '8px' }}>
             {modelsList.length > 0 ? (
@@ -130,9 +122,18 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
               className="btn btn-secondary"
               style={{ whiteSpace: 'nowrap' }}
             >
-              {isFetchingModels ? '获取中...' : '获取模型'}
+              {isFetchingModels ? t('settings.fetchingModels') : t('settings.fetchModels')}
             </button>
           </div>
+        </div>
+
+        <div>
+          <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
+            {t('settings.language')}
+          </label>
+          <select className="input-field" style={{ width: '100%' }} value={locale} onChange={(event) => { void onLocaleChange(event.target.value as Locale); }}>
+            {SUPPORTED_LOCALES.map((supportedLocale) => <option key={supportedLocale} value={supportedLocale}>{supportedLocale}</option>)}
+          </select>
         </div>
 
         <button 
@@ -141,7 +142,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
           className="btn btn-primary"
           style={{ width: '100%', marginTop: '10px' }}
         >
-          保存并继续
+          {t('common.save')}
         </button>
       </div>
     </div>

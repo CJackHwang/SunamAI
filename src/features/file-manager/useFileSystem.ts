@@ -1,294 +1,131 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { WebContainer } from '@webcontainer/api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { WebContainer } from '@webcontainer/api';
+import type { FileEntry } from '@/entities/file/types';
+import { mapWithConcurrency } from '@/shared/lib/async';
+import { isSafeEntryName } from './fileUtils';
 
-export interface FileEntry {
-  name: string;
-  isDirectory: boolean;
-  /** Approximate size in bytes (0 for directories) */
-  size: number;
+export type { FileEntry } from '@/entities/file/types';
+
+const SIZE_CONCURRENCY = 8;
+
+function joinPath(base: string, name: string): string {
+  return base === '/' ? `/${name}` : `${base}/${name}`;
 }
 
-/**
- * Hook that wraps WebContainer's filesystem API with convenient operations.
- * All paths are absolute (e.g. '/src/index.ts').
- */
-export function useFileSystem(wc: WebContainer | null, rootDir: string = '/') {
+function isWithinRoot(path: string, rootDir: string): boolean {
+  return rootDir === '/' || path === rootDir || path.startsWith(`${rootDir}/`);
+}
+
+async function copyDirRecursive(wc: WebContainer, source: string, destination: string): Promise<void> {
+  await wc.fs.mkdir(destination, { recursive: true });
+  const entries = await wc.fs.readdir(source, { withFileTypes: true });
+  await Promise.all(entries.map(async (entry) => {
+    const sourcePath = joinPath(source, entry.name);
+    const destinationPath = joinPath(destination, entry.name);
+    if (entry.isDirectory()) await copyDirRecursive(wc, sourcePath, destinationPath);
+    else await wc.fs.writeFile(destinationPath, await wc.fs.readFile(sourcePath));
+  }));
+}
+
+async function movePath(wc: WebContainer, source: string, destination: string): Promise<void> {
+  try {
+    await wc.fs.rename(source, destination);
+  } catch {
+    const entries = await wc.fs.readdir(source.substring(0, source.lastIndexOf('/')) || '/', { withFileTypes: true });
+    const entry = entries.find((item) => item.name === source.split('/').at(-1));
+    if (entry?.isDirectory()) await copyDirRecursive(wc, source, destination);
+    else await wc.fs.writeFile(destination, await wc.fs.readFile(source));
+    await wc.fs.rm(source, { recursive: true });
+  }
+}
+
+/** A root-bounded, watched filesystem facade around WebContainer's API. */
+export function useFileSystem(wc: WebContainer | null, rootDir = '/') {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [currentPath, setCurrentPath] = useState(rootDir);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const currentPathRef = useRef(currentPath);
+  const sizeCacheRef = useRef(new Map<string, number>());
   currentPathRef.current = currentPath;
 
-  /** Join path segments cleanly */
-  const joinPath = (base: string, name: string): string => {
-    if (base === '/') return `/${name}`;
-    return `${base}/${name}`;
-  };
-
-  /** Navigate to a directory and list its contents */
-  const navigateTo = useCallback(async (dirPath: string) => {
+  const navigateTo = useCallback(async (directory: string) => {
     if (!wc) return;
+    if (!isWithinRoot(directory, rootDir)) {
+      setError('Cannot navigate outside the container root');
+      return;
+    }
     setIsLoading(true);
     setError(null);
-
     try {
-      const rawEntries = await wc.fs.readdir(dirPath, { withFileTypes: true });
-      const fileEntries: FileEntry[] = [];
-
-      for (const entry of rawEntries) {
-        const isDir = entry.isDirectory();
-        let size = 0;
-
-        if (!isDir) {
-          try {
-            const content = await wc.fs.readFile(joinPath(dirPath, entry.name), 'utf-8');
-            size = new Blob([content]).size;
-          } catch {
-            // Binary or unreadable — estimate as 0
-          }
+      const rawEntries = await wc.fs.readdir(directory, { withFileTypes: true });
+      const listed = await mapWithConcurrency(rawEntries, SIZE_CONCURRENCY, async (entry): Promise<FileEntry> => {
+        const path = joinPath(directory, entry.name);
+        if (entry.isDirectory()) return { name: entry.name, isDirectory: true, size: 0 };
+        const cachedSize = sizeCacheRef.current.get(path);
+        if (cachedSize !== undefined) return { name: entry.name, isDirectory: false, size: cachedSize };
+        try {
+          const content = await wc.fs.readFile(path);
+          const size = content.byteLength;
+          sizeCacheRef.current.set(path, size);
+          return { name: entry.name, isDirectory: false, size };
+        } catch {
+          return { name: entry.name, isDirectory: false, size: 0 };
         }
-
-        fileEntries.push({
-          name: entry.name,
-          isDirectory: isDir,
-          size,
-        });
-      }
-
-      // Sort: directories first, then alphabetically
-      fileEntries.sort((a, b) => {
-        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-        return a.name.localeCompare(b.name);
       });
-
-      setEntries(fileEntries);
-      setCurrentPath(dirPath);
-    } catch (err: any) {
-      const errMsg = err?.message || String(err);
-      if (errMsg.includes('ENOENT') && dirPath !== '/') {
-        // If current directory was deleted, fallback to parent
-        const parent = dirPath.substring(0, dirPath.lastIndexOf('/')) || '/';
-        setTimeout(() => navigateTo(parent), 0);
+      listed.sort((left, right) => left.isDirectory !== right.isDirectory ? (left.isDirectory ? -1 : 1) : left.name.localeCompare(right.name));
+      setEntries(listed);
+      setCurrentPath(directory);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : String(caught);
+      if (message.includes('ENOENT') && directory !== rootDir) {
+        const parent = directory.substring(0, directory.lastIndexOf('/')) || rootDir;
+        queueMicrotask(() => { void navigateTo(parent); });
       } else {
-        setError(`Failed to read directory: ${err}`);
         setEntries([]);
+        setError(`Failed to read directory: ${message}`);
       }
     } finally {
       setIsLoading(false);
     }
-  }, [wc]);
+  }, [rootDir, wc]);
+
+  useEffect(() => { if (wc) { setCurrentPath(rootDir); void navigateTo(rootDir); } }, [navigateTo, rootDir, wc]);
+  const refresh = useCallback(() => { void navigateTo(currentPathRef.current); }, [navigateTo]);
 
   useEffect(() => {
-    if (wc) {
-      setCurrentPath(rootDir);
-      navigateTo(rootDir);
-    }
-  }, [rootDir, navigateTo, wc]);
+    if (!wc || !currentPath) return;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const watcher = wc.fs.watch(currentPath, () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => { if (currentPathRef.current === currentPath) refresh(); }, 300);
+    });
+    return () => { if (timeoutId) clearTimeout(timeoutId); watcher.close(); };
+  }, [currentPath, refresh, wc]);
 
-  /** Refresh the current directory listing */
-  const refresh = useCallback(() => {
-    navigateTo(currentPathRef.current);
-  }, [navigateTo]);
-
-  /** Watch for file changes in the current directory */
-  useEffect(() => {
-    if (!wc || currentPath === '') return;
-    
-    let watcher: any = null;
-    let timeoutId: ReturnType<typeof setTimeout>;
-
-    try {
-      watcher = wc.fs.watch(currentPath, () => {
-        clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => {
-          if (currentPathRef.current === currentPath) {
-            refresh();
-          }
-        }, 500); // 500ms debounce
-      });
-    } catch (err) {
-      console.warn('Failed to watch directory:', err);
-    }
-
-    return () => {
-      clearTimeout(timeoutId);
-      if (watcher && typeof watcher.close === 'function') {
-        watcher.close();
-      }
-    };
-  }, [wc, currentPath, refresh]);
-
-  /** Go up one directory level */
+  const validate = (name: string) => {
+    if (!isSafeEntryName(name)) throw new Error('Invalid file or directory name');
+  };
+  const run = useCallback(async (operation: () => Promise<void>, fallbackError: string) => {
+    try { await operation(); refresh(); }
+    catch (caught) { setError(`${fallbackError}: ${caught instanceof Error ? caught.message : String(caught)}`); }
+  }, [refresh]);
   const goUp = useCallback(() => {
     if (currentPath === rootDir || currentPath === '/') return;
     const parent = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/';
-    if (!parent.startsWith(rootDir) && rootDir !== '/') {
-      navigateTo(rootDir);
-    } else {
-      navigateTo(parent);
-    }
+    void navigateTo(rootDir !== '/' && !parent.startsWith(rootDir) ? rootDir : parent);
   }, [currentPath, navigateTo, rootDir]);
+  const createFile = useCallback(async (name: string, content = '') => { if (!wc) return; await run(async () => { validate(name); await wc.fs.writeFile(joinPath(currentPathRef.current, name), content); }, 'Failed to create file'); }, [run, wc]);
+  const createDir = useCallback(async (name: string) => { if (!wc) return; await run(async () => { validate(name); await wc.fs.mkdir(joinPath(currentPathRef.current, name), { recursive: true }); }, 'Failed to create directory'); }, [run, wc]);
+  const remove = useCallback(async (name: string) => { if (!wc) return; await run(async () => { validate(name); await wc.fs.rm(joinPath(currentPathRef.current, name), { recursive: true }); }, 'Failed to delete'); }, [run, wc]);
+  const rename = useCallback(async (oldName: string, newName: string) => { if (!wc) return; await run(async () => { validate(oldName); validate(newName); await movePath(wc, joinPath(currentPathRef.current, oldName), joinPath(currentPathRef.current, newName)); }, 'Failed to rename'); }, [run, wc]);
+  const moveFile = useCallback(async (sourceName: string, destinationDir: string) => { if (!wc) return; await run(async () => { validate(sourceName); if (!isWithinRoot(destinationDir, rootDir)) throw new Error('Cannot move outside the container root'); await movePath(wc, joinPath(currentPathRef.current, sourceName), joinPath(destinationDir, sourceName)); }, 'Failed to move'); }, [rootDir, run, wc]);
+  const readFile = useCallback(async (name: string) => { if (!wc) return ''; validate(name); return wc.fs.readFile(joinPath(currentPathRef.current, name), 'utf-8'); }, [wc]);
+  const readFileRaw = useCallback(async (name: string) => { if (!wc) return new Uint8Array(); validate(name); return wc.fs.readFile(joinPath(currentPathRef.current, name)); }, [wc]);
+  const uploadFile = useCallback(async (file: File) => { if (!wc) return; await run(async () => { validate(file.name); await wc.fs.writeFile(joinPath(currentPathRef.current, file.name), new Uint8Array(await file.arrayBuffer())); }, 'Failed to upload'); }, [run, wc]);
+  const uploadFiles = useCallback(async (files: FileList | File[]) => { for (const file of Array.from(files)) await uploadFile(file); }, [uploadFile]);
 
-  /** Create a new file */
-  const createFile = useCallback(async (name: string, content: string = '') => {
-    if (!wc) return;
-    const filePath = joinPath(currentPathRef.current, name);
-    try {
-      await wc.fs.writeFile(filePath, content);
-      refresh();
-    } catch (err) {
-      setError(`Failed to create file: ${err}`);
-    }
-  }, [wc, refresh]);
-
-  /** Create a new directory */
-  const createDir = useCallback(async (name: string) => {
-    if (!wc) return;
-    const dirPath = joinPath(currentPathRef.current, name);
-    try {
-      await wc.fs.mkdir(dirPath, { recursive: true });
-      refresh();
-    } catch (err) {
-      setError(`Failed to create directory: ${err}`);
-    }
-  }, [wc, refresh]);
-
-  /** Delete a file or directory */
-  const remove = useCallback(async (name: string) => {
-    if (!wc) return;
-    const targetPath = joinPath(currentPathRef.current, name);
-    try {
-      await wc.fs.rm(targetPath, { recursive: true });
-      refresh();
-    } catch (err) {
-      setError(`Failed to delete: ${err}`);
-    }
-  }, [wc, refresh]);
-
-  /** Rename a file or directory (read → write → delete) */
-  const rename = useCallback(async (oldName: string, newName: string) => {
-    if (!wc) return;
-    const base = currentPathRef.current;
-    const oldPath = joinPath(base, oldName);
-    const newPath = joinPath(base, newName);
-
-    try {
-      // Check if it's a directory
-      const entries = await wc.fs.readdir(base, { withFileTypes: true });
-      const entry = entries.find(e => e.name === oldName);
-
-      if (entry?.isDirectory()) {
-        // For directories, we need to recursively copy contents
-        await copyDirRecursive(wc, oldPath, newPath);
-        await wc.fs.rm(oldPath, { recursive: true });
-      } else {
-        const content = await wc.fs.readFile(oldPath);
-        await wc.fs.writeFile(newPath, content);
-        await wc.fs.rm(oldPath);
-      }
-      refresh();
-    } catch (err) {
-      setError(`Failed to rename: ${err}`);
-    }
-  }, [wc, refresh]);
-
-  /** Move a file/directory to a new parent directory */
-  const moveFile = useCallback(async (sourceName: string, destDir: string) => {
-    if (!wc) return;
-    const sourcePath = joinPath(currentPathRef.current, sourceName);
-    const destPath = joinPath(destDir, sourceName);
-
-    try {
-      const entries = await wc.fs.readdir(currentPathRef.current, { withFileTypes: true });
-      const entry = entries.find(e => e.name === sourceName);
-
-      if (entry?.isDirectory()) {
-        await copyDirRecursive(wc, sourcePath, destPath);
-        await wc.fs.rm(sourcePath, { recursive: true });
-      } else {
-        const content = await wc.fs.readFile(sourcePath);
-        await wc.fs.writeFile(destPath, content);
-        await wc.fs.rm(sourcePath);
-      }
-      refresh();
-    } catch (err) {
-      setError(`Failed to move file: ${err}`);
-    }
-  }, [wc, refresh]);
-
-  /** Read file content as string */
-  const readFile = useCallback(async (name: string): Promise<string> => {
-    if (!wc) return '';
-    const filePath = joinPath(currentPathRef.current, name);
-    try {
-      return await wc.fs.readFile(filePath, 'utf-8');
-    } catch {
-      throw new Error('Cannot read file (possibly binary)');
-    }
-  }, [wc]);
-
-  /** Read file content as Uint8Array (for binary files) */
-  const readFileRaw = useCallback(async (name: string): Promise<Uint8Array> => {
-    if (!wc) return new Uint8Array();
-    const filePath = joinPath(currentPathRef.current, name);
-    return await wc.fs.readFile(filePath);
-  }, [wc]);
-
-  /** Upload a browser File object into the container */
-  const uploadFile = useCallback(async (file: File) => {
-    if (!wc) return;
-    const filePath = joinPath(currentPathRef.current, file.name);
-    try {
-      const buffer = await file.arrayBuffer();
-      await wc.fs.writeFile(filePath, new Uint8Array(buffer));
-      refresh();
-    } catch (err) {
-      setError(`Failed to upload: ${err}`);
-    }
-  }, [wc, refresh]);
-
-  /** Upload multiple files */
-  const uploadFiles = useCallback(async (files: FileList | File[]) => {
-    for (const file of Array.from(files)) {
-      await uploadFile(file);
-    }
-  }, [uploadFile]);
-
-  return {
-    entries,
-    currentPath,
-    isLoading,
-    error,
-    navigateTo,
-    refresh,
-    goUp,
-    createFile,
-    createDir,
-    remove,
-    rename,
-    moveFile,
-    readFile,
-    readFileRaw,
-    uploadFile,
-    uploadFiles,
-  };
+  return { entries, currentPath, isLoading, error, clearError: () => setError(null), navigateTo, refresh, goUp, createFile, createDir, remove, rename, moveFile, readFile, readFileRaw, uploadFile, uploadFiles };
 }
 
-/** Helper: recursively copy a directory */
-async function copyDirRecursive(wc: WebContainer, src: string, dest: string) {
-  await wc.fs.mkdir(dest, { recursive: true });
-  const entries = await wc.fs.readdir(src, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const srcPath = src === '/' ? `/${entry.name}` : `${src}/${entry.name}`;
-    const destPath = dest === '/' ? `/${entry.name}` : `${dest}/${entry.name}`;
-
-    if (entry.isDirectory()) {
-      await copyDirRecursive(wc, srcPath, destPath);
-    } else {
-      const content = await wc.fs.readFile(srcPath);
-      await wc.fs.writeFile(destPath, content);
-    }
-  }
-}
+export type FileSystemController = ReturnType<typeof useFileSystem>;

@@ -1,41 +1,33 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { WebContainer } from '@webcontainer/api';
 import { Terminal } from '@xterm/xterm';
-import { Loader2, Maximize2, Minimize2, PanelRightClose, Monitor, Terminal as TerminalIcon, Folder, Server, Trash2, StopCircle } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import TerminalView from '../../entities/container/TerminalView.tsx';
 import { getWebContainer } from '../../shared/lib/webcontainer.ts';
-import { saveSnapshot } from '../../shared/lib/persistence.ts';
-import FileManager from '../file-manager/FileManager.tsx';
+import { appendAiTerminalHistory, getAiTerminalHistory } from '@/shared/lib/terminalHistory';
+import { createSnapshotScheduler } from '@/shared/lib/snapshotScheduler';
+import type { AgentRuntime } from '@/shared/contracts/agentRuntime';
+import { useI18n } from '@/shared/i18n';
+import { CollapsedTerminalNav, TerminalTabs } from './TerminalTabs';
+import { ServicesPanel, type ActiveProcess } from './ServicesPanel';
+import type { TerminalLayout, TerminalTab } from './types';
 
-const AI_TERM_HISTORY_KEY = 'sunam_ai_term_history';
-const writeAiHistory = (sessionId: string | null, data: string) => {
-  if (!sessionId) return;
-  const key = `${AI_TERM_HISTORY_KEY}_${sessionId}`;
-  try {
-    const history = localStorage.getItem(key) || '';
-    const newHistory = history + data;
-    localStorage.setItem(key, newHistory.length > 50000 ? newHistory.slice(-50000) : newHistory);
-  } catch(e) {}
-};
+const FileManager = lazy(() => import('../file-manager/FileManager.tsx'));
 
-export interface DualTerminalRef {
-  spawnAiProcess: (command: string, containerId: string) => Promise<string>;
-  getAiProcessStatus: (processId: string) => { isRunning: boolean; output: string } | null;
-  sendAiProcessInput: (processId: string, input: string) => Promise<boolean>;
-  killAiProcess: (processId: string) => void;
-}
+export interface DualTerminalRef extends AgentRuntime {}
 
 interface DualTerminalProps {
   onReady?: () => void;
-  activeTab: 'ai' | 'user' | 'files' | 'services';
-  onTabChange: (tab: 'ai' | 'user' | 'files' | 'services') => void;
-  layoutState?: 'half' | 'full' | 'collapsed';
-  onLayoutChange?: (state: 'half' | 'full' | 'collapsed') => void;
+  activeTab: TerminalTab;
+  onTabChange: (tab: TerminalTab) => void;
+  layoutState?: TerminalLayout;
+  onLayoutChange?: (state: TerminalLayout) => void;
   activeContainerId?: string | null;
   activeSessionId?: string | null;
 }
 
 const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onReady, activeTab, onTabChange, layoutState = 'half', onLayoutChange, activeContainerId, activeSessionId }, ref) => {
+  const { t } = useI18n();
   const aiTermRef = useRef<Terminal | null>(null);
   const userTermRef = useRef<Terminal | null>(null);
   const [isUserTermReady, setIsUserTermReady] = useState(false);
@@ -45,7 +37,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
   const userShellWriterRef = useRef<WritableStreamDefaultWriter<string> | null>(null);
   
   // Track active AI processes and trigger UI updates
-  const activeAiProcesses = useRef(new Map<string, { process: any, output: string, isRunning: boolean, command: string }>());
+  const activeAiProcesses = useRef(new Map<string, ActiveProcess>());
   const [, setProcessVersion] = useState(0);
   const forceUpdateProcesses = () => setProcessVersion(v => v + 1);
 
@@ -152,12 +144,11 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
   useEffect(() => {
     if (!wc || !isBooted) return;
 
-    const interval = setInterval(() => {
-      saveSnapshot(wc);
-    }, 30_000);
+    const scheduler = createSnapshotScheduler(wc);
+    const interval = setInterval(scheduler.schedule, 30_000);
 
     // Also save once when the page is about to unload
-    const handleBeforeUnload = () => { saveSnapshot(wc); };
+    const handleBeforeUnload = () => { scheduler.schedule(); };
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
@@ -183,7 +174,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
     sessionIdRef.current = activeSessionId;
     if (aiTermRef.current && activeSessionId) {
       aiTermRef.current.clear();
-      const history = localStorage.getItem(`${AI_TERM_HISTORY_KEY}_${activeSessionId}`);
+      const history = getAiTerminalHistory(activeSessionId);
       if (history) {
         aiTermRef.current.write(history);
       }
@@ -200,7 +191,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
       if (term) {
         term.writeln(`\r\n[Background Process ${processId}] Admin@Sunam ~ # ${command}`);
       }
-      writeAiHistory(sessionIdRef.current || null, `\r\n[Background Process ${processId}] Admin@Sunam ~ # ${command}\r\n`);
+      appendAiTerminalHistory(sessionIdRef.current || null, `\r\n[Background Process ${processId}] Admin@Sunam ~ # ${command}\r\n`);
 
       const spawnCwd = `/${containerId}`;
       const process = await wc.spawn('jsh', ['-c', command], { env: {}, cwd: spawnCwd });
@@ -218,7 +209,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
           if (term) {
             term.write(data);
           }
-          writeAiHistory(sessionIdRef.current || null, data);
+          appendAiTerminalHistory(sessionIdRef.current || null, data);
         }
       }));
       
@@ -228,7 +219,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
         if (term) {
           term.writeln(`\r\n[Process ${processId} exited with code ${code}]`);
         }
-        writeAiHistory(sessionIdRef.current || null, `\r\n[Process ${processId} exited with code ${code}]\r\n`);
+        appendAiTerminalHistory(sessionIdRef.current || null, `\r\n[Process ${processId} exited with code ${code}]\r\n`);
       });
       
       return processId;
@@ -260,227 +251,34 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
         if (term) {
           term.writeln(`\r\n[Process ${processId} was killed]`);
         }
-        writeAiHistory(sessionIdRef.current || null, `\r\n[Process ${processId} was killed]\r\n`);
+        appendAiTerminalHistory(sessionIdRef.current || null, `\r\n[Process ${processId} was killed]\r\n`);
       }
     }
   }));
 
 
-  return (
-    <div style={{ display: 'flex', flexDirection: layoutState === 'collapsed' ? 'row' : 'column', height: '100%', overflow: 'hidden' }}>
-      {layoutState !== 'collapsed' ? (
-        <div className="dual-terminal-tabs" style={{ 
-          display: 'flex', 
-          gap: '8px', 
-          padding: '0 16px', 
-          height: '54px',
-          borderBottom: '1px solid var(--color-border)', 
-          alignItems: 'center', 
-          overflowX: 'auto', 
-          flexShrink: 0 
-        }}>
-          <button className={`terminal-tab-btn ${activeTab === 'ai' ? 'active' : ''}`} onClick={() => onTabChange('ai')}>
-            <Monitor size={18} className="show-on-narrow" />
-            <span className="hide-on-narrow">Sunam的电脑</span>
-          </button>
-          <button className={`terminal-tab-btn ${activeTab === 'user' ? 'active' : ''}`} onClick={() => onTabChange('user')}>
-            <TerminalIcon size={18} className="show-on-narrow" />
-            <span className="hide-on-narrow">终端</span>
-          </button>
-          <button className={`terminal-tab-btn ${activeTab === 'files' ? 'active' : ''}`} onClick={() => onTabChange('files')}>
-            <Folder size={16} className="show-on-narrow" />
-            <span className="hide-on-narrow">文件</span>
-          </button>
-          <button className={`terminal-tab-btn ${activeTab === 'services' ? 'active' : ''}`} onClick={() => onTabChange('services')}>
-            <Server size={16} className="show-on-narrow" />
-            <span className="hide-on-narrow">服务</span>
-          </button>
-          <div style={{ flex: 1 }}></div>
-          {onLayoutChange && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <div style={{ width: '1px', height: '16px', backgroundColor: 'var(--color-border)', margin: '0 12px 0 8px' }}></div>
-              {layoutState === 'half' ? (
-                <button 
-                  className="desktop-only-btn terminal-icon-btn" 
-                  onClick={() => onLayoutChange('full')}
-                  title="全屏模式"
-                >
-                  <Maximize2 size={18} />
-                </button>
-              ) : (
-                <button 
-                  className="desktop-only-btn terminal-icon-btn" 
-                  onClick={() => onLayoutChange('half')}
-                  title="半屏模式"
-                >
-                  <Minimize2 size={18} />
-                </button>
-              )}
-              <button 
-                className="desktop-only-btn terminal-icon-btn" 
-                onClick={() => onLayoutChange('collapsed')}
-                title="收起"
-              >
-                <PanelRightClose size={18} />
-              </button>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="desktop-only-btn" style={{ display: 'flex', flexDirection: 'column', width: '56px', height: '100%', alignItems: 'center', paddingTop: '16px', gap: '12px', backgroundColor: 'var(--color-surface)' }}>
-           <button className={`right-sidebar-btn ${activeTab === 'ai' ? 'active' : ''}`} onClick={() => { onTabChange('ai'); onLayoutChange?.('half'); }} title="Sunam的电脑">
-             <Monitor size={20} />
-           </button>
-           <button className={`right-sidebar-btn ${activeTab === 'user' ? 'active' : ''}`} onClick={() => { onTabChange('user'); onLayoutChange?.('half'); }} title="终端">
-             <TerminalIcon size={20} />
-           </button>
-           <button className={`right-sidebar-btn ${activeTab === 'files' ? 'active' : ''}`} onClick={() => { onTabChange('files'); onLayoutChange?.('half'); }} title="文件">
-             <Folder size={20} />
-           </button>
-           <button className={`right-sidebar-btn ${activeTab === 'services' ? 'active' : ''}`} onClick={() => { onTabChange('services'); onLayoutChange?.('half'); }} title="服务">
-             <Server size={20} />
-           </button>
-        </div>
-      )}
-      <div style={{ flex: 1, padding: activeTab === 'files' ? '0' : '16px', position: 'relative', overflow: 'hidden', display: layoutState === 'collapsed' ? 'none' : 'block' }}>
+  const killProcessFromServices = (processId: string) => {
+    const process = activeAiProcesses.current.get(processId);
+    if (!process || !process.isRunning) return;
+    process.process.kill();
+    process.isRunning = false;
+    forceUpdateProcesses();
+    aiTermRef.current?.writeln(`\r\n[Process ${processId} was killed by user]`);
+    appendAiTerminalHistory(sessionIdRef.current ?? null, `\r\n[Process ${processId} was killed by user]\r\n`);
+  };
 
-      {activeTab === 'services' && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px', backgroundColor: 'var(--color-bg)', borderRadius: 'var(--radius-large)', display: 'flex', flexDirection: 'column', gap: '24px', height: '100%' }}>
-          
-          <div className="services-section">
-            <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--color-success)' }}></div>
-              内网穿透端口
-            </h3>
-            {activePorts.length === 0 ? (
-              <div style={{ fontSize: '13px', color: 'var(--color-text-secondary)', padding: '16px', textAlign: 'center' }}>
-                暂无已映射的端口。请在终端或后台启动服务（如 npm run dev）。
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {activePorts.map((p, idx) => (
-                  <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', border: '1px solid var(--color-border)', borderRadius: '6px', backgroundColor: 'var(--color-surface)', gap: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: '14px', fontWeight: 500, color: 'var(--color-text)', whiteSpace: 'nowrap' }}>端口 {p.port}</div>
-                      <a
-                        href={p.url}
-                        target="_blank"
-                        rel="opener"
-                        style={{ fontSize: '13px', color: 'var(--color-primary)', textDecoration: 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                        title={p.url}
-                      >
-                        {p.url} ↗
-                      </a>
-                    </div>
-                    <button 
-                      onClick={() => setActivePorts(prev => prev.filter(x => x.port !== p.port))}
-                      style={{ background: 'none', border: 'none', color: '#ff4d4f', cursor: 'pointer', padding: '6px', borderRadius: '4px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      onMouseOver={e => e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'}
-                      onMouseOut={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                      title="清除记录"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="services-section">
-            <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--color-primary)' }}></div>
-              后台进程管理
-            </h3>
-            {Array.from(activeAiProcesses.current.entries()).filter(([_, state]) => state.isRunning).length === 0 ? (
-              <div style={{ fontSize: '13px', color: 'var(--color-text-secondary)', padding: '16px', textAlign: 'center' }}>
-                暂无运行中的后台进程。
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {Array.from(activeAiProcesses.current.entries()).map(([pid, state]) => {
-                  if (!state.isRunning) return null;
-                  return (
-                    <div key={pid} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', border: '1px solid var(--color-border)', borderRadius: '6px', backgroundColor: 'var(--color-surface)', gap: '12px' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden', minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontFamily: 'monospace' }}>{pid}</div>
-                        <div style={{ fontSize: '14px', color: 'var(--color-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`$ ${state.command}`}>
-                          $ {state.command}
-                        </div>
-                      </div>
-                      <button 
-                        onClick={() => {
-                          state.process.kill();
-                          state.isRunning = false;
-                          forceUpdateProcesses();
-                          if (aiTermRef.current) aiTermRef.current.writeln(`\r\n[Process ${pid} was killed by user]`);
-                          writeAiHistory(sessionIdRef.current || null, `\r\n[Process ${pid} was killed by user]\r\n`);
-                        }}
-                        style={{ flexShrink: 0, background: 'none', border: 'none', color: '#ff4d4f', cursor: 'pointer', padding: '6px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        onMouseOver={e => e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'}
-                        onMouseOut={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                        title="强制终止"
-                      >
-                        <StopCircle size={18} />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-        </div>
-      )}
-
-        {!isBooted && (
-          <div style={{
-            position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--color-surface)', zIndex: 10
-          }}>
-            <Loader2 className="lucide-spin" style={{ width: '32px', height: '32px', color: 'var(--color-text-secondary)', animation: 'spin 2s linear infinite' }} />
-            <span style={{ marginTop: '16px', color: 'var(--color-text-secondary)', fontSize: '14px' }}>Booting container...</span>
-            <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
-          </div>
-        )}
-
-        {/* We use absolute positioning with opacity to hide terminals instead of display:none. 
-            This completely prevents xterm.js from losing its rendering context or getting 0x0 dimensions! */}
-        <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-          <div style={{
-            position: 'absolute', inset: 0,
-            opacity: activeTab === 'ai' ? 1 : 0,
-            pointerEvents: activeTab === 'ai' ? 'auto' : 'none',
-            zIndex: activeTab === 'ai' ? 2 : 1
-          }}>
-            <TerminalView readOnly={true} onTerminalReady={(term) => { 
-              aiTermRef.current = term; 
-              if (activeSessionId) {
-                const history = localStorage.getItem(`${AI_TERM_HISTORY_KEY}_${activeSessionId}`);
-                if (history) term.write(history);
-              }
-            }} />
-          </div>
-          <div style={{
-            position: 'absolute', inset: 0,
-            opacity: activeTab === 'user' ? 1 : 0,
-            pointerEvents: activeTab === 'user' ? 'auto' : 'none',
-            zIndex: activeTab === 'user' ? 2 : 1
-          }}>
-            <TerminalView readOnly={false} onTerminalReady={(term) => { userTermRef.current = term; setIsUserTermReady(true); }} />
-          </div>
-          <div style={{
-            position: 'absolute', inset: 0,
-            opacity: activeTab === 'files' ? 1 : 0,
-            pointerEvents: activeTab === 'files' ? 'auto' : 'none',
-            zIndex: activeTab === 'files' ? 2 : 1
-          }}>
-            {isBooted && <FileManager wc={wc} rootDir={readyContainerId ? `/${readyContainerId}` : '/'} />}
-          </div>
-        </div>
+  return <div style={{ display: 'flex', flexDirection: layoutState === 'collapsed' ? 'row' : 'column', height: '100%', overflow: 'hidden' }}>
+    {layoutState === 'collapsed' ? <CollapsedTerminalNav activeTab={activeTab} onTabChange={onTabChange} onExpand={() => onLayoutChange?.('half')} /> : <TerminalTabs activeTab={activeTab} onTabChange={onTabChange} layoutState={layoutState} onLayoutChange={onLayoutChange} />}
+    <div style={{ flex: 1, padding: activeTab === 'files' ? '0' : '16px', position: 'relative', overflow: 'hidden', display: layoutState === 'collapsed' ? 'none' : 'block' }}>
+      {activeTab === 'services' && <ServicesPanel ports={activePorts} processes={activeAiProcesses.current} onClearPort={(port) => setActivePorts((ports) => ports.filter((item) => item.port !== port))} onKillProcess={killProcessFromServices} />}
+      {!isBooted && <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--color-surface)', zIndex: 10 }}><Loader2 className="lucide-spin" style={{ width: '32px', height: '32px', color: 'var(--color-text-secondary)', animation: 'spin 2s linear infinite' }} /><span style={{ marginTop: '16px', color: 'var(--color-text-secondary)', fontSize: '14px' }}>{t('terminal.booting')}</span></div>}
+      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+        <div style={{ position: 'absolute', inset: 0, opacity: activeTab === 'ai' ? 1 : 0, pointerEvents: activeTab === 'ai' ? 'auto' : 'none', zIndex: activeTab === 'ai' ? 2 : 1 }}><TerminalView readOnly onTerminalReady={(term) => { aiTermRef.current = term; const history = getAiTerminalHistory(activeSessionId ?? null); if (history) term.write(history); }} /></div>
+        <div style={{ position: 'absolute', inset: 0, opacity: activeTab === 'user' ? 1 : 0, pointerEvents: activeTab === 'user' ? 'auto' : 'none', zIndex: activeTab === 'user' ? 2 : 1 }}><TerminalView readOnly={false} onTerminalReady={(term) => { userTermRef.current = term; setIsUserTermReady(true); }} /></div>
+        <div style={{ position: 'absolute', inset: 0, opacity: activeTab === 'files' ? 1 : 0, pointerEvents: activeTab === 'files' ? 'auto' : 'none', zIndex: activeTab === 'files' ? 2 : 1 }}>{isBooted && <Suspense fallback={null}><FileManager wc={wc} rootDir={readyContainerId ? `/${readyContainerId}` : '/'} /></Suspense>}</div>
       </div>
     </div>
-  );
+  </div>;
 });
 
 export default DualTerminal;
