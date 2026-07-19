@@ -24,7 +24,7 @@ export function RunBoard({ run, events, liveOutput, onResume }: RunBoardProps) {
   const tools = runEvents.filter((event) => event.kind === 'tool_finished').slice(-6);
   const completedCount = run.task.plan.filter((item) => item.status === 'completed').length;
   const icon = run.phase === 'failed' ? <XCircle size={16} /> : run.phase === 'completed' ? <CheckCircle2 size={16} /> : run.phase === 'interrupted' ? <Circle size={16} /> : <Activity size={16} />;
-  return <section className={`task-list-popover motion-fade-in ${isExpanded ? 'expanded' : ''}`}>
+  return <section className={`task-list-popover glass-input motion-fade-in ${isExpanded ? 'expanded' : ''}`}>
     <button type="button" className="task-list-summary" aria-expanded={isExpanded} onClick={() => setIsExpanded((expanded) => !expanded)}>
       <span className="task-list-icon">{icon}</span>
       <strong>{t('agent.runBoard')}</strong>

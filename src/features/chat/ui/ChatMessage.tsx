@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Terminal } from 'lucide-react';
+import { FileText, Terminal } from 'lucide-react';
 import type { Message } from '@/entities/message/types';
 import MarkdownRenderer from '@/shared/ui/MarkdownRenderer';
 import { useI18n } from '@/shared/i18n';
@@ -21,7 +21,7 @@ export const ChatMessage = memo(function ChatMessage({ message, toolOutputs }: C
     }}>
       {message.reasoning_content && <ThinkingProcess content={message.reasoning_content} />}
       {message.content.trim() && message.role !== 'user' && <div style={{ fontSize: '14.5px', marginBottom: message.tool_calls ? '12px' : '0' }}><RenderErrorBoundary label={t('common.error')}><MarkdownRenderer content={message.content} /></RenderErrorBoundary></div>}
-      {message.role === 'user' && !message.tool_calls && <div style={{ fontSize: '14.5px' }}>{message.content}</div>}
+      {message.role === 'user' && !message.tool_calls && <><div style={{ fontSize: '14.5px' }}>{message._ui_displayContent ?? message.content}</div>{message._ui_attachments && message._ui_attachments.length > 0 && <div className="message-attachments">{message._ui_attachments.map((attachment, index) => <span key={`${attachment.name}-${index}`}><FileText size={13} />{attachment.name}</span>)}</div>}</>}
       {message.tool_calls && <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>{message.tool_calls.map((call) => {
         const output = toolOutputs.find((candidate) => candidate.tool_call_id === call.id);
         if (call.function.name === 'ask_user') return <div key={call.id} style={{ fontSize: '14.5px' }}><RenderErrorBoundary label={t('common.error')}><MarkdownRenderer content={extractChatContent(call.function.arguments)} /></RenderErrorBoundary></div>;

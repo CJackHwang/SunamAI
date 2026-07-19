@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AgentEventEmitter } from '@/features/agent-core/events';
-import { projectLatestTask, projectMessages, projectProgress, projectRunEvents } from '@/features/agent-core/projector';
+import { projectLatestTask, projectMessages, projectProgress, projectRunEvents, sanitizeToolTranscript } from '@/features/agent-core/projector';
 import type { AgentEvent, AgentRun, TaskContract } from '@/features/agent-core/types';
 
 const task: TaskContract = { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: false, plan: [], evidence: [], changedWorkspace: false, verified: false, verificationEvidence: [] };
@@ -29,5 +29,19 @@ describe('agent event projections', () => {
     await emitter.start(run);
     await emitter.emit('progress_reported', { message: 'next' });
     expect(emitted.map((event) => event.id)).toEqual(['r-1:4', 'r-1:5']);
+  });
+
+  it('drops interrupted and orphaned tool protocol fragments from model history', () => {
+    const assistant = { role: 'assistant' as const, content: '', tool_calls: [
+      { id: 'one', type: 'function' as const, function: { name: 'a', arguments: '{}' } },
+      { id: 'two', type: 'function' as const, function: { name: 'b', arguments: '{}' } },
+    ] };
+    const partialTool = { role: 'tool' as const, content: 'one result', tool_call_id: 'one' };
+    const nextUser = { role: 'user' as const, content: 'continue' };
+    expect(sanitizeToolTranscript([assistant, partialTool, nextUser])).toEqual([nextUser]);
+
+    const secondTool = { role: 'tool' as const, content: 'two result', tool_call_id: 'two' };
+    expect(sanitizeToolTranscript([assistant, partialTool, secondTool, nextUser])).toEqual([assistant, partialTool, secondTool, nextUser]);
+    expect(sanitizeToolTranscript([partialTool, nextUser])).toEqual([nextUser]);
   });
 });

@@ -1,4 +1,4 @@
-import type { Message, ToolCall } from '@/entities/message/types';
+import type { ChatAttachment, Message, ToolCall } from '@/entities/message/types';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 import type { SunamModel } from '@/shared/config/models';
 import { ContextComposer } from './context';
@@ -6,6 +6,7 @@ import { AgentEventEmitter } from './events';
 import type { AgentEventStore } from './eventStore';
 import type { AgentModelClient } from './modelClient';
 import { buildAgentSystemPrompt, createChaosContract } from './prompt';
+import { sanitizeToolTranscript } from './projector';
 import { AgentToolRegistry, type ParsedToolCall, type ToolExecutionContext } from './tools';
 import type { AgentBudget, AgentEvent, AgentPhase, AgentRun, AgentToolResult, TaskContract } from './types';
 
@@ -56,6 +57,7 @@ export interface AgentEngineOptions {
   persona: SunamModel;
   model: string;
   input: string;
+  attachments?: ChatAttachment[];
   initialMessages: Message[];
   client: AgentModelClient;
   runtime: AgentWorkspaceRuntime;
@@ -160,7 +162,7 @@ export class AgentEngine {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        return await this.options.client.complete(messages, {
+        return await this.options.client.complete(sanitizeToolTranscript(messages), {
           signal: this.options.signal,
           tools: this.registry.getApiDefinitions(),
           onDelta: (content) => { void this.emitter.emit('assistant_delta', { content, transient: true }); },
@@ -248,7 +250,9 @@ export class AgentEngine {
       await this.options.runtime.ensureContainer(this.options.containerId);
       await this.options.store.saveRun(this.run);
       await this.emitter.start(this.run);
-      await this.emitMessage({ role: 'user', content: this.options.input });
+      const attachments = this.options.attachments ?? [];
+      const modelInput = attachments.length === 0 ? this.options.input : `${this.options.input}\n\nChat attachments (context only; these are not workspace files):\n${JSON.stringify(attachments.map(({ name, size, content }) => ({ name, size, content })))}`;
+      await this.emitMessage({ role: 'user', content: modelInput, _ui_displayContent: this.options.input, _ui_attachments: attachments });
       await this.phase(isNonTrivial(this.options.input) ? 'planning' : 'acting');
       let emptyResponses = 0;
       let noProgressTurns = 0;

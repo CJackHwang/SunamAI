@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { mergeSessionRecords } from '@/features/agent-core/useAgentV2';
+import { mergeSessionRecords, recoveredSessionStatus } from '@/features/agent-core/useAgentV2';
+import type { AgentRun } from '@/features/agent-core/types';
 
 describe('useAgentV2 session isolation', () => {
   it('retains concurrent records for the active session without leaking the previous session', () => {
@@ -13,5 +14,17 @@ describe('useAgentV2 session isolation', () => {
       { id: 'new-persisted', sessionId: 's-new', value: 1 },
       { id: 'new-live', sessionId: 's-new', value: 3 },
     ]);
+  });
+
+  it('clears a stale running badge when the newest recovered run is interrupted', () => {
+    const run = (id: string, phase: AgentRun['phase'], updatedAt: number): AgentRun => ({
+      id, phase, updatedAt, sessionId: 's-1', containerId: 'c-1', model: 'm', persona: 'Sunam 1.14 Homo', createdAt: 1,
+      task: { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: false, plan: [], evidence: [], changedWorkspace: false, verified: false, verificationEvidence: [] },
+      chaos: { persona: 'Sunam 1.14 Homo', ritual: '', privateGoods: '', styleDirective: '', invariants: [] },
+      budget: { maxModelTurns: 1, maxToolCalls: 1, maxDurationMs: 1 }, modelTurns: 0, toolCalls: 0, summary: '',
+    });
+
+    expect(recoveredSessionStatus([run('old', 'completed', 1), run('latest', 'interrupted', 2)])).toBe('idle');
+    expect(recoveredSessionStatus([run('active', 'acting', 3)])).toBeNull();
   });
 });

@@ -254,15 +254,131 @@ button {
   z-index: 5;
 }
 
+.chat-composer-upper-row {
+  display: flex;
+  align-items: flex-end;
+  width: calc(100% - 56px);
+  align-self: flex-start;
+  pointer-events: auto;
+}
+
+.chat-task-list-slot {
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-attach-btn {
+  position: absolute;
+  right: 24px;
+  bottom: 68px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  flex: 0 0 44px;
+  border-radius: 50%;
+  color: var(--color-text);
+}
+
+.chat-scroll-bottom-btn {
+  position: absolute;
+  right: 24px;
+  bottom: 124px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  pointer-events: auto;
+  border-radius: 50%;
+  color: var(--color-text);
+}
+
+.chat-attach-btn:disabled {
+  color: var(--color-text-secondary);
+  cursor: not-allowed;
+}
+
+.chat-attachment-tray,
+.chat-attachment-error {
+  width: calc(100% - 56px);
+  align-self: flex-start;
+  pointer-events: auto;
+}
+
+.chat-attachment-tray {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 6px 8px;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: 12px;
+  background-color: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  font-size: 12px;
+}
+
+.chat-attachment-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-attachment-chip small {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+}
+
+.chat-attachment-chip button {
+  display: grid;
+  place-items: center;
+  padding: 2px;
+  flex: 0 0 auto;
+}
+
+.chat-attachment-error {
+  color: #b91c1c;
+  font-size: 12px;
+}
+
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.message-attachments span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  padding: 4px 7px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 9px;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .task-list-popover {
   width: 100%;
   pointer-events: auto;
   color: var(--color-text);
-  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
-  border: 1px solid var(--color-border);
-  border-radius: 18px;
-  box-shadow: var(--elevation-2);
-  backdrop-filter: blur(18px);
+  border-radius: 22px;
   overflow: hidden;
 }
 
@@ -271,13 +387,13 @@ button {
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 42px;
-  padding: 8px 12px;
+  min-height: 44px;
+  padding: 8px 20px;
   text-align: left;
 }
 
 .task-list-summary:hover {
-  background: var(--color-bg);
+  background: color-mix(in srgb, var(--color-surface) 42%, transparent);
 }
 
 .task-list-icon {
@@ -324,7 +440,7 @@ button {
 .task-list-scroll {
   min-height: 0;
   max-height: min(42dvh, 360px);
-  padding: 0 12px;
+  padding: 0 20px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -332,9 +448,13 @@ button {
   font-size: 12px;
 }
 
+.task-list-scroll > * {
+  flex: 0 0 auto;
+}
+
 .task-list-popover.expanded .task-list-scroll {
   padding-block: 4px 12px;
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
 }
 
 .task-list-objective {
@@ -511,6 +631,16 @@ button {
 
   .chat-composer-shell {
     padding: 10px 12px;
+  }
+
+  .chat-attach-btn {
+    right: 12px;
+    bottom: 66px;
+  }
+
+  .chat-scroll-bottom-btn {
+    right: 12px;
+    bottom: 122px;
   }
 
   .task-list-phase {

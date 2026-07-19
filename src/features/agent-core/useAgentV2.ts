@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Message } from '@/entities/message/types';
+import type { ChatAttachment, Message } from '@/entities/message/types';
 import type { SessionStatus } from '@/entities/workspace/types';
 import type { SunamModel } from '@/shared/config/models';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
@@ -15,6 +15,11 @@ export function mergeSessionRecords<T extends { id: string; sessionId: string }>
   const byId = new Map(persisted.map((item) => [item.id, item]));
   current.filter((item) => item.sessionId === sessionId).forEach((item) => byId.set(item.id, item));
   return Array.from(byId.values());
+}
+
+export function recoveredSessionStatus(runs: AgentRun[]): SessionStatus | null {
+  const latest = [...runs].sort((left, right) => right.updatedAt - left.updatedAt)[0];
+  return latest && (latest.phase === 'interrupted' || latest.phase === 'awaiting_user') ? 'idle' : null;
 }
 
 function toSessionStatus(run: AgentRun): SessionStatus {
@@ -59,6 +64,8 @@ export function useAgentV2(
         : await store.loadSessionRuns(activeSessionId);
       recoveredSessionsRef.current.add(activeSessionId);
       if (mounted && sessionRef.current === activeSessionId) {
+        const recoveredStatus = recoveredSessionStatus(restoredRuns);
+        if (recoveredStatus) updateSessionStatus(activeSessionId, recoveredStatus);
         setEvents((previous) => {
           // Loading is asynchronous, so retain events appended while this same
           // session was loading. Never merge the previously selected session.
@@ -71,7 +78,7 @@ export function useAgentV2(
       }
     })();
     return () => { mounted = false; };
-  }, [activeSessionId]);
+  }, [activeSessionId, updateSessionStatus]);
 
   const appendEvent = useCallback((event: AgentEvent) => {
     if (event.transient) {
@@ -94,7 +101,7 @@ export function useAgentV2(
     }
   }, [updateSessionStatus]);
 
-  const launchTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, inheritedMessages?: Message[]) => {
+  const launchTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, inheritedMessages?: Message[], attachments?: ChatAttachment[]) => {
     const sessionId = overrideSessionId ?? activeSessionId;
     const containerId = overrideContainerId ?? activeContainerId;
     if (!sessionId || !containerId || !runtime || !userPrompt.trim()) return;
@@ -109,6 +116,7 @@ export function useAgentV2(
       persona: sunamModel,
       model: apiModel,
       input: userPrompt.trim(),
+      attachments,
       initialMessages,
       client: new OpenAIChatModelClient({ apiKey, baseUrl, model: apiModel }),
       runtime,
@@ -123,8 +131,8 @@ export function useAgentV2(
     });
   }, [activeContainerId, activeSessionId, apiKey, apiModel, appendEvent, baseUrl, events, runtime, sunamModel, updateRun]);
 
-  const startTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string) => {
-    launchTask(userPrompt, overrideSessionId, overrideContainerId);
+  const startTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, attachments?: ChatAttachment[]) => {
+    launchTask(userPrompt, overrideSessionId, overrideContainerId, undefined, attachments);
   }, [launchTask]);
 
   const resumeTask = useCallback((run?: AgentRun | null) => {

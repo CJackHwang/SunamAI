@@ -22,7 +22,7 @@ export interface LLMConfig {
 export function buildChatRequest(messages: Message[], config: LLMConfig) {
   return {
     model: config.model || 'deepseek-chat',
-    messages: messages.map(({ _ui_streaming, _ui_retryCount, ...message }) => message),
+    messages: messages.map(({ _ui_streaming, _ui_retryCount, _ui_displayContent, _ui_attachments, ...message }) => message),
     ...(config.tools?.length ? { tools: config.tools, tool_choice: 'auto' } : {}),
     stream: Boolean(config.onUpdate),
   };

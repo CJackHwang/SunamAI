@@ -10,9 +10,12 @@ import { ModelSelector } from '@/features/chat/ui/ModelSelector';
 import { generateTitle } from '@/features/session/titleService';
 import type { SunamModel } from '@/shared/config/models';
 import type { SessionStatus } from '@/entities/workspace/types';
+import type { ChatAttachment } from '@/entities/message/types';
 import { useWorkspaceStore } from '@/shared/store/useWorkspaceStore';
 import { WorkspaceRuntimeProvider } from '@/features/runtime/WorkspaceRuntimeProvider';
 import { useWorkspaceRuntime } from '@/features/runtime/WorkspaceRuntimeContext';
+import { readChatAttachments } from '@/features/chat/lib/chatAttachments';
+import { useI18n } from '@/shared/i18n';
 
 const DualTerminal = lazy(() => import('@/features/terminal-session/DualTerminal'));
 
@@ -29,17 +32,21 @@ interface WorkspaceProps {
 }
 
 function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, updateSessionStatus }: WorkspaceProps) {
+  const { t } = useI18n();
   const { runtime, webcontainer, isReady: isRuntimeReady, error: runtimeError, getContainerRoot } = useWorkspaceRuntime();
   const { events, messages, activeRun, latestRun, streamingContent, startTask, resumeTask, stopTask } = useAgentV2(apiKey, baseUrl, apiModel, sunamModel, runtime, activeSessionId, activeContainerId, updateSessionStatus);
   const { sessions, containers, createSession, createContainer, renameSession } = useWorkspaceStore();
   const isRunning = Boolean(activeRun);
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [composerHeight, setComposerHeight] = useState(124);
   const [isTerminalReady, setIsTerminalReady] = useState(false);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [terminalTab, setTerminalTab] = useState<TerminalTab>('ai');
   const [mobileActive, setMobileActive] = useState<'chat' | TerminalTab>('chat');
   const [layoutState, setLayoutState] = useState<TerminalLayout>('half');
-  const { containerRef, isAtBottom, onScroll, scrollToBottom } = useChatAutoScroll([messages, isRunning]);
+  const { containerRef, isAtBottom, onScroll, scrollToBottom } = useChatAutoScroll([messages, isRunning, composerHeight]);
   const activeContainer = containers.find((container) => container.id === activeContainerId) ?? null;
 
   useEffect(() => {
@@ -51,7 +58,7 @@ function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel
 
   const handleSubmit = (event?: SyntheticEvent) => {
     event?.preventDefault();
-    if (!input.trim() || isRunning || !isTerminalReady || !isRuntimeReady) return;
+    if ((!input.trim() && attachments.length === 0) || isRunning || !isTerminalReady || !isRuntimeReady) return;
     let isNewSession = false;
     let sessionId = activeSessionId;
     if (!sessionId) {
@@ -61,13 +68,15 @@ function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel
       const session = sessions.find((item) => item.id === sessionId);
       isNewSession = session?.title === '新建对话' || session?.title === '新对话';
     }
-    const prompt = input;
+    const prompt = input.trim() || t('chat.analyzeAttachments');
     if (isNewSession) {
       void generateTitle(prompt, { apiKey, baseUrl, model: apiModel }).then((title) => { if (title) renameSession(sessionId!, title); }).catch(console.error);
     }
     const containerId = activeContainerId ?? createContainer();
-    startTask(prompt, sessionId, containerId);
+    startTask(prompt, sessionId, containerId, attachments);
     setInput('');
+    setAttachments([]);
+    setAttachmentError(null);
   };
 
   const selectTerminalTab = (tab: TerminalTab) => {
@@ -79,8 +88,8 @@ function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel
     <div className="workspace-container" data-active-tab={mobileActive}>
       <div className="chat-section" style={{ display: layoutState === 'full' ? 'none' : 'flex' }}>
         <ModelSelector model={sunamModel} isOpen={isModelMenuOpen} onToggle={() => setIsModelMenuOpen((open) => !open)} onSelect={(model) => { setSunamModel(model); setIsModelMenuOpen(false); }} onMobileSidebarToggle={onMobileSidebarToggle} />
-        <ChatMessageList messages={messages} isRunning={isRunning} retryCount={0} containerRef={containerRef} onScroll={onScroll} />
-        <ChatComposer input={input} isRunning={Boolean(isRunning)} isTerminalReady={isTerminalReady} isAtBottom={isAtBottom} taskList={<RunBoard run={activeRun ?? latestRun} events={events} liveOutput={streamingContent} onResume={() => resumeTask(latestRun)} />} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} />
+        <ChatMessageList messages={messages} isRunning={isRunning} retryCount={0} containerRef={containerRef} onScroll={onScroll} bottomInset={composerHeight + 16} />
+        <ChatComposer input={input} attachments={attachments} attachmentError={attachmentError} isRunning={Boolean(isRunning)} isTerminalReady={isTerminalReady} isAtBottom={isAtBottom} taskList={<RunBoard run={activeRun ?? latestRun} events={events} liveOutput={streamingContent} onResume={() => resumeTask(latestRun)} />} onFilesSelected={(files) => { void readChatAttachments(files).then((next) => { setAttachments((current) => [...current, ...next].slice(0, 8)); setAttachmentError(null); }).catch((error) => setAttachmentError(error instanceof Error ? error.message : String(error))); }} onRemoveAttachment={(index) => setAttachments((current) => current.filter((_attachment, candidateIndex) => candidateIndex !== index))} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} onHeightChange={setComposerHeight} />
       </div>
       <div className="terminal-section" style={{ flex: layoutState === 'collapsed' ? '0 0 56px' : '1', minWidth: layoutState === 'collapsed' ? '56px' : '0', transition: 'flex-basis var(--motion-base) var(--motion-ease), min-width var(--motion-base) var(--motion-ease)', borderLeft: 'none', ...(layoutState === 'full' ? { position: 'fixed', inset: 0, zIndex: 100, paddingTop: 0 } : {}) }}>
         <Suspense fallback={<div className="motion-fade-in" style={{ height: '100%' }} />}>

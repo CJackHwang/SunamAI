@@ -13,7 +13,7 @@ describe('LLM protocol', () => {
 
   it('preserves the OpenAI-compatible request body while excluding UI-only fields', () => {
     const tools = [{ type: 'function' as const, function: { name: 'inspect', description: 'inspect', parameters: { type: 'object' } } }];
-    const request = buildChatRequest([{ role: 'user', content: 'hi', _ui_streaming: true }], { apiKey: 'key', baseUrl: 'https://api.test', model: 'm', tools });
+    const request = buildChatRequest([{ role: 'user', content: 'hi', _ui_streaming: true, _ui_displayContent: 'visible', _ui_attachments: [{ name: 'a.txt', size: 1, content: 'a' }] }], { apiKey: 'key', baseUrl: 'https://api.test', model: 'm', tools });
     expect(request).toMatchObject({ model: 'm', stream: false, tool_choice: 'auto', messages: [{ role: 'user', content: 'hi' }] });
     expect(request.tools).toEqual(tools);
     expect(buildChatRequest([{ role: 'user', content: 'plain' }], { apiKey: 'key', baseUrl: 'https://api.test' })).not.toHaveProperty('tools');

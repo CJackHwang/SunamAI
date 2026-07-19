@@ -9,6 +9,14 @@ export interface Message {
   reasoning_content?: string;
   _ui_streaming?: boolean;
   _ui_retryCount?: number;
+  _ui_displayContent?: string;
+  _ui_attachments?: ChatAttachment[];
+}
+
+export interface ChatAttachment {
+  name: string;
+  size: number;
+  content: string;
 }
 
 export interface ToolCall {
