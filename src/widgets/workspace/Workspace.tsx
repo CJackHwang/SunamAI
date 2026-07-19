@@ -1,11 +1,11 @@
-import React, { useRef, useState, Component } from 'react';
+import React, { useRef, useState, useEffect, Component } from 'react';
 import type { ErrorInfo } from 'react';
 import DualTerminal from '../../features/terminal-session/DualTerminal.tsx';
 import MarkdownRenderer from '../../components/MarkdownRenderer';
 import type { DualTerminalRef } from '../../features/terminal-session/DualTerminal.tsx';
 import { useReActAgent } from '../../features/chat-agent/useReActAgent.ts';
 import { useWorkspaceStore } from '../../shared/store/useWorkspaceStore.ts';
-import { Send, Square, Terminal, Monitor, Folder, MessageSquare, PanelLeft } from 'lucide-react';
+import { MessageSquare, Terminal, Monitor, Folder, Send, Server, PanelLeft, Square, Globe, ArrowDown } from 'lucide-react';
 
 // Error boundary to catch rendering errors
 class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean, error: string }> {
@@ -81,9 +81,30 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 900);
 
-  const [terminalTab, setTerminalTab] = useState<'ai' | 'user' | 'files'>('ai');
-  const [mobileActive, setMobileActive] = useState<'chat' | 'ai' | 'user' | 'files'>('chat');
+  const [terminalTab, setTerminalTab] = useState<'ai' | 'user' | 'files' | 'services' | 'preview'>('ai');
+  const [mobileActive, setMobileActive] = useState<'chat' | 'ai' | 'user' | 'files' | 'services' | 'preview'>('chat');
   const [layoutState, setLayoutState] = useState<'half' | 'full' | 'collapsed'>('half');
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+
+  const handleScroll = () => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+    const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+    setIsAtBottom(atBottom);
+  };
+
+  const scrollToBottom = () => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  };
+
+  useEffect(() => {
+    if (isAtBottom) {
+      scrollToBottom();
+    }
+  }, [messages, isRunning]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,17 +132,20 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
       {/* Chat Section */}
       <div className="chat-section" style={{ display: layoutState === 'full' ? 'none' : 'flex' }}>
         <header style={{
-          height: '60px',
+          height: '54px',
           display: 'flex',
           alignItems: 'center',
           padding: '0 16px',
           flexShrink: 0,
-          backgroundColor: 'transparent',
+          backgroundColor: 'color-mix(in srgb, var(--color-bg) 75%, transparent)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          borderBottom: 'none',
           position: 'absolute',
           top: 0, left: 0, right: 0,
           zIndex: 50
         }}>
-          <div className="workspace-header-left">
+          <div className="workspace-header-left" style={{ margin: 0 }}>
             <button className="mobile-sidebar-toggle sidebar-icon-btn" style={{ display: 'none' }} onClick={onMobileSidebarToggle}>
               <PanelLeft size={20} />
             </button>
@@ -140,8 +164,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
                 transition: 'background-color 0.2s',
                 border: 'none',
                 background: 'transparent',
-                cursor: 'pointer',
-                transform: 'translateY(-4px)'
+                cursor: 'pointer'
               }}
             >
               {sunamModel}
@@ -162,7 +185,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
             )}
           </div>
         </header>
-        <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: '24px', paddingTop: '84px', paddingBottom: '100px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div ref={chatContainerRef} onScroll={handleScroll} style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: '24px', paddingTop: '84px', paddingBottom: '100px', display: 'flex', flexDirection: 'column', gap: '16px', scrollBehavior: 'smooth' }}>
           {messages.map((msg, idx) => {
             if (msg.role === 'tool') return null; // Hide tool messages, render them inside the assistant message
             if (msg.role === 'user' && msg.content.startsWith('SYSTEM ERROR:')) return null;
@@ -243,8 +266,26 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
             </div>
           )}
         </div>
-        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '12px 24px', pointerEvents: 'none' }}>
-          <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '12px', alignItems: 'center', pointerEvents: 'auto' }}>
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '12px 24px', pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '12px' }}>
+          {!isAtBottom && (
+            <button 
+              onClick={scrollToBottom}
+              className="glass-input"
+              style={{
+                pointerEvents: 'auto',
+                width: '44px', height: '44px', borderRadius: '50%', padding: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0,
+                color: 'var(--color-text)',
+                transition: 'filter 0.2s'
+              }}
+              onMouseOver={e => e.currentTarget.style.filter = 'brightness(0.95)'}
+              onMouseOut={e => e.currentTarget.style.filter = 'none'}
+              title="回到底部"
+            >
+              <ArrowDown size={16} />
+            </button>
+          )}
+          <form onSubmit={(e) => { handleSubmit(e); setTimeout(scrollToBottom, 50); }} style={{ display: 'flex', gap: '12px', alignItems: 'center', pointerEvents: 'auto', width: '100%' }}>
             <input
               className="input-field glass-input"
               style={{ flex: 1, borderRadius: 'var(--radius-large)', padding: '0 20px 6px 20px', height: '44px' }}
@@ -321,6 +362,20 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
           title="文件"
         >
           <Folder size={24} />
+        </button>
+        <button
+          className={mobileActive === 'services' ? 'active' : ''}
+          onClick={() => { setMobileActive('services'); setTerminalTab('services'); }}
+          title="服务"
+        >
+          <Server size={24} />
+        </button>
+        <button
+          className={mobileActive === 'preview' ? 'active' : ''}
+          onClick={() => { setMobileActive('preview'); setTerminalTab('preview'); }}
+          title="预览"
+        >
+          <Globe size={24} />
         </button>
       </div>
     </div>
