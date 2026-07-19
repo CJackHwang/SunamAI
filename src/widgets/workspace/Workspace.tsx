@@ -71,6 +71,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model, setModel,
   const [input, setInput] = useState('');
   const [isTermReady, setIsTermReady] = useState(false);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 900);
 
   const [terminalTab, setTerminalTab] = useState<'ai' | 'user' | 'files'>('ai');
   const [mobileActive, setMobileActive] = useState<'chat' | 'ai' | 'user' | 'files'>('chat');
@@ -85,7 +86,9 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model, setModel,
 
   React.useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth <= 900) {
+      const mobile = window.innerWidth <= 900;
+      setIsMobile(mobile);
+      if (mobile) {
         setLayoutState('half');
       }
     };
@@ -110,7 +113,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model, setModel,
           top: 0, left: 0, right: 0,
           zIndex: 50
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative', marginTop: '-22px', marginLeft: '-12px' }}>
+          <div className="workspace-header-left">
             <button className="mobile-sidebar-toggle sidebar-icon-btn" style={{ display: 'none' }} onClick={onMobileSidebarToggle}>
               <PanelLeft size={20} />
             </button>
@@ -129,7 +132,8 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model, setModel,
                 transition: 'background-color 0.2s',
                 border: 'none',
                 background: 'transparent',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                transform: 'translateY(-4px)'
               }}
             >
               {model}
@@ -138,7 +142,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model, setModel,
 
             {isModelMenuOpen && (
               <>
-                <div className="context-overlay" onClick={() => setIsModelMenuOpen(false)} style={{ backgroundColor: 'transparent' }} />
+                <div className={`context-overlay ${isMobile ? 'dimmed' : ''}`} onClick={() => setIsModelMenuOpen(false)} />
                 <div className="context-menu" style={{ position: 'absolute', top: '100%', left: '0', marginTop: '4px' }}>
                   <button className="context-item" onClick={() => { setModel('Sunam 1.14 Homo'); localStorage.setItem('sunam_model', 'Sunam 1.14 Homo'); setIsModelMenuOpen(false); }}>Sunam 1.14 Homo</button>
                   <button className="context-item" onClick={() => { setModel('Sunam 1.14 Saki'); localStorage.setItem('sunam_model', 'Sunam 1.14 Saki'); setIsModelMenuOpen(false); }}>Sunam 1.14 Saki</button>

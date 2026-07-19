@@ -529,7 +529,7 @@ button {
 .sidebar-toggle-btn {
   color: var(--color-text-secondary);
   padding: 4px;
-  border-radius: var(--radius-small);
+  border-radius: var(--radius-medium);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -573,10 +573,11 @@ button {
 
 .sidebar-icon-btn {
   color: var(--color-text-secondary);
-  padding: 2px;
-  border-radius: 4px;
+  padding: 4px;
+  border-radius: var(--radius-medium);
   display: flex;
 }
+
 .sidebar-icon-btn:hover {
   background-color: var(--color-gray-200);
   color: var(--color-black);
@@ -624,7 +625,9 @@ button {
   background-color: var(--color-gray-100);
 }
 
-.right-sidebar-btn:hover {
+.right-sidebar-btn:hover,
+.sidebar.collapsed .sidebar-item:hover,
+.sidebar.collapsed .sidebar-action-btn:hover {
   background-color: var(--color-gray-200);
 }
 
@@ -634,13 +637,14 @@ button {
 
 .terminal-icon-btn {
   padding: 6px;
-  border-radius: var(--radius-small);
+  border-radius: var(--radius-medium);
   color: var(--color-text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
   transition: background-color 0.1s;
 }
+
 .terminal-icon-btn:hover {
   background-color: var(--color-gray-200);
   color: var(--color-black);
@@ -657,14 +661,16 @@ button {
   font-size: 15px;
   transition: all 0.2s ease;
   white-space: nowrap;
-  border-radius: var(--radius-small) var(--radius-small) 0 0;
+  border-radius: var(--radius-medium);
   background-color: transparent;
 }
+
 .terminal-tab-btn.active {
   color: var(--color-black);
   font-weight: 600;
   font-size: 16px;
 }
+
 .terminal-tab-btn:hover:not(.active) {
   background-color: var(--color-gray-100);
   color: var(--color-black);
@@ -721,6 +727,7 @@ button {
 .sidebar-item:hover .item-action {
   opacity: 1;
 }
+
 .item-action:hover {
   color: var(--color-black);
 }
@@ -771,14 +778,29 @@ button {
   text-overflow: ellipsis;
 }
 
+.workspace-header-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+  margin-top: -16px;
+  margin-left: -12px;
+}
+
 @media (max-width: 900px) {
   .sidebar {
     position: absolute;
     z-index: 1000;
     transform: translateX(-100%);
-    box-shadow: 4px 0 24px rgba(0,0,0,0.1);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.1);
   }
+
   .sidebar.mobile-open {
     transform: translateX(0);
+  }
+
+  .workspace-header-left {
+    margin-top: -12px;
+    margin-left: 0px;
   }
 }
