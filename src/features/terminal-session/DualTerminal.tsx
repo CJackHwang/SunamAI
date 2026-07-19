@@ -7,6 +7,17 @@ import { getWebContainer } from '../../shared/lib/webcontainer.ts';
 import { saveSnapshot } from '../../shared/lib/persistence.ts';
 import FileManager from '../file-manager/FileManager.tsx';
 
+const AI_TERM_HISTORY_KEY = 'sunam_ai_term_history';
+const writeAiHistory = (sessionId: string | null, data: string) => {
+  if (!sessionId) return;
+  const key = `${AI_TERM_HISTORY_KEY}_${sessionId}`;
+  try {
+    const history = localStorage.getItem(key) || '';
+    const newHistory = history + data;
+    localStorage.setItem(key, newHistory.length > 50000 ? newHistory.slice(-50000) : newHistory);
+  } catch(e) {}
+};
+
 export interface DualTerminalRef {
   spawnAiProcess: (command: string, containerId: string) => Promise<string>;
   getAiProcessStatus: (processId: string) => { isRunning: boolean; output: string } | null;
@@ -21,9 +32,10 @@ interface DualTerminalProps {
   layoutState?: 'half' | 'full' | 'collapsed';
   onLayoutChange?: (state: 'half' | 'full' | 'collapsed') => void;
   activeContainerId?: string | null;
+  activeSessionId?: string | null;
 }
 
-const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onReady, activeTab, onTabChange, layoutState = 'half', onLayoutChange, activeContainerId }, ref) => {
+const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onReady, activeTab, onTabChange, layoutState = 'half', onLayoutChange, activeContainerId, activeSessionId }, ref) => {
   const aiTermRef = useRef<Terminal | null>(null);
   const userTermRef = useRef<Terminal | null>(null);
   const [isUserTermReady, setIsUserTermReady] = useState(false);
@@ -166,6 +178,18 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
     return () => clearTimeout(timer);
   }, [activeTab]);
 
+  const sessionIdRef = useRef(activeSessionId);
+  useEffect(() => {
+    sessionIdRef.current = activeSessionId;
+    if (aiTermRef.current && activeSessionId) {
+      aiTermRef.current.clear();
+      const history = localStorage.getItem(`${AI_TERM_HISTORY_KEY}_${activeSessionId}`);
+      if (history) {
+        aiTermRef.current.write(history);
+      }
+    }
+  }, [activeSessionId]);
+
   React.useImperativeHandle(ref, () => ({
     spawnAiProcess: async (command: string, containerId: string) => {
       if (!wc) throw new Error("WebContainer not booted");
@@ -176,6 +200,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
       if (term) {
         term.writeln(`\r\n[Background Process ${processId}] Admin@Sunam ~ # ${command}`);
       }
+      writeAiHistory(sessionIdRef.current || null, `\r\n[Background Process ${processId}] Admin@Sunam ~ # ${command}\r\n`);
 
       const spawnCwd = `/${containerId}`;
       const process = await wc.spawn('jsh', ['-c', command], { env: {}, cwd: spawnCwd });
@@ -193,6 +218,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
           if (term) {
             term.write(data);
           }
+          writeAiHistory(sessionIdRef.current || null, data);
         }
       }));
       
@@ -202,6 +228,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
         if (term) {
           term.writeln(`\r\n[Process ${processId} exited with code ${code}]`);
         }
+        writeAiHistory(sessionIdRef.current || null, `\r\n[Process ${processId} exited with code ${code}]\r\n`);
       });
       
       return processId;
@@ -233,6 +260,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
         if (term) {
           term.writeln(`\r\n[Process ${processId} was killed]`);
         }
+        writeAiHistory(sessionIdRef.current || null, `\r\n[Process ${processId} was killed]\r\n`);
       }
     }
   }));
@@ -386,6 +414,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
                           state.isRunning = false;
                           forceUpdateProcesses();
                           if (aiTermRef.current) aiTermRef.current.writeln(`\r\n[Process ${pid} was killed by user]`);
+                          writeAiHistory(sessionIdRef.current || null, `\r\n[Process ${pid} was killed by user]\r\n`);
                         }}
                         style={{ flexShrink: 0, background: 'none', border: 'none', color: '#ff4d4f', cursor: 'pointer', padding: '6px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                         onMouseOver={e => e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'}
@@ -424,7 +453,13 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
             pointerEvents: activeTab === 'ai' ? 'auto' : 'none',
             zIndex: activeTab === 'ai' ? 2 : 1
           }}>
-            <TerminalView readOnly={true} onTerminalReady={(term) => { aiTermRef.current = term; }} />
+            <TerminalView readOnly={true} onTerminalReady={(term) => { 
+              aiTermRef.current = term; 
+              if (activeSessionId) {
+                const history = localStorage.getItem(`${AI_TERM_HISTORY_KEY}_${activeSessionId}`);
+                if (history) term.write(history);
+              }
+            }} />
           </div>
           <div style={{
             position: 'absolute', inset: 0,

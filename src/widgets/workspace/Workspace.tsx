@@ -4,6 +4,7 @@ import DualTerminal from '../../features/terminal-session/DualTerminal.tsx';
 import MarkdownRenderer from '../../components/MarkdownRenderer';
 import type { DualTerminalRef } from '../../features/terminal-session/DualTerminal.tsx';
 import { useReActAgent } from '../../features/chat-agent/useReActAgent.ts';
+import { callLLM } from '../../shared/api/llm.ts';
 import { useWorkspaceStore } from '../../shared/store/useWorkspaceStore.ts';
 import { MessageSquare, Terminal, Monitor, Folder, Send, Server, PanelLeft, Square, ArrowDown } from 'lucide-react';
 
@@ -73,7 +74,7 @@ const ThinkingProcess: React.FC<{ content: string }> = ({ content }) => {
 const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, updateSessionStatus }) => {
   const terminalRef = useRef<DualTerminalRef>(null);
   const { messages, startTask, stopTask, retryCount } = useReActAgent(apiKey, baseUrl, apiModel, sunamModel, terminalRef, activeSessionId, activeContainerId, updateSessionStatus);
-  const { sessions, createSession, createContainer } = useWorkspaceStore();
+  const { sessions, createSession, createContainer, renameSession } = useWorkspaceStore();
   const isRunning = sessions.find(s => s.id === activeSessionId)?.status === 'running';
   
   const [input, setInput] = useState('');
@@ -109,10 +110,29 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
     if (e) e.preventDefault();
     if (!input.trim() || isRunning || !isTermReady) return;
 
+    let isNewSession = false;
     let sessionId = activeSessionId;
     if (!sessionId) {
       sessionId = createSession();
+      isNewSession = true;
+    } else {
+      const session = sessions.find(s => s.id === sessionId);
+      if (session && (session.title === '新建对话' || session.title === '新对话')) {
+        isNewSession = true;
+      }
     }
+
+    if (isNewSession) {
+      callLLM(
+        [{ role: 'user', content: `请根据用户的这句话总结一个会话标题，字数不超过15个字。这个标题必须非常离谱，字面意义上符合但是内核完全曲解用户的请求。直接输出标题文本，不要包含任何多余的标点符号或解释说明。用户的话是：${input}` }],
+        { apiKey, baseUrl, model: apiModel }
+      ).then(res => {
+        if (res.content) {
+          renameSession(sessionId, res.content.trim().replace(/^"|"$/g, ''));
+        }
+      }).catch(console.error);
+    }
+
     
     let containerId = activeContainerId;
     if (!containerId) {
@@ -386,6 +406,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
           layoutState={layoutState}
           onLayoutChange={setLayoutState}
           activeContainerId={activeContainerId}
+          activeSessionId={activeSessionId}
         />
       </div>
 

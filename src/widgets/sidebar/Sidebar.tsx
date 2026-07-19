@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { SquarePen, History, Box, Plus, PanelLeftClose, PanelLeft, MoreHorizontal, Settings, Pin, Trash2, Edit2, Search, Loader2 } from 'lucide-react';
+import { SquarePen, History, Box, Plus, PanelLeftClose, PanelLeft, MoreHorizontal, Settings, Pin, Trash2, Edit2, Search, Loader2, Sparkles } from 'lucide-react';
 import { useWorkspaceStore } from '../../shared/store/useWorkspaceStore';
 
 interface SidebarProps {
@@ -35,6 +35,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [editing, setEditing] = useState<EditingState>(null);
+  const [generatingTitleId, setGeneratingTitleId] = useState<string | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
 
   const {
@@ -75,6 +76,57 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
       renameContainer(editing.id, editing.text.trim());
     }
     setEditing(null);
+  };
+
+  const handleGenerateTitle = async (type: 'session' | 'container', id: string) => {
+    closeContextMenu();
+    setGeneratingTitleId(id);
+
+    const apiKey = localStorage.getItem('sunam_api_key') || '';
+    const baseUrl = localStorage.getItem('sunam_base_url') || 'https://api.deepseek.com/v1';
+    const apiModel = localStorage.getItem('sunam_api_model') || 'deepseek-v4-flash';
+
+    if (!apiKey) {
+      alert('请先配置 API Key');
+      return;
+    }
+
+    let input = '';
+    if (type === 'session') {
+      const messagesStr = localStorage.getItem(`sunam_messages_${id}`);
+      if (messagesStr) {
+        try {
+          const msgs = JSON.parse(messagesStr);
+          const firstUserMsg = msgs.find((m: any) => m.role === 'user');
+          if (firstUserMsg) {
+            input = firstUserMsg.content;
+          }
+        } catch (e) {}
+      }
+      if (!input) input = '无有效对话记录，请随意发挥。';
+    } else {
+      input = '这是一个容器的自动重命名，请随意起名。';
+    }
+
+    try {
+      const { callLLM } = await import('../../shared/api/llm.ts');
+      const res = await callLLM(
+        [{ role: 'user', content: `请根据以下提示总结一个标题，字数不超过15个字。这个标题必须非常离谱，字面意义上符合但是内核完全曲解用户的请求。直接输出标题文本，不要包含任何多余的标点符号或解释说明。提示：${input}` }],
+        { apiKey, baseUrl, model: apiModel }
+      );
+      if (res.content) {
+        if (type === 'session') {
+          renameSession(id, res.content.trim().replace(/^"|"$/g, ''));
+        } else {
+          renameContainer(id, res.content.trim().replace(/^"|"$/g, ''));
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      alert('生成标题失败');
+    } finally {
+      setGeneratingTitleId(null);
+    }
   };
 
   useEffect(() => {
@@ -187,6 +239,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
                       ) : (
                         <span className="item-text">{container.name}</span>
                       )}
+                      {generatingTitleId === container.id && <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-secondary)' }} />}
                       <button 
                         className="item-action" 
                         onClick={(e) => { e.stopPropagation(); handleContextMenu(e, 'container', container.id); }}
@@ -231,6 +284,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
                       ) : (
                         <span className="item-text">{session.title}</span>
                       )}
+                      {generatingTitleId === session.id && <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-secondary)' }} />}
                       {session.status === 'running' && <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-primary)' }} />}
                       {session.status === 'completed_unread' && <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />}
                       {session.status === 'failed_unread' && <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }} />}
@@ -303,6 +357,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
             >
               <Edit2 size={16} className="context-item-icon" />
               重命名
+            </button>
+            <button 
+              className="context-item" 
+              onClick={() => handleGenerateTitle(contextMenu.type, contextMenu.id)}
+            >
+              <Sparkles size={16} className="context-item-icon" />
+              生成标题
             </button>
             <button 
               className="context-item" 
