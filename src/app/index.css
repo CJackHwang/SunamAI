@@ -939,6 +939,10 @@ button {
   color: var(--color-black);
 }
 
+.mobile-sidebar-close {
+  display: none;
+}
+
 .sidebar-content {
   flex: 1;
   overflow-y: auto;
@@ -1196,6 +1200,10 @@ button {
 
   .sidebar.mobile-open {
     transform: translateX(0);
+  }
+
+  .mobile-sidebar-close {
+    display: flex;
   }
 
   .workspace-header-left {

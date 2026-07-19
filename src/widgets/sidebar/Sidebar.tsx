@@ -168,6 +168,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
                 >
                   <PanelLeftClose size={20} />
                 </button>
+                <button
+                  className="sidebar-toggle-btn mobile-sidebar-close"
+                  onClick={onCloseMobile}
+                  title={t('sidebar.close')}
+                  aria-label={t('sidebar.close')}
+                >
+                  <PanelLeftClose size={20} />
+                </button>
               </div>
             </>
           )}

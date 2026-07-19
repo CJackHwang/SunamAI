@@ -38,6 +38,7 @@ export const jaJP = {
   'sidebar.apiKeyRequired': '先にAPIキーを設定してください',
   'sidebar.user': 'User',
   'sidebar.collapse': 'サイドバーを折りたたむ',
+  'sidebar.close': 'サイドバーを閉じる',
   'chat.askAnything': 'Sunamに何でも質問してください...',
   'chat.booting': 'コンテナを起動中...',
   'chat.thinking': 'Sunamが考え中...',

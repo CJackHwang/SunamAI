@@ -38,6 +38,7 @@ export const enUS = {
   'sidebar.apiKeyRequired': 'Configure an API key first',
   'sidebar.user': 'User',
   'sidebar.collapse': 'Collapse Sidebar',
+  'sidebar.close': 'Close sidebar',
   'chat.askAnything': 'Ask Sunam anything...',
   'chat.booting': 'Container is starting...',
   'chat.thinking': 'Sunam is thinking...',

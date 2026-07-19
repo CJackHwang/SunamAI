@@ -36,6 +36,7 @@ export const zhCN = {
   'sidebar.apiKeyRequired': '请先配置 API Key',
   'sidebar.user': 'User',
   'sidebar.collapse': 'Collapse Sidebar',
+  'sidebar.close': '收起侧栏',
   'chat.askAnything': '问 Sunam 任何问题...',
   'chat.booting': '容器启动中...',
   'chat.thinking': 'Sunam 正在思考...',
