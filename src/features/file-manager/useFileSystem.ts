@@ -12,9 +12,9 @@ export interface FileEntry {
  * Hook that wraps WebContainer's filesystem API with convenient operations.
  * All paths are absolute (e.g. '/src/index.ts').
  */
-export function useFileSystem(wc: WebContainer | null) {
+export function useFileSystem(wc: WebContainer | null, rootDir: string = '/') {
   const [entries, setEntries] = useState<FileEntry[]>([]);
-  const [currentPath, setCurrentPath] = useState('/');
+  const [currentPath, setCurrentPath] = useState(rootDir);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const currentPathRef = useRef(currentPath);
@@ -79,6 +79,12 @@ export function useFileSystem(wc: WebContainer | null) {
     }
   }, [wc]);
 
+  useEffect(() => {
+    if (wc) {
+      setCurrentPath(rootDir);
+      navigateTo(rootDir);
+    }
+  }, [rootDir, navigateTo, wc]);
 
   /** Refresh the current directory listing */
   const refresh = useCallback(() => {
@@ -115,10 +121,14 @@ export function useFileSystem(wc: WebContainer | null) {
 
   /** Go up one directory level */
   const goUp = useCallback(() => {
-    if (currentPath === '/') return;
+    if (currentPath === rootDir || currentPath === '/') return;
     const parent = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/';
-    navigateTo(parent);
-  }, [currentPath, navigateTo]);
+    if (!parent.startsWith(rootDir) && rootDir !== '/') {
+      navigateTo(rootDir);
+    } else {
+      navigateTo(parent);
+    }
+  }, [currentPath, navigateTo, rootDir]);
 
   /** Create a new file */
   const createFile = useCallback(async (name: string, content: string = '') => {

@@ -8,7 +8,10 @@ import { saveSnapshot } from '../../shared/lib/persistence.ts';
 import FileManager from '../file-manager/FileManager.tsx';
 
 export interface DualTerminalRef {
-  runAiCommand: (command: string) => Promise<string>;
+  spawnAiProcess: (command: string, containerId: string) => Promise<string>;
+  getAiProcessStatus: (processId: string) => { isRunning: boolean; output: string } | null;
+  sendAiProcessInput: (processId: string, input: string) => Promise<boolean>;
+  killAiProcess: (processId: string) => void;
 }
 
 interface DualTerminalProps {
@@ -17,14 +20,18 @@ interface DualTerminalProps {
   onTabChange: (tab: 'ai' | 'user' | 'files') => void;
   layoutState?: 'half' | 'full' | 'collapsed';
   onLayoutChange?: (state: 'half' | 'full' | 'collapsed') => void;
+  activeContainerId?: string | null;
 }
 
-const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onReady, activeTab, onTabChange, layoutState = 'half', onLayoutChange }, ref) => {
+const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onReady, activeTab, onTabChange, layoutState = 'half', onLayoutChange, activeContainerId }, ref) => {
   const aiTermRef = useRef<Terminal | null>(null);
   const userTermRef = useRef<Terminal | null>(null);
   const [isUserTermReady, setIsUserTermReady] = useState(false);
   const [wc, setWc] = useState<WebContainer | null>(null);
   const [isBooted, setIsBooted] = useState(false);
+  const [readyContainerId, setReadyContainerId] = useState<string | null>(null);
+  const userShellWriterRef = useRef<WritableStreamDefaultWriter<string> | null>(null);
+  const activeAiProcesses = useRef(new Map<string, { process: any, output: string, isRunning: boolean }>());
 
   // Store onReady in a ref to prevent infinite loops if parent passes inline function
   const onReadyRef = useRef(onReady);
@@ -63,6 +70,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
       }));
 
       const shellWriter = process.input.getWriter();
+      userShellWriterRef.current = shellWriter;
 
       onDataDisposable = userTermRef.current?.onData((data) => {
         shellWriter.write(data);
@@ -72,10 +80,35 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
 
     return () => {
       if (process) process.kill();
+      userShellWriterRef.current = null;
       // MUST dispose the listener or it will try to write to a killed shell!
       if (onDataDisposable) onDataDisposable.dispose();
     };
   }, [wc, isUserTermReady]);
+
+  // Setup active container directory
+  useEffect(() => {
+    if (!wc || !isBooted || !activeContainerId) return;
+    
+    const setupContainer = async () => {
+      try {
+        const containerPath = `/${activeContainerId}`;
+        await wc.fs.mkdir(containerPath, { recursive: true });
+        
+        // Change user terminal working directory
+        if (userShellWriterRef.current) {
+          userShellWriterRef.current.write(`cd ~/sunam${containerPath}\r`);
+        }
+        
+        // Signal FileManager that the directory is ready
+        setReadyContainerId(activeContainerId);
+      } catch (err) {
+        console.error('Failed to setup container:', err);
+      }
+    };
+    
+    setupContainer();
+  }, [wc, isBooted, activeContainerId]);
 
   // Auto-save filesystem snapshot every 30s while container is running
   useEffect(() => {
@@ -108,33 +141,63 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
   }, [activeTab]);
 
   React.useImperativeHandle(ref, () => ({
-    runAiCommand: async (command: string): Promise<string> => {
-      if (!wc || !aiTermRef.current) return 'Error: WebContainer not ready';
-
+    spawnAiProcess: async (command: string, containerId: string) => {
+      if (!wc) throw new Error("WebContainer not booted");
+      
       const term = aiTermRef.current;
-      term.writeln(`\r\nAdmin@Sunam ~ # ${command}`);
+      const processId = `proc-${Date.now().toString(36)}`;
+      
+      if (term) {
+        term.writeln(`\r\n[Background Process ${processId}] Admin@Sunam ~ # ${command}`);
+      }
 
-      try {
-        const process = await wc.spawn('jsh', ['-c', command]);
-        let output = '';
-
-        process.output.pipeTo(new WritableStream({
-          write(data) {
-            term.write(data);
-            output += data;
+      const spawnCwd = `/${containerId}`;
+      const process = await wc.spawn('jsh', ['-c', command], { env: {}, cwd: spawnCwd });
+      
+      const procState = { process, output: '', isRunning: true };
+      activeAiProcesses.current.set(processId, procState);
+      
+      process.output.pipeTo(new WritableStream({
+        write(data) {
+          procState.output += data;
+          if (procState.output.length > 20000) {
+            procState.output = procState.output.slice(-10000);
           }
-        }));
-
-        const exitCode = await process.exit;
-        term.writeln(`\r\n[Process exited with code ${exitCode}]`);
-
-        // Save snapshot after each AI command execution
-        saveSnapshot(wc);
-
-        return output || '[No Output]';
-      } catch (err) {
-        term.writeln(`\r\n[Execution Error]: ${err}`);
-        return `Error: ${err}`;
+          if (term) {
+            term.write(data);
+          }
+        }
+      }));
+      
+      process.exit.then((code) => {
+        procState.isRunning = false;
+        if (term) {
+          term.writeln(`\r\n[Process ${processId} exited with code ${code}]`);
+        }
+      });
+      
+      return processId;
+    },
+    getAiProcessStatus: (processId: string) => {
+      const procState = activeAiProcesses.current.get(processId);
+      if (!procState) return null;
+      const lines = procState.output.split('\n');
+      const tail = lines.slice(-150).join('\n');
+      return { isRunning: procState.isRunning, output: tail };
+    },
+    sendAiProcessInput: async (processId: string, input: string) => {
+      const procState = activeAiProcesses.current.get(processId);
+      if (!procState || !procState.isRunning) return false;
+      
+      const writer = procState.process.input.getWriter();
+      await writer.write(input);
+      writer.releaseLock();
+      return true;
+    },
+    killAiProcess: (processId: string) => {
+      const procState = activeAiProcesses.current.get(processId);
+      if (procState && procState.isRunning) {
+        procState.process.kill();
       }
     }
   }));
@@ -244,7 +307,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
             pointerEvents: activeTab === 'files' ? 'auto' : 'none',
             zIndex: activeTab === 'files' ? 2 : 1
           }}>
-            {isBooted && <FileManager wc={wc} />}
+            {isBooted && <FileManager wc={wc} rootDir={readyContainerId ? `/${readyContainerId}` : '/'} />}
           </div>
         </div>
       </div>

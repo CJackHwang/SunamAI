@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { SquarePen, History, Box, Plus, PanelLeftClose, PanelLeft, MoreHorizontal, Settings, Pin, Trash2, Edit2, Search } from 'lucide-react';
+import { SquarePen, History, Box, Plus, PanelLeftClose, PanelLeft, MoreHorizontal, Settings, Pin, Trash2, Edit2, Search, Loader2 } from 'lucide-react';
 import { useWorkspaceStore } from '../../shared/store/useWorkspaceStore';
 
 interface SidebarProps {
@@ -153,7 +153,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
             <div className="sidebar-section">
               <div className="sidebar-section-title">
                 容器
-                <button className="sidebar-icon-btn" onClick={createContainer} title="新建容器">
+                <button className="sidebar-icon-btn" onClick={() => { if (window.confirm("确定要新建一个独立容器吗？")) createContainer(); }} title="新建容器">
                   <Plus size={14} />
                 </button>
               </div>
@@ -166,6 +166,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
                     onContextMenu={(e) => handleContextMenu(e, 'container', container.id)}
                   >
                     <Box size={16} style={{ color: container.pinned ? 'var(--color-black)' : 'inherit' }} />
+                    {container.pinned && <Pin size={12} fill="currentColor" style={{ marginLeft: '-4px', marginRight: '4px', opacity: 0.8 }} />}
                     {editing?.id === container.id ? (
                       <input 
                         ref={editInputRef}
@@ -205,6 +206,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
                     onContextMenu={(e) => handleContextMenu(e, 'session', session.id)}
                   >
                     <History size={16} style={{ color: session.pinned ? 'var(--color-black)' : 'inherit' }} />
+                    {session.pinned && <Pin size={12} fill="currentColor" style={{ marginLeft: '-4px', marginRight: '4px', opacity: 0.8 }} />}
                     {editing?.id === session.id ? (
                       <input 
                         ref={editInputRef}
@@ -219,6 +221,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
                     ) : (
                       <span className="item-text">{session.title}</span>
                     )}
+                    {session.status === 'running' && <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-primary)' }} />}
+                    {session.status === 'completed_unread' && <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />}
+                    {session.status === 'failed_unread' && <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }} />}
                     <button 
                       className="item-action" 
                       onClick={(e) => { e.stopPropagation(); handleContextMenu(e, 'session', session.id); }}
@@ -297,13 +302,24 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
               }}
             >
               <Pin size={16} className="context-item-icon" />
-              置顶 / 取消置顶
+              {(() => {
+                const isSession = contextMenu.type === 'session';
+                const item = isSession 
+                  ? sessions.find(s => s.id === contextMenu.id)
+                  : containers.find(c => c.id === contextMenu.id);
+                return item?.pinned ? '取消置顶' : '置顶';
+              })()}
             </button>
             <div className="context-divider" />
             <button 
               className="context-item danger" 
               onClick={() => {
-                if (contextMenu.type === 'session') deleteSession(contextMenu.id);
+                const isSession = contextMenu.type === 'session';
+                if (!isSession && !window.confirm("确定要删除该容器及其所有数据吗？")) {
+                  closeContextMenu();
+                  return;
+                }
+                if (isSession) deleteSession(contextMenu.id);
                 else deleteContainer(contextMenu.id);
                 closeContextMenu();
               }}

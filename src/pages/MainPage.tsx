@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import Workspace from '../widgets/workspace/Workspace.tsx';
 import SettingsModal from '../widgets/settings/SettingsModal.tsx';
 import { Sidebar } from '../widgets/sidebar/Sidebar.tsx';
+import { useWorkspaceStore } from '../shared/store/useWorkspaceStore.ts';
 
 const MainPage: React.FC = () => {
   const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('sunam_api_key') || '');
   const [baseUrl, setBaseUrl] = useState<string>(() => localStorage.getItem('sunam_base_url') || 'https://api.deepseek.com/v1');
   const [apiModel, setApiModel] = useState<string>(() => localStorage.getItem('sunam_api_model') || 'deepseek-v4-flash');
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const { activeSessionId, activeContainerId, updateSessionStatus } = useWorkspaceStore();
   
   const [sunamModel, setSunamModel] = useState<string>(() => {
     const saved = localStorage.getItem('sunam_model');
@@ -47,7 +49,10 @@ const MainPage: React.FC = () => {
               apiModel={apiModel}
               sunamModel={sunamModel} 
               setSunamModel={setSunamModel} 
-              onMobileSidebarToggle={() => setIsMobileOpen(true)} 
+              onMobileSidebarToggle={() => setIsMobileOpen(true)}
+              activeSessionId={activeSessionId}
+              activeContainerId={activeContainerId}
+              updateSessionStatus={updateSessionStatus}
             />
           ) : (
             <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>

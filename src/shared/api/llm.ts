@@ -12,8 +12,8 @@ const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'execute_terminal_command',
-      description: 'Executes a command in the terminal (Sunam\'s Computer). Highest privilege. You must use this to explore the environment, write files, install dependencies, etc.',
+      name: 'run_terminal_async',
+      description: 'Executes a background command in the terminal. Returns a Process ID (PID). You MUST use this to explore the environment, write files, install dependencies, etc.',
       parameters: {
         type: 'object',
         properties: {
@@ -23,6 +23,61 @@ const TOOLS = [
           }
         },
         required: ['command']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'check_terminal_status',
+      description: 'Checks the status of a background terminal process and reads the last 150 lines of its output.',
+      parameters: {
+        type: 'object',
+        properties: {
+          processId: {
+            type: 'string',
+            description: 'The Process ID (PID) to check.'
+          }
+        },
+        required: ['processId']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_terminal_input',
+      description: 'Sends string input to a running terminal process. Can be used for interactive prompts (e.g. sending "y") or sending interrupt signals (e.g. "\\x03" for Ctrl+C).',
+      parameters: {
+        type: 'object',
+        properties: {
+          processId: {
+            type: 'string',
+            description: 'The Process ID (PID).'
+          },
+          input: {
+            type: 'string',
+            description: 'The string input to send.'
+          }
+        },
+        required: ['processId', 'input']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'kill_terminal_process',
+      description: 'Forcefully kills a running terminal process.',
+      parameters: {
+        type: 'object',
+        properties: {
+          processId: {
+            type: 'string',
+            description: 'The Process ID (PID) to kill.'
+          }
+        },
+        required: ['processId']
       }
     }
   },

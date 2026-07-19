@@ -16,7 +16,7 @@ export const getWebContainer = async (): Promise<WebContainer> => {
   bootPromise = (async () => {
     try {
       console.log('Booting WebContainer...');
-      const instance = await WebContainer.boot({ workdirName: 'project' });
+      const instance = await WebContainer.boot({ workdirName: 'sunam' });
       webcontainerInstance = instance;
       console.log('WebContainer booted successfully.');
 

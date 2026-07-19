@@ -4,6 +4,7 @@ import DualTerminal from '../../features/terminal-session/DualTerminal.tsx';
 import MarkdownRenderer from '../../components/MarkdownRenderer';
 import type { DualTerminalRef } from '../../features/terminal-session/DualTerminal.tsx';
 import { useReActAgent } from '../../features/chat-agent/useReActAgent.ts';
+import { useWorkspaceStore } from '../../shared/store/useWorkspaceStore.ts';
 import { Send, Square, Terminal, Monitor, Folder, MessageSquare, PanelLeft } from 'lucide-react';
 
 // Error boundary to catch rendering errors
@@ -24,6 +25,9 @@ interface WorkspaceProps {
   sunamModel: string;
   setSunamModel: (model: string) => void;
   onMobileSidebarToggle?: () => void;
+  activeSessionId: string | null;
+  activeContainerId: string | null;
+  updateSessionStatus: (id: string, status: any) => void;
 }
 
 /** 
@@ -66,9 +70,12 @@ const ThinkingProcess: React.FC<{ content: string }> = ({ content }) => {
   );
 };
 
-const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle }) => {
+const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, updateSessionStatus }) => {
   const terminalRef = useRef<DualTerminalRef>(null);
-  const { messages, startTask, stopTask, isRunning, retryCount } = useReActAgent(apiKey, baseUrl, apiModel, sunamModel, terminalRef);
+  const { messages, startTask, stopTask, retryCount } = useReActAgent(apiKey, baseUrl, apiModel, sunamModel, terminalRef, activeSessionId, activeContainerId, updateSessionStatus);
+  const { sessions } = useWorkspaceStore();
+  const isRunning = sessions.find(s => s.id === activeSessionId)?.status === 'running';
+  
   const [input, setInput] = useState('');
   const [isTermReady, setIsTermReady] = useState(false);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
@@ -178,7 +185,21 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
               }}>
                 {msg.reasoning_content && <ThinkingProcess content={msg.reasoning_content} />}
 
-                {msg.tool_calls ? (
+                {msg.content && msg.content.trim() && msg.role !== 'user' && (
+                  <div style={{ fontSize: '14.5px', marginBottom: msg.tool_calls ? '12px' : '0' }}>
+                    <ErrorBoundary>
+                      <MarkdownRenderer content={msg.content} />
+                    </ErrorBoundary>
+                  </div>
+                )}
+                
+                {msg.role === 'user' && !msg.tool_calls && (
+                  <div style={{ fontSize: '14.5px' }}>
+                    {msg.content}
+                  </div>
+                )}
+
+                {msg.tool_calls && (
                   msg.tool_calls[0].function.name === 'chat' ? (
                     <div style={{ fontSize: '14.5px' }}>
                       <ErrorBoundary>
@@ -207,16 +228,6 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
                       )}
                     </div>
                   )
-                ) : (
-                  <div style={{ fontSize: '14.5px' }}>
-                    {msg.role === 'user' ? (
-                      msg.content
-                    ) : (
-                      <ErrorBoundary>
-                        <MarkdownRenderer content={msg.content} />
-                      </ErrorBoundary>
-                    )}
-                  </div>
                 )}
               </div>
             );
@@ -277,6 +288,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
           }}
           layoutState={layoutState}
           onLayoutChange={setLayoutState}
+          activeContainerId={activeContainerId}
         />
       </div>
 

@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useSyncExternalStore, useCallback } from 'react';
 
 export interface Session {
   id: string;
   title: string;
   updatedAt: number;
   pinned?: boolean;
+  status?: 'idle' | 'running' | 'completed_unread' | 'failed_unread';
 }
 
 export interface Container {
@@ -23,40 +24,55 @@ interface WorkspaceState {
 
 const STORAGE_KEY = 'sunam_workspace_state';
 
-const defaultState: WorkspaceState = {
-  sessions: [{ id: 'default-session', title: '新建对话', updatedAt: Date.now() }],
-  containers: [{ id: 'default-container', name: '默认容器', updatedAt: Date.now() }],
-  activeSessionId: 'default-session',
-  activeContainerId: 'default-container',
+const getInitialState = (): WorkspaceState => {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    try {
+      return JSON.parse(saved);
+    } catch (e) {
+      console.error('Failed to parse workspace state', e);
+    }
+  }
+  const initTs = Date.now();
+  const defaultSessionId = `s-${initTs.toString(36)}`;
+  const defaultContainerId = `c-${initTs.toString(36)}`;
+  return {
+    sessions: [{ id: defaultSessionId, title: '新建对话', updatedAt: initTs }],
+    containers: [{ id: defaultContainerId, name: '默认容器', updatedAt: initTs }],
+    activeSessionId: defaultSessionId,
+    activeContainerId: defaultContainerId,
+  };
+};
+
+// Global state variables
+let globalState: WorkspaceState = getInitialState();
+const listeners = new Set<() => void>();
+
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+};
+
+const getSnapshot = () => globalState;
+
+const setState = (updater: (prev: WorkspaceState) => WorkspaceState) => {
+  const next = updater(globalState);
+  if (next !== globalState) {
+    globalState = next;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(globalState));
+    listeners.forEach((l) => l());
+  }
 };
 
 export function useWorkspaceStore() {
-  const [state, setState] = useState<WorkspaceState>(defaultState);
+  const state = useSyncExternalStore(subscribe, getSnapshot);
 
-  // Load from localStorage on mount
-  useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        setState(JSON.parse(saved));
-      } catch (e) {
-        console.error('Failed to parse workspace state', e);
-      }
-    }
-  }, []);
-
-  // Save to localStorage whenever state changes
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
-
-
-  // --- Session Methods ---
   const createSession = useCallback(() => {
+    const ts = Date.now();
     const newSession: Session = {
-      id: `session-${Date.now()}`,
+      id: `s-${ts.toString(36)}`,
       title: '新对话',
-      updatedAt: Date.now(),
+      updatedAt: ts,
     };
     setState((prev) => ({
       ...prev,
@@ -90,16 +106,32 @@ export function useWorkspaceStore() {
     }));
   }, []);
 
-  const selectSession = useCallback((id: string) => {
-    setState((prev) => ({ ...prev, activeSessionId: id }));
+  const updateSessionStatus = useCallback((id: string, status: Session['status']) => {
+    setState((prev) => ({
+      ...prev,
+      sessions: prev.sessions.map((s) => (s.id === id ? { ...s, status } : s)),
+    }));
   }, []);
 
-  // --- Container Methods ---
+  const selectSession = useCallback((id: string) => {
+    setState((prev) => {
+      // Clear unread status when selecting
+      const updatedSessions = prev.sessions.map((s) => {
+        if (s.id === id && (s.status === 'completed_unread' || s.status === 'failed_unread')) {
+          return { ...s, status: 'idle' as const };
+        }
+        return s;
+      });
+      return { ...prev, activeSessionId: id, sessions: updatedSessions };
+    });
+  }, []);
+
   const createContainer = useCallback(() => {
+    const ts = Date.now();
     const newContainer: Container = {
-      id: `container-${Date.now()}`,
+      id: `c-${ts.toString(36)}`,
       name: '新容器',
-      updatedAt: Date.now(),
+      updatedAt: ts,
     };
     setState((prev) => ({
       ...prev,
@@ -143,6 +175,7 @@ export function useWorkspaceStore() {
     renameSession,
     deleteSession,
     togglePinSession,
+    updateSessionStatus,
     selectSession,
     createContainer,
     renameContainer,

@@ -10,6 +10,7 @@ import './FileManager.css';
 
 interface FileManagerProps {
   wc: WebContainer | null;
+  rootDir?: string;
 }
 
 // File extensions that can be previewed
@@ -37,8 +38,8 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const FileManager: React.FC<FileManagerProps> = ({ wc }) => {
-  const fs = useFileSystem(wc);
+const FileManager: React.FC<FileManagerProps> = ({ wc, rootDir = '/' }) => {
+  const fs = useFileSystem(wc, rootDir);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -58,16 +59,8 @@ const FileManager: React.FC<FileManagerProps> = ({ wc }) => {
   const renameInputRef = useRef<HTMLInputElement>(null);
   const newItemInputRef = useRef<HTMLInputElement>(null);
   const isLongPressing = useRef(false);
-  const hasLoaded = useRef(false);
 
-  // Initial load
-  useEffect(() => {
-    if (wc && !hasLoaded.current) {
-      hasLoaded.current = true;
-      fs.navigateTo('/');
-      setSelectedItem(null);
-    }
-  }, [wc, fs]);
+  // Initial load is now handled inside useFileSystem when rootDir changes
 
   // Focus rename input when renaming
   useEffect(() => {
@@ -299,9 +292,11 @@ const FileManager: React.FC<FileManagerProps> = ({ wc }) => {
   }, [fs]);
 
   // ===== Breadcrumb =====
-  const breadcrumbSegments = fs.currentPath === '/'
+  const rootName = rootDir !== '/' ? rootDir.replace(/^\//, '') : 'sunam';
+  const relativePath = fs.currentPath.startsWith(rootDir) && rootDir !== '/' ? fs.currentPath.slice(rootDir.length) : fs.currentPath;
+  const breadcrumbSegments = relativePath === '' || relativePath === '/'
     ? ['/']
-    : ['/', ...fs.currentPath.split('/').filter(Boolean)];
+    : ['/', ...relativePath.split('/').filter(Boolean)];
 
   // ===== Render =====
   return (
@@ -335,7 +330,7 @@ const FileManager: React.FC<FileManagerProps> = ({ wc }) => {
         {/* Breadcrumb */}
         <div className="fm-breadcrumb">
           {breadcrumbSegments.map((segment, idx) => {
-            const path = idx === 0 ? '/' : '/' + breadcrumbSegments.slice(1, idx + 1).join('/');
+            const path = idx === 0 ? rootDir : (rootDir === '/' ? '' : rootDir) + '/' + breadcrumbSegments.slice(1, idx + 1).join('/');
             const isLast = idx === breadcrumbSegments.length - 1;
 
             return (
@@ -345,7 +340,7 @@ const FileManager: React.FC<FileManagerProps> = ({ wc }) => {
                   className={`fm-breadcrumb-segment ${isLast ? 'active' : ''}`}
                   onClick={() => !isLast && fs.navigateTo(path)}
                 >
-                  {segment === '/' ? 'project' : segment}
+                  {segment === '/' ? rootName : segment}
                 </button>
               </React.Fragment>
             );

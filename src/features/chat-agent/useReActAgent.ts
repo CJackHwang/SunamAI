@@ -2,15 +2,21 @@ import React, { useState } from 'react';
 import type { Message } from '../../entities/message/types.ts';
 import { callLLM } from '../../shared/api/llm.ts';
 import type { DualTerminalRef } from '../terminal-session/DualTerminal.tsx';
+import { useMessageStore } from '../../shared/store/useMessageStore.ts';
 
 const personaPrompts: Record<string, string> = import.meta.glob('../../assets/ACT_system_prompt/*.txt', { query: '?raw', import: 'default', eager: true });
 
-const getSystemPrompt = (sunamModel: string) => {
+const getSystemPrompt = (sunamModel: string, activeContainerId: string | null) => {
+  const containerDir = activeContainerId ? `/containers/${activeContainerId}` : '/';
   const basePrompt = `You are running in a browser-based container environment (WebContainer).
 You have maximum privileges in this environment. 
+CRITICAL: You are currently isolated in the container directory: ${containerDir}. 
+Your terminal default working directory is set to this container. Please ensure your file operations are contained within this directory.
 You MUST explore the environment to fulfill user requests. Do not ask for environment info upfront.
 You have a dedicated terminal called "Sunam's Computer".
-If you need to execute commands in the terminal, use the 'execute_terminal_command' tool.
+CRITICAL: ALL terminal commands MUST be executed asynchronously using 'run_terminal_async'.
+To run a command, use 'run_terminal_async', which will return a Process ID (PID).
+You can then check its status and output using 'check_terminal_status', send input via 'send_terminal_input', or kill it via 'kill_terminal_process'.
 If you have finished the task, you MUST use the 'tasks_complete' tool and report the work status in the 'work_status' field.
 If you need to talk to the user (e.g. ask questions, provide updates, show results), you can just output plain text directly.
 Keep your text responses concise and professional.
@@ -25,40 +31,46 @@ CRITICAL: DO NOT use any emojis in your text output. Emojis are strictly prohibi
   return basePrompt;
 };
 
-export const useReActAgent = (apiKey: string, baseUrl: string, apiModel: string, sunamModel: string, terminalRef: React.RefObject<DualTerminalRef | null>) => {
-  const [messages, setMessages] = useState<Message[]>([
-    { role: 'system', content: getSystemPrompt(sunamModel) }
-  ]);
-  const [isRunning, setIsRunning] = useState(false);
+export const useReActAgent = (apiKey: string, baseUrl: string, apiModel: string, sunamModel: string, terminalRef: React.RefObject<DualTerminalRef | null>, activeSessionId: string | null, activeContainerId: string | null, updateSessionStatus: (id: string, status: 'idle' | 'running' | 'completed_unread' | 'failed_unread') => void) => {
+  const { messages, updateMessages: setMessages } = useMessageStore(activeSessionId);
   const [retryCount, setRetryCount] = useState(0);
-  const abortControllerRef = React.useRef<AbortController | null>(null);
+  const abortControllersRef = React.useRef(new Map<string, AbortController>());
 
   React.useEffect(() => {
-    setMessages(prev => {
-      const newMessages = [...prev];
-      if (newMessages.length > 0 && newMessages[0].role === 'system') {
-        newMessages[0].content = getSystemPrompt(sunamModel);
-      }
-      return newMessages;
-    });
-  }, [sunamModel]);
+    if (activeSessionId) {
+      setMessages(prev => {
+        if (prev.length === 0) {
+          return [{ role: 'system', content: getSystemPrompt(sunamModel, activeContainerId) }];
+        }
+        if (prev[0].role === 'system') {
+          const newMessages = [...prev];
+          newMessages[0].content = getSystemPrompt(sunamModel, activeContainerId);
+          return newMessages;
+        }
+        return prev;
+      });
+    }
+  }, [sunamModel, activeContainerId, activeSessionId, setMessages]);
 
-  const runLoop = async (initialMessages: Message[]) => {
-    setIsRunning(true);
+  const runLoop = async (initialMessages: Message[], sessionId: string, containerId: string | null) => {
+    updateSessionStatus(sessionId, 'running');
     setRetryCount(0);
-    abortControllerRef.current = new AbortController();
+    
+    const abortController = new AbortController();
+    abortControllersRef.current.set(sessionId, abortController);
+    
     let currentMessages = [...initialMessages];
     let currentRetries = 0;
     
     try {
       while (true) {
-        if (abortControllerRef.current.signal.aborted) {
+        if (abortController.signal.aborted) {
           throw new Error("Task was stopped by user.");
         }
         
         const responseMessage = await callLLM(currentMessages, { 
           apiKey, baseUrl, model: apiModel,
-          signal: abortControllerRef.current.signal,
+          signal: abortController.signal,
           onUpdate: (partial) => {
             setMessages([...currentMessages, partial]);
           }
@@ -91,26 +103,44 @@ export const useReActAgent = (apiKey: string, baseUrl: string, apiModel: string,
                 content: 'Message displayed to user. Waiting for user response...'
               });
               shouldBreak = true;
-            } else if (toolCall.function.name === 'execute_terminal_command') {
+            } else if (toolCall.function.name === 'run_terminal_async') {
               let args = { command: '' };
-              try {
-                args = JSON.parse(toolCall.function.arguments);
-              } catch(e) {
-                // Ignore parse error
+              try { args = JSON.parse(toolCall.function.arguments); } catch(e) {}
+              let output = 'Failed to start.';
+              if (terminalRef.current && args.command && containerId) {
+                const pid = await terminalRef.current.spawnAiProcess(args.command, containerId);
+                output = `Process started in background. Process ID: ${pid}`;
               }
-              
-              // Execute in terminal
-              let output = 'No terminal available or invalid command.';
-              if (terminalRef.current && args.command) {
-                output = await terminalRef.current.runAiCommand(args.command);
+              newToolResults.push({ role: 'tool', tool_call_id: toolCall.id, name: 'run_terminal_async', content: output });
+            } else if (toolCall.function.name === 'check_terminal_status') {
+              let args = { processId: '' };
+              try { args = JSON.parse(toolCall.function.arguments); } catch(e) {}
+              let output = 'Invalid process ID.';
+              if (terminalRef.current && args.processId) {
+                const status = terminalRef.current.getAiProcessStatus(args.processId);
+                if (status) {
+                  output = `[Running: ${status.isRunning}]\n--- Last 150 Lines ---\n${status.output}`;
+                } else {
+                  output = 'Process not found.';
+                }
               }
-              
-              newToolResults.push({
-                role: 'tool',
-                tool_call_id: toolCall.id,
-                name: 'execute_terminal_command',
-                content: output
-              });
+              newToolResults.push({ role: 'tool', tool_call_id: toolCall.id, name: 'check_terminal_status', content: output });
+            } else if (toolCall.function.name === 'send_terminal_input') {
+              let args = { processId: '', input: '' };
+              try { args = JSON.parse(toolCall.function.arguments); } catch(e) {}
+              let output = 'Failed to send input.';
+              if (terminalRef.current && args.processId) {
+                const success = await terminalRef.current.sendAiProcessInput(args.processId, args.input);
+                output = success ? 'Input sent.' : 'Failed. Process might not be running.';
+              }
+              newToolResults.push({ role: 'tool', tool_call_id: toolCall.id, name: 'send_terminal_input', content: output });
+            } else if (toolCall.function.name === 'kill_terminal_process') {
+              let args = { processId: '' };
+              try { args = JSON.parse(toolCall.function.arguments); } catch(e) {}
+              if (terminalRef.current && args.processId) {
+                terminalRef.current.killAiProcess(args.processId);
+              }
+              newToolResults.push({ role: 'tool', tool_call_id: toolCall.id, name: 'kill_terminal_process', content: 'Kill signal sent.' });
             } else {
               // Fallback for unknown tools
               newToolResults.push({
@@ -150,37 +180,45 @@ export const useReActAgent = (apiKey: string, baseUrl: string, apiModel: string,
     } catch (err: any) {
       if (err.name === 'AbortError' || err.message === 'Task was stopped by user.') {
          setMessages(prev => [...prev, { role: 'system', content: 'Agent stopped by user.' }]);
+         updateSessionStatus(sessionId, 'idle');
       } else {
          const errorMsg: Message = {
            role: 'system',
            content: `Error: ${err.message}`
          };
          setMessages(prev => [...prev, errorMsg]);
+         updateSessionStatus(sessionId, 'failed_unread');
       }
     } finally {
-      setIsRunning(false);
+      if (!abortController.signal.aborted) {
+        updateSessionStatus(sessionId, 'completed_unread');
+      }
+      abortControllersRef.current.delete(sessionId);
     }
   };
 
 
   const startTask = (userPrompt: string) => {
+    if (!activeSessionId) return;
     const newUserMsg: Message = { role: 'user', content: userPrompt };
     const newMessages = [...messages, newUserMsg];
     setMessages(newMessages);
-    runLoop(newMessages);
+    runLoop(newMessages, activeSessionId, activeContainerId);
   };
 
   const stopTask = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
+    if (activeSessionId) {
+      const controller = abortControllersRef.current.get(activeSessionId);
+      if (controller) {
+        controller.abort();
+      }
     }
   };
 
   return {
-    messages: messages.filter(m => m.role !== 'system' || m.content === 'Agent stopped by user.' || m.content.startsWith('Error:')), // Hide system prompts from UI, except errors
+    messages: messages.filter(m => m.role !== 'system' || m.content === 'Agent stopped by user.' || m.content.startsWith('Error:')),
     startTask,
     stopTask,
-    isRunning,
     retryCount
   };
 };
