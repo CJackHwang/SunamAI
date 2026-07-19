@@ -13,7 +13,7 @@ class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError:
   static getDerivedStateFromError(error: Error) { return { hasError: true, error: error.toString() }; }
   componentDidCatch(error: Error, errorInfo: ErrorInfo) { console.error("Error Boundary caught:", error, errorInfo); }
   render() {
-    if (this.state.hasError) return <div style={{ color: 'red' }}>Error: {this.state.error}</div>;
+    if (this.state.hasError) return <div style={{ color: 'red' }}>错误: {this.state.error}</div>;
     return this.props.children;
   }
 }
@@ -62,7 +62,7 @@ const ThinkingProcess: React.FC<{ content: string }> = ({ content }) => {
 
   return (
     <div style={{ marginBottom: '12px', padding: '12px', backgroundColor: 'var(--color-gray-100)', borderRadius: 'var(--radius-small)', color: 'var(--color-text-secondary)', fontSize: '13px', fontStyle: 'italic', borderLeft: '3px solid var(--color-border)' }}>
-      <div style={{ fontWeight: 600, marginBottom: '4px' }}>Thinking Process</div>
+      <div style={{ fontWeight: 600, marginBottom: '4px' }}>思考过程</div>
       <div ref={containerRef} style={{ whiteSpace: 'pre-wrap', maxHeight: '120px', overflowY: 'auto' }}>
         {content}
       </div>
@@ -254,7 +254,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       <div style={{ fontSize: '13px', color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 500 }}>
                         <Terminal size={14} />
-                        Executing: {msg.tool_calls[0].function.name}
+                        执行中: {msg.tool_calls[0].function.name}
                       </div>
                       {msg.tool_calls[0].function.arguments && (
                         <pre style={{ fontSize: '12px', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-bg)', padding: '8px', borderRadius: '4px', overflowX: 'auto', margin: 0 }}>
@@ -264,7 +264,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
 
                       {toolOutputs.length > 0 && (
                         <div style={{ marginTop: '4px', fontSize: '12px', borderTop: '1px solid var(--color-border)', paddingTop: '8px' }}>
-                          <div style={{ color: 'var(--color-text-secondary)', fontWeight: 600, marginBottom: '4px' }}>Result</div>
+                          <div style={{ color: 'var(--color-text-secondary)', fontWeight: 600, marginBottom: '4px' }}>结果</div>
                           <div style={{ color: 'var(--color-text)', whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto', backgroundColor: 'var(--color-gray-100)', padding: '8px', borderRadius: '4px' }}>
                             {toolOutputs[0].content}
                           </div>
@@ -278,10 +278,10 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
           })}
           {isRunning && (
             <div style={{ alignSelf: 'flex-start', color: 'var(--color-text-secondary)', fontSize: '14px', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              Sunam is thinking...
+              Sunam 正在思考...
               {retryCount > 0 && (
                 <span style={{ fontSize: '12px', backgroundColor: 'var(--color-border)', padding: '2px 6px', borderRadius: '12px' }}>
-                  Retry: {retryCount}
+                  重试: {retryCount}
                 </span>
               )}
             </div>
@@ -339,7 +339,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
                 }
               }}
               disabled={isRunning || !isTermReady}
-              placeholder={isTermReady ? "Ask Sunam anything..." : "Booting container..."}
+              placeholder={isTermReady ? "问 Sunam 任何问题..." : "容器启动中..."}
             />
             <button
               type="button"

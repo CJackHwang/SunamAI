@@ -52,11 +52,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
           }
         }
       } else {
-        alert('Failed to fetch models');
+        alert('获取模型列表失败');
       }
     } catch (err) {
       console.error(err);
-      alert('Error fetching models');
+      alert('获取模型时出错');
     } finally {
       setIsFetchingModels(false);
     }
@@ -70,11 +70,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
       }
     }}>
       <div className="settings-modal-content">
-        <h2 style={{ fontSize: '24px', fontWeight: 600 }}>Configuration</h2>
+        <h2 style={{ fontSize: '24px', fontWeight: 600 }}>配置</h2>
         
         <div>
           <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
-            Base URL (OpenAI Compatible)
+            接口地址 (OpenAI Compatible)
           </label>
           <input 
             className="input-field"
@@ -87,7 +87,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
 
         <div>
           <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
-            API Key
+            API 密钥
           </label>
           <input 
             className="input-field"
@@ -101,7 +101,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
 
         <div>
           <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
-            Model
+            模型
           </label>
           <div style={{ display: 'flex', gap: '8px' }}>
             {modelsList.length > 0 ? (
@@ -130,7 +130,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
               className="btn btn-secondary"
               style={{ whiteSpace: 'nowrap' }}
             >
-              {isFetchingModels ? 'Fetching...' : 'Fetch Models'}
+              {isFetchingModels ? '获取中...' : '获取模型'}
             </button>
           </div>
         </div>
@@ -141,7 +141,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
           className="btn btn-primary"
           style={{ width: '100%', marginTop: '10px' }}
         >
-          Save and Continue
+          保存并继续
         </button>
       </div>
     </div>

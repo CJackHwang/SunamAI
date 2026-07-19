@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { WebContainer } from '@webcontainer/api';
 import {
-  Folder, FileText, ChevronRight, ArrowUp, RefreshCw,
+  Folder, FileText, ChevronRight, ArrowLeft, RefreshCw,
   FilePlus, FolderPlus, Trash2, Pencil, Download, Eye,
   Upload, MoreVertical, X, AlertCircle, FolderOpen
 } from 'lucide-react';
@@ -324,7 +324,7 @@ const FileManager: React.FC<FileManagerProps> = ({ wc, rootDir = '/' }) => {
           disabled={fs.currentPath === '/'}
           title="返回上级"
         >
-          <ArrowUp size={18} />
+          <ArrowLeft size={18} />
         </button>
 
         {/* Breadcrumb */}
@@ -382,10 +382,8 @@ const FileManager: React.FC<FileManagerProps> = ({ wc, rootDir = '/' }) => {
 
       {/* File list */}
       <div className="fm-list" ref={listRef} onClick={() => setSelectedItem(null)}>
-        {/* New item inline form */}
         {newItemType && (
-          <div className="fm-new-dialog">
-            {newItemType === 'folder' ? <Folder size={20} color="var(--color-black)" /> : <FileText size={20} color="var(--color-black)" />}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 12px' }}>
             <input
               ref={newItemInputRef}
               className="input-field"

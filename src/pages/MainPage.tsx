@@ -56,7 +56,7 @@ const MainPage: React.FC = () => {
             />
           ) : (
             <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
-              <p>Please configure your API Key to start.</p>
+              <p>请先配置 API Key 以开始使用。</p>
             </div>
           )}
         </div>

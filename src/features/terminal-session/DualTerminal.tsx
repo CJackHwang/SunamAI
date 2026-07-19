@@ -317,7 +317,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
       <div style={{ flex: 1, padding: activeTab === 'files' ? '0' : '16px', position: 'relative', overflow: 'hidden', display: layoutState === 'collapsed' ? 'none' : 'block' }}>
 
       {activeTab === 'services' && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px', backgroundColor: 'var(--color-bg)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '24px', height: '100%' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px', backgroundColor: 'var(--color-bg)', borderRadius: 'var(--radius-large)', display: 'flex', flexDirection: 'column', gap: '24px', height: '100%' }}>
           
           <div className="services-section">
             <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -325,7 +325,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
               内网穿透端口
             </h3>
             {activePorts.length === 0 ? (
-              <div style={{ fontSize: '13px', color: 'var(--color-text-secondary)', padding: '16px', border: '1px dashed var(--color-border)', borderRadius: '6px', textAlign: 'center' }}>
+              <div style={{ fontSize: '13px', color: 'var(--color-text-secondary)', padding: '16px', textAlign: 'center' }}>
                 暂无已映射的端口。请在终端或后台启动服务（如 npm run dev）。
               </div>
             ) : (
@@ -365,7 +365,7 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
               后台进程管理
             </h3>
             {Array.from(activeAiProcesses.current.entries()).filter(([_, state]) => state.isRunning).length === 0 ? (
-              <div style={{ fontSize: '13px', color: 'var(--color-text-secondary)', padding: '16px', border: '1px dashed var(--color-border)', borderRadius: '6px', textAlign: 'center' }}>
+              <div style={{ fontSize: '13px', color: 'var(--color-text-secondary)', padding: '16px', textAlign: 'center' }}>
                 暂无运行中的后台进程。
               </div>
             ) : (
