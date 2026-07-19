@@ -101,7 +101,12 @@ const toolDefinitions: ToolDefinition<any>[] = [
       const content = `${result.timedOut ? 'Command still running after timeout.' : `Exit: ${process.exitCode ?? 'running'}`}\nPID: ${process.id}\n${output}`;
       const isVerificationCommand = input.mode === 'foreground' && /(?:test|check|lint|build|typecheck|verify)/i.test(input.command);
       const verification = isVerificationCommand ? { command: input.command, passed: !result.timedOut && process.exitCode === 0 } : undefined;
-      if (verification) context.updateTask((task) => ({ ...task, verified: true, evidence: [...task.evidence, `Verified: ${input.command}`] }));
+      if (verification) context.updateTask((task) => ({
+        ...task,
+        verified: task.verified || verification.passed,
+        evidence: [...task.evidence, `${verification.passed ? 'Verified' : 'Failed verification'}: ${input.command}`],
+        verificationEvidence: [...task.verificationEvidence, { ...verification, createdAt: Date.now() }],
+      }));
       return { ok: !result.timedOut && (process.exitCode ?? 0) === 0, content, data: process, verification };
     },
   },
@@ -113,7 +118,7 @@ const toolDefinitions: ToolDefinition<any>[] = [
     readOnly: true,
     concurrencySafe: true,
     async execute(input, context) {
-      const process = context.runtime.observeProcess(input.process_id, input.cursor);
+      const process = context.runtime.observeProcess(input.process_id, { sessionId: context.sessionId, runId: context.runId, containerId: context.containerId }, input.cursor);
       if (!process) return { ok: false, content: 'Process not found.' };
       return { ok: true, content: `Running: ${process.isRunning}\nExit: ${process.exitCode ?? 'pending'}\nCursor: ${process.cursor}\n${process.output || '(no new output)'}`, data: process };
     },
@@ -126,7 +131,7 @@ const toolDefinitions: ToolDefinition<any>[] = [
     readOnly: false,
     concurrencySafe: false,
     async execute(input, context) {
-      const sent = await context.runtime.sendProcessInput(input.process_id, input.input);
+      const sent = await context.runtime.sendProcessInput(input.process_id, { sessionId: context.sessionId, runId: context.runId, containerId: context.containerId }, input.input);
       return { ok: sent, content: sent ? 'Input sent.' : 'Process is not running.' };
     },
   },
@@ -138,7 +143,7 @@ const toolDefinitions: ToolDefinition<any>[] = [
     readOnly: false,
     concurrencySafe: false,
     async execute(input, context) {
-      const stopped = context.runtime.stopProcess(input.process_id);
+      const stopped = context.runtime.stopProcess(input.process_id, { sessionId: context.sessionId, runId: context.runId, containerId: context.containerId });
       return { ok: stopped, content: stopped ? 'Process stopped.' : 'Process is not running.' };
     },
   },
@@ -180,14 +185,15 @@ const controlToolDefinitions: ToolDefinition<any>[] = [
     name: 'complete_task',
     description: 'Finish only after the task contract has evidence. Workspace changes require a successful relevant verification command.',
     parameters: { type: 'object', properties: { summary: { type: 'string', maxLength: 2000 }, evidence: { type: 'array', items: { type: 'string' }, maxItems: 12 } }, required: ['summary', 'evidence'] },
-    schema: z.object({ summary: z.string().min(1).max(2_000), evidence: z.array(z.string().min(1)).max(12) }),
+    schema: z.object({ summary: z.string().min(1).max(2_000), evidence: z.array(z.string().min(1)).min(1).max(12) }),
     readOnly: true,
     concurrencySafe: false,
     async execute(input, context) {
       const task = context.getTask();
-      if (task.changedWorkspace && !task.verified) return { ok: false, content: 'Completion blocked: workspace changed but no relevant successful verification command has been recorded.' };
+      if (task.changedWorkspace && !task.verificationEvidence.some((verification) => verification.passed)) return { ok: false, content: 'Completion blocked: workspace changed but no relevant successful verification command has been recorded.' };
       if (task.requiresPlan && !task.plan.length) return { ok: false, content: 'Completion blocked: this non-trivial task needs a recorded execution plan.' };
       if (task.plan.some((item) => item.status === 'pending' || item.status === 'in_progress')) return { ok: false, content: 'Completion blocked: the execution plan still has unfinished steps.' };
+      if (!input.evidence.length) return { ok: false, content: 'Completion blocked: provide structured evidence for the acceptance criteria.' };
       context.updateTask((current) => ({ ...current, evidence: [...current.evidence, ...input.evidence] }));
       return { ok: true, content: input.summary, finalSummary: input.summary, stopRun: 'completed' };
     },

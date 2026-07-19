@@ -3,6 +3,7 @@ import { useI18n } from '@/shared/i18n';
 
 interface FileManagerToolbarProps {
   rootDir: string;
+  rootLabel?: string;
   currentPath: string;
   onGoUp: () => void;
   onNavigate: (path: string) => void;
@@ -12,9 +13,9 @@ interface FileManagerToolbarProps {
   onUpload: () => void;
 }
 
-export function FileManagerToolbar({ rootDir, currentPath, onGoUp, onNavigate, onRefresh, onCreateFile, onCreateFolder, onUpload }: FileManagerToolbarProps) {
+export function FileManagerToolbar({ rootDir, rootLabel, currentPath, onGoUp, onNavigate, onRefresh, onCreateFile, onCreateFolder, onUpload }: FileManagerToolbarProps) {
   const { t } = useI18n();
-  const rootName = rootDir !== '/' ? rootDir.replace(/^\//, '') : 'sunam';
+  const rootName = rootLabel ?? (rootDir !== '/' ? rootDir.replace(/^\//, '') : 'sunam');
   const relativePath = currentPath.startsWith(rootDir) && rootDir !== '/' ? currentPath.slice(rootDir.length) : currentPath;
   const segments = relativePath === '' || relativePath === '/' ? ['/'] : ['/', ...relativePath.split('/').filter(Boolean)];
   return <div className="fm-toolbar">

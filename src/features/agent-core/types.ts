@@ -32,6 +32,7 @@ export interface TaskContract {
   evidence: string[];
   changedWorkspace: boolean;
   verified: boolean;
+  verificationEvidence: Array<{ command: string; passed: boolean; createdAt: number }>;
 }
 
 export interface ChaosContract {
@@ -78,6 +79,8 @@ export type AgentEventKind =
   | 'tool_started'
   | 'tool_finished'
   | 'verification'
+  | 'model_retry'
+  | 'recovery_hint'
   | 'context_compacted'
   | 'checkpoint'
   | 'run_finished'
@@ -104,6 +107,8 @@ export type AgentEvent =
   | (AgentEventBase & { kind: 'tool_started'; toolCall: ToolCall })
   | (AgentEventBase & { kind: 'tool_finished'; toolCall: ToolCall; result: AgentToolResult })
   | (AgentEventBase & { kind: 'verification'; command: string; passed: boolean; detail: string })
+  | (AgentEventBase & { kind: 'model_retry'; attempt: number; delayMs: number; error: string })
+  | (AgentEventBase & { kind: 'recovery_hint'; message: string })
   | (AgentEventBase & { kind: 'context_compacted'; summary: string; fallback: boolean })
   | (AgentEventBase & { kind: 'checkpoint'; summary: string })
   | (AgentEventBase & { kind: 'run_finished'; summary: string })

@@ -11,6 +11,12 @@ import type { AgentEvent, AgentRun } from './types';
 
 type UpdateSessionStatus = (id: string, status: SessionStatus) => void;
 
+export function mergeSessionRecords<T extends { id: string; sessionId: string }>(persisted: T[], current: T[], sessionId: string): T[] {
+  const byId = new Map(persisted.map((item) => [item.id, item]));
+  current.filter((item) => item.sessionId === sessionId).forEach((item) => byId.set(item.id, item));
+  return Array.from(byId.values());
+}
+
 function toSessionStatus(run: AgentRun): SessionStatus {
   if (['preparing', 'planning', 'acting', 'observing', 'verifying', 'cancelling'].includes(run.phase)) return 'running';
   if (run.phase === 'failed') return 'failed_unread';
@@ -23,7 +29,7 @@ export function useAgentV2(
   baseUrl: string,
   apiModel: string,
   sunamModel: SunamModel,
-  runtimeRef: React.RefObject<AgentWorkspaceRuntime | null>,
+  runtime: AgentWorkspaceRuntime | null,
   activeSessionId: string | null,
   activeContainerId: string | null,
   updateSessionStatus: UpdateSessionStatus,
@@ -54,15 +60,14 @@ export function useAgentV2(
       recoveredSessionsRef.current.add(activeSessionId);
       if (mounted && sessionRef.current === activeSessionId) {
         setEvents((previous) => {
-          const byId = new Map(loaded.map((event) => [event.id, event]));
-          previous.forEach((event) => byId.set(event.id, event));
-          return Array.from(byId.values()).sort((left, right) => left.createdAt - right.createdAt || left.sequence - right.sequence);
+          // Loading is asynchronous, so retain events appended while this same
+          // session was loading. Never merge the previously selected session.
+          return mergeSessionRecords(loaded, previous, activeSessionId).sort((left, right) => left.createdAt - right.createdAt || left.sequence - right.sequence);
         });
         setRuns((previous) => {
-          const byId = new Map(restoredRuns.map((run) => [run.id, run]));
-          previous.forEach((run) => byId.set(run.id, run));
-          return Array.from(byId.values()).sort((left, right) => right.updatedAt - left.updatedAt);
+          return mergeSessionRecords(restoredRuns, previous, activeSessionId).sort((left, right) => right.updatedAt - left.updatedAt);
         });
+        setStreamingContent('');
       }
     })();
     return () => { mounted = false; };
@@ -89,16 +94,15 @@ export function useAgentV2(
     }
   }, [updateSessionStatus]);
 
-  const startTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string) => {
+  const launchTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, inheritedMessages?: Message[]) => {
     const sessionId = overrideSessionId ?? activeSessionId;
     const containerId = overrideContainerId ?? activeContainerId;
-    const runtime = runtimeRef.current;
     if (!sessionId || !containerId || !runtime || !userPrompt.trim()) return;
     if (sessionId === sessionRef.current) setStreamingContent('');
     controllersRef.current.get(sessionId)?.abort();
     const controller = new AbortController();
     controllersRef.current.set(sessionId, controller);
-    const initialMessages: Message[] = sessionId === sessionRef.current ? projectMessages(events) : [];
+    const initialMessages: Message[] = inheritedMessages ?? (sessionId === sessionRef.current ? projectMessages(events) : []);
     const engine = new AgentEngine({
       sessionId,
       containerId,
@@ -117,7 +121,22 @@ export function useAgentV2(
     void engine.execute().finally(() => {
       if (controllersRef.current.get(sessionId) === controller) controllersRef.current.delete(sessionId);
     });
-  }, [activeContainerId, activeSessionId, apiKey, apiModel, appendEvent, baseUrl, events, runtimeRef, sunamModel, updateRun]);
+  }, [activeContainerId, activeSessionId, apiKey, apiModel, appendEvent, baseUrl, events, runtime, sunamModel, updateRun]);
+
+  const startTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string) => {
+    launchTask(userPrompt, overrideSessionId, overrideContainerId);
+  }, [launchTask]);
+
+  const resumeTask = useCallback((run?: AgentRun | null) => {
+    const target = run ?? runs.find((candidate) => candidate.phase === 'interrupted') ?? runs[0] ?? null;
+    if (!target) return;
+    void storeRef.current.latestCheckpoint(target.id).then((checkpoint) => {
+      const inherited = checkpoint?.messages ?? (target.sessionId === sessionRef.current ? projectMessages(events) : []);
+      const checkpointSummary = checkpoint?.summary ?? target.summary ?? 'reassess the interrupted task';
+      const prompt = `Continue from checkpoint: ${checkpointSummary}. Inspect the current workspace, preserve truthful evidence, and finish only after verification.`;
+      launchTask(prompt, target.sessionId, target.containerId, inherited);
+    }).catch((error) => console.error('Failed to load v2 checkpoint:', error));
+  }, [events, launchTask, runs]);
 
   const stopTask = useCallback(() => {
     if (activeSessionId) controllersRef.current.get(activeSessionId)?.abort();
@@ -127,5 +146,5 @@ export function useAgentV2(
   const activeRun = useMemo(() => runs.find((run) => ['preparing', 'planning', 'acting', 'observing', 'verifying', 'cancelling'].includes(run.phase)) ?? null, [runs]);
   const latestRun = runs[0] ?? null;
 
-  return { events, runs, messages, activeRun, latestRun, streamingContent, startTask, stopTask };
+  return { events, runs, messages, activeRun, latestRun, streamingContent, startTask, resumeTask, stopTask };
 }

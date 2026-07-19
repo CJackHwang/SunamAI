@@ -35,6 +35,12 @@ export interface ShellRunResult {
   timedOut: boolean;
 }
 
+export interface ProcessOwnership {
+  sessionId: string;
+  runId: string;
+  containerId: string;
+}
+
 /** Browser-safe boundary between the Agent Core and WebContainer. */
 export interface AgentWorkspaceRuntime {
   ensureContainer(containerId: string): Promise<void>;
@@ -43,10 +49,10 @@ export interface AgentWorkspaceRuntime {
   searchWorkspace(containerId: string, query: string, maxResults: number): Promise<Array<{ path: string; line: number; content: string }>>;
   applyWorkspaceChanges(containerId: string, changes: Array<{ path: string; content: string; expectedContent?: string }>): Promise<Array<{ path: string; diff: string }>>;
   runShell(request: ShellRunRequest): Promise<ShellRunResult>;
-  observeProcess(processId: string, cursor?: number): ProcessStatus | null;
-  sendProcessInput(processId: string, input: string): Promise<boolean>;
-  stopProcess(processId: string): boolean;
-  stopRun(runId: string): void;
-  getProcesses(): ProcessStatus[];
+  observeProcess(processId: string, ownership: ProcessOwnership, cursor?: number): ProcessStatus | null;
+  sendProcessInput(processId: string, ownership: ProcessOwnership, input: string): Promise<boolean>;
+  stopProcess(processId: string, ownership: ProcessOwnership): boolean;
+  stopRun(ownership: ProcessOwnership): void;
+  getProcesses(ownership?: Partial<ProcessOwnership>): ProcessStatus[];
   subscribe(listener: (event: RuntimeProcessEvent) => void): () => void;
 }

@@ -18,8 +18,13 @@ export default defineConfig({
       reporter: ['text', 'html', 'json-summary'],
       include: [
         'src/shared/lib/{storage,settings,async}.ts',
+        'src/shared/lib/containerPaths.ts',
+        'src/shared/persistence/{v2Repository,snapshotScheduler}.ts',
+        'src/shared/store/useWorkspaceStore.ts',
         'src/shared/api/{llm,sse,models}.ts',
         'src/entities/workspace/repository.ts',
+        'src/features/agent-core/{engine,eventStore,events,projector,tools}.ts',
+        'src/features/terminal-session/WebContainerAgentRuntime.ts',
         'src/features/file-manager/fileUtils.ts',
       ],
       exclude: ['**/*.d.ts'],

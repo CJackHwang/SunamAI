@@ -11,17 +11,20 @@ shared → entities → features → widgets → pages → app
 
 ## 关键契约
 
-- `AgentWorkspaceRuntime` 是 Agent Core 与 WebContainer 的唯一边界：受容器根目录约束的文件读取/搜索/写入、前后台进程、输出游标、取消与事件订阅。`WebContainerAgentRuntime` 拥有进程；终端仅渲染和手动控制它。
+- `AgentWorkspaceRuntime` 是 Agent Core 与 WebContainer 的唯一边界：受容器根目录约束的文件读取/搜索/写入、前后台进程、输出游标、取消与事件订阅。`WebContainerAgentRuntime` 拥有进程；终端仅渲染和手动控制它。所有容器路径唯一由 `getContainerRoot(containerId)` 生成；它是相对于 `WebContainer.workdir` 的 `.sunam/workspaces/{containerId}`，交互 Shell 使用 `workdir` 拼出的绝对路径，禁止从 Agent、终端或文件管理器各自拼接根目录。
 - `features/agent-core` 是唯一的 Agent 执行内核。每个 Run 拥有固定的 session、container、模型、人格、Task Contract、Chaos Contract、预算和 append-only 事件序列；不存在旧的纯 loop 或运行时回退路径。
-- Tool Registry 以 schema、只读/并发属性和结构化 `AgentToolResult` 描述工具。只读工具可并发，写入和命令按容器串行；所有工具结果回流下一次模型请求。
+- Tool Registry 以 schema、只读/并发属性和结构化 `AgentToolResult` 描述工具。只读工具至多四路并发，写入和命令按容器串行；所有工具结果回流下一次模型请求。验证命令无论成功或失败都会成为不可伪造的证据，工作区被修改后只有成功验证才能完成 Run。
 - LLM API 层独立构造 OpenAI-compatible 请求、解析 SSE、列模型；Agent Core 通过 `AgentModelClient` 使用它，因此未来协议只能新增 Adapter，不能进入执行内核。
-- Agent Event Store 在当前页面内存中保存 v2 的 session/run/sequence 事件与 checkpoint；它从不导入旧消息或旧 Run。运行中的 v2 Run 在当前 session 重新接管时会被标记为 `interrupted`，只能从 checkpoint 新建 Run 续作；刷新即清空。
-- 设置使用独立的 `sunam_v2_*` 键。旧 `sunam_*` 键、旧工作区、消息、终端历史和文件系统快照均不会被读取或转换；开发刷新从新的内存工作区开始。
+- `V2PersistenceRepository` 是唯一的持久化入口。它在 IndexedDB `sunam-v2` 中以版本化 record 存放 workspace、Run、append-only event、checkpoint、Agent 终端历史、容器文件系统快照和隔离区；无 IndexedDB 的测试环境才使用内存后备。损坏或未知版本的 record 会隔离并显示给用户，绝不覆盖或猜测迁移。
+- Agent Event Store 以内存作为热缓存、以 v2 ledger 作为事实来源；它从不导入旧消息或旧 Run。启动时活动 Run 会标记为 `interrupted`，只能依据 checkpoint **新建** Run 续作，旧 PID、AbortController 与实时订阅绝不恢复。
+- 设置使用独立的 `sunam_v2_*` 键；工作数据只在 `sunam-v2` 数据库中读取。旧 `sunam_*` 键、旧工作区、消息、终端历史和旧数据库从不读取、转换、删除或备份，不存在向下兼容路径。
+- `WorkspaceRuntimeProvider` 是 WebContainer 单例的 UI 生命周期边界：在 Workspace 懒加载后才创建 `WebContainerAgentRuntime`，在 `pagehide` 和卸载时 flush 快照。文件系统 watch 经防抖快照调度器串行写入，避免重叠导出。
 - `shared/i18n` 默认 `zh-CN`、延迟加载 `en-US`；新增 UI 文案必须先加入两份类型安全词条。
 
 ## 性能原则
 
-- 页面未配置 API Key 时不加载 Workspace、WebContainer、xterm、文件管理或 Agent Core。
+- 页面未配置 API Key 时不加载 Workspace、WebContainer、xterm、文件管理或 Agent Core；Runtime Provider 不在应用根部初始化 WebContainer。
 - 切换终端标签不销毁 xterm；文件面板首次加载后保持实例。
 - 流式 assistant delta 是 transient 事件，不进入长期 transcript；上下文达到阈值后由 Context Composer 摘要，连续失败后确定性裁剪。
-- Agent 终端输出仅保留在当前页面内存中，切换标签不会丢失，刷新页面即清空。
+- Agent 终端输出按 session 持久化，切换标签和刷新后可恢复；输出显示仍有长度边界，避免无上限的 DOM/上下文增长。
+- 数据管理能力仅保留在 `V2PersistenceRepository` 的类型化接口中，暂不暴露 UI；备份对 `Uint8Array` 文件内容使用可逆 JSON 编码，不会把二进制文件静默降级为数字对象。

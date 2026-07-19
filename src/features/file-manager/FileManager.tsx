@@ -10,9 +10,9 @@ import { FileEntryList } from './FileEntryList';
 import { FileContextMenu, type FileContextMenuState } from './FileContextMenu';
 import './FileManager.css';
 
-interface FileManagerProps { wc: WebContainer | null; rootDir?: string; }
+interface FileManagerProps { wc: WebContainer | null; rootDir?: string; rootLabel?: string; }
 
-export default function FileManager({ wc, rootDir = '/' }: FileManagerProps) {
+export default function FileManager({ wc, rootDir = '/', rootLabel }: FileManagerProps) {
   const { t, format } = useI18n();
   const fs = useFileSystem(wc, rootDir);
   const [contextMenu, setContextMenu] = useState<FileContextMenuState | null>(null);
@@ -117,7 +117,7 @@ export default function FileManager({ wc, rootDir = '/' }: FileManagerProps) {
 
   return <div className={`fm-container ${isDragOver ? 'fm-drop-active' : ''}`} onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
     <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }} onChange={handleFileInputChange} />
-    <FileManagerToolbar rootDir={rootDir} currentPath={fs.currentPath} onGoUp={fs.goUp} onNavigate={(path) => { void fs.navigateTo(path); }} onRefresh={fs.refresh} onCreateFile={() => { setNewItemType('file'); setNewItemName(''); }} onCreateFolder={() => { setNewItemType('folder'); setNewItemName(''); }} onUpload={() => fileInputRef.current?.click()} />
+    <FileManagerToolbar rootDir={rootDir} rootLabel={rootLabel} currentPath={fs.currentPath} onGoUp={fs.goUp} onNavigate={(path) => { void fs.navigateTo(path); }} onRefresh={fs.refresh} onCreateFile={() => { setNewItemType('file'); setNewItemName(''); }} onCreateFolder={() => { setNewItemType('folder'); setNewItemName(''); }} onUpload={() => fileInputRef.current?.click()} />
     {fs.error && <div className="fm-error"><AlertCircle size={14} />{fs.error}<button style={{ marginLeft: 'auto' }} onClick={fs.clearError}><X size={14} /></button></div>}
     {isDragOver && <div className="fm-drop-label"><Upload size={24} style={{ marginRight: 8 }} />{t('files.dropToUpload')}</div>}
     <FileEntryList entries={fs.entries} isLoading={fs.isLoading} selectedItem={selectedItem} dragOverFolder={dragOverFolder} renamingEntry={renamingEntry} renameValue={renameValue} newItemType={newItemType} newItemName={newItemName} listRef={listRef} renameInputRef={renameInputRef} newItemInputRef={newItemInputRef} onClearSelection={() => setSelectedItem(null)} onItemClick={handleItemClick} onItemDoubleClick={handleItemDoubleClick} onContextMenu={openContextMenu} onLongPressStart={handleLongPressStart} onLongPressEnd={handleLongPressEnd} onDragStart={(event, entry) => { event.dataTransfer.setData('text/plain', entry.name); event.dataTransfer.effectAllowed = 'move'; }} onFolderDragOver={(event, name) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setDragOverFolder(name); }} onFolderDragLeave={() => setDragOverFolder(null)} onFolderDrop={handleFolderDrop} onRenameChange={setRenameValue} onRenameConfirm={() => { void confirmRename(); }} onRenameCancel={cancelRename} onNewNameChange={setNewItemName} onNewConfirm={() => { void confirmNewItem(); }} onNewCancel={cancelNewItem} />

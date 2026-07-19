@@ -58,6 +58,13 @@
   padding: 4px 0;
 }
 
+.fm-breadcrumb > span {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: max-content;
+}
+
 .fm-breadcrumb::-webkit-scrollbar {
   display: none;
 }
@@ -344,5 +351,20 @@
 
   .fm-upload-fab:active {
     transform: scale(0.92);
+  }
+}
+
+@media (max-width: 520px) {
+  .fm-toolbar {
+    gap: 4px;
+    padding-inline: 8px;
+  }
+
+  .fm-toolbar-btn {
+    width: 34px;
+  }
+
+  .fm-breadcrumb-segment {
+    padding-inline: 4px;
   }
 }

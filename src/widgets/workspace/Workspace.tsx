@@ -1,5 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type SyntheticEvent } from 'react';
-import type { DualTerminalRef } from '@/features/terminal-session/DualTerminal';
+import { lazy, Suspense, useEffect, useState, type SyntheticEvent } from 'react';
 import type { TerminalLayout, TerminalTab } from '@/features/terminal-session/types';
 import { RunBoard } from '@/features/agent-core/RunBoard';
 import { useAgentV2 } from '@/features/agent-core/useAgentV2';
@@ -12,6 +11,8 @@ import { generateTitle } from '@/features/session/titleService';
 import type { SunamModel } from '@/shared/config/models';
 import type { SessionStatus } from '@/entities/workspace/types';
 import { useWorkspaceStore } from '@/shared/store/useWorkspaceStore';
+import { WorkspaceRuntimeProvider } from '@/features/runtime/WorkspaceRuntimeProvider';
+import { useWorkspaceRuntime } from '@/features/runtime/WorkspaceRuntimeContext';
 
 const DualTerminal = lazy(() => import('@/features/terminal-session/DualTerminal'));
 
@@ -27,10 +28,10 @@ interface WorkspaceProps {
   updateSessionStatus: (id: string, status: SessionStatus) => void;
 }
 
-export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, updateSessionStatus }: WorkspaceProps) {
-  const terminalRef = useRef<DualTerminalRef>(null);
-  const { events, messages, activeRun, latestRun, streamingContent, startTask, stopTask } = useAgentV2(apiKey, baseUrl, apiModel, sunamModel, terminalRef, activeSessionId, activeContainerId, updateSessionStatus);
-  const { sessions, createSession, createContainer, renameSession } = useWorkspaceStore();
+function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, updateSessionStatus }: WorkspaceProps) {
+  const { runtime, webcontainer, isReady: isRuntimeReady, error: runtimeError, getContainerRoot } = useWorkspaceRuntime();
+  const { events, messages, activeRun, latestRun, streamingContent, startTask, resumeTask, stopTask } = useAgentV2(apiKey, baseUrl, apiModel, sunamModel, runtime, activeSessionId, activeContainerId, updateSessionStatus);
+  const { sessions, containers, createSession, createContainer, renameSession } = useWorkspaceStore();
   const isRunning = Boolean(activeRun);
   const [input, setInput] = useState('');
   const [isTerminalReady, setIsTerminalReady] = useState(false);
@@ -39,6 +40,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
   const [mobileActive, setMobileActive] = useState<'chat' | TerminalTab>('chat');
   const [layoutState, setLayoutState] = useState<TerminalLayout>('half');
   const { containerRef, isAtBottom, onScroll, scrollToBottom } = useChatAutoScroll([messages, isRunning]);
+  const activeContainer = containers.find((container) => container.id === activeContainerId) ?? null;
 
   useEffect(() => {
     const onResize = () => { if (window.innerWidth <= 900) setLayoutState('half'); };
@@ -49,7 +51,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
 
   const handleSubmit = (event?: SyntheticEvent) => {
     event?.preventDefault();
-    if (!input.trim() || isRunning || !isTerminalReady) return;
+    if (!input.trim() || isRunning || !isTerminalReady || !isRuntimeReady) return;
     let isNewSession = false;
     let sessionId = activeSessionId;
     if (!sessionId) {
@@ -77,15 +79,20 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
     <div className="workspace-container" data-active-tab={mobileActive}>
       <div className="chat-section" style={{ display: layoutState === 'full' ? 'none' : 'flex' }}>
         <ModelSelector model={sunamModel} isOpen={isModelMenuOpen} onToggle={() => setIsModelMenuOpen((open) => !open)} onSelect={(model) => { setSunamModel(model); setIsModelMenuOpen(false); }} onMobileSidebarToggle={onMobileSidebarToggle} />
-        <ChatMessageList messages={messages} isRunning={isRunning} retryCount={0} containerRef={containerRef} onScroll={onScroll} runBoard={<RunBoard run={activeRun ?? latestRun} events={events} liveOutput={streamingContent} onResume={() => startTask('Continue from the previous checkpoint. Re-check the task contract, inspect the current workspace, and finish only with truthful verification evidence.')} />} />
-        <ChatComposer input={input} isRunning={Boolean(isRunning)} isTerminalReady={isTerminalReady} isAtBottom={isAtBottom} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} />
+        <ChatMessageList messages={messages} isRunning={isRunning} retryCount={0} containerRef={containerRef} onScroll={onScroll} />
+        <ChatComposer input={input} isRunning={Boolean(isRunning)} isTerminalReady={isTerminalReady} isAtBottom={isAtBottom} taskList={<RunBoard run={activeRun ?? latestRun} events={events} liveOutput={streamingContent} onResume={() => resumeTask(latestRun)} />} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} />
       </div>
-      <div className="terminal-section" style={{ flex: layoutState === 'collapsed' ? '0 0 56px' : '1', minWidth: layoutState === 'collapsed' ? '56px' : '0', transition: 'all var(--motion-base) var(--motion-ease)', borderLeft: 'none', ...(layoutState === 'full' ? { position: 'fixed', inset: 0, zIndex: 100, paddingTop: 0 } : {}) }}>
+      <div className="terminal-section" style={{ flex: layoutState === 'collapsed' ? '0 0 56px' : '1', minWidth: layoutState === 'collapsed' ? '56px' : '0', transition: 'flex-basis var(--motion-base) var(--motion-ease), min-width var(--motion-base) var(--motion-ease)', borderLeft: 'none', ...(layoutState === 'full' ? { position: 'fixed', inset: 0, zIndex: 100, paddingTop: 0 } : {}) }}>
         <Suspense fallback={<div className="motion-fade-in" style={{ height: '100%' }} />}>
-          <DualTerminal ref={terminalRef} onReady={() => setIsTerminalReady(true)} activeTab={terminalTab} onTabChange={selectTerminalTab} layoutState={layoutState} onLayoutChange={setLayoutState} activeContainerId={activeContainerId} activeSessionId={activeSessionId} />
+          <DualTerminal runtime={runtime} webcontainer={webcontainer} onReady={() => setIsTerminalReady(true)} activeTab={terminalTab} onTabChange={selectTerminalTab} layoutState={layoutState} onLayoutChange={setLayoutState} activeContainerId={activeContainerId} activeContainerName={activeContainer?.name ?? null} activeSessionId={activeSessionId} rootDir={activeContainerId ? getContainerRoot(activeContainerId) : '/'} />
         </Suspense>
       </div>
+      {runtimeError && <div role="alert" style={{ position: 'absolute', right: '16px', bottom: '16px', maxWidth: '420px', padding: '10px 12px', color: '#b91c1c', background: 'var(--color-surface)', border: '1px solid #fecaca', borderRadius: 'var(--radius-small)' }}>{runtimeError}</div>}
       <MobileNavigation active={mobileActive} onChange={(tab) => tab === 'chat' ? setMobileActive('chat') : selectTerminalTab(tab)} />
     </div>
   );
+}
+
+export default function Workspace(props: WorkspaceProps) {
+  return <WorkspaceRuntimeProvider><WorkspaceContent {...props} /></WorkspaceRuntimeProvider>;
 }

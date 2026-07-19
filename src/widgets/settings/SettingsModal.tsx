@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { listModels } from '@/shared/api/models';
 import { SUPPORTED_LOCALES, type Locale, useI18n } from '@/shared/i18n';
+import { Modal } from '@/shared/ui/Modal';
+import { ErrorState } from '@/shared/ui/AsyncState';
 
 interface SettingsModalProps {
   initialApiKey: string;
@@ -12,34 +14,19 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-const overlayStyle: React.CSSProperties = {
-  position: 'fixed',
-  top: 0,
-  left: 0,
-  width: '100vw',
-  height: '100vh',
-  backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  zIndex: 1000
-};
-
-// Using CSS class from index.css instead of inline style for responsive width
-
-// Using CSS classes from index.css instead of inline styles for responsive width
-
-const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBaseUrl, initialModel, locale, onLocaleChange, onSave, onClose }) => {
+const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, onLocaleChange, onSave, onClose }: SettingsModalProps) => {
   const { t } = useI18n();
   const [apiKey, setApiKey] = useState(initialApiKey);
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [model, setModel] = useState(initialModel);
   const [modelsList, setModelsList] = useState<string[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const handleFetchModels = async () => {
     if (!apiKey || !baseUrl) return;
     setIsFetchingModels(true);
+    setFetchError(null);
     try {
       const ids = await listModels(apiKey, baseUrl);
       setModelsList(ids);
@@ -48,24 +35,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
       }
     } catch (error) {
       console.error(error);
-      alert(t('settings.fetchModelsError'));
+      setFetchError(t('settings.fetchModelsError'));
     } finally {
       setIsFetchingModels(false);
     }
   };
 
   return (
-    <div style={overlayStyle} onClick={(e) => {
-      // Allow closing only if API key is set
-      if (initialApiKey && e.target === e.currentTarget) {
-        onClose();
-      }
-    }}>
-      <div className="settings-modal-content">
-        <h2 style={{ fontSize: '24px', fontWeight: 600 }}>{t('settings.title')}</h2>
+    <Modal title={t('settings.title')} onDismiss={initialApiKey ? onClose : undefined}>
         
-        <div>
-          <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
+        <div className="settings-field">
+          <label>
             {t('settings.baseUrl')}
           </label>
           <input 
@@ -77,8 +57,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
           />
         </div>
 
-        <div>
-          <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
+        <div className="settings-field">
+          <label>
             {t('settings.apiKey')}
           </label>
           <input 
@@ -91,15 +71,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
           />
         </div>
 
-        <div>
-          <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
+        <div className="settings-field">
+          <label>
             {t('settings.model')}
           </label>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div className="settings-model-row">
             {modelsList.length > 0 ? (
               <select
                 className="input-field"
-                style={{ flex: 1 }}
+                style={{ flex: 1, minWidth: 0 }}
                 value={model}
                 onChange={e => setModel(e.target.value)}
               >
@@ -110,7 +90,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
             ) : (
               <input 
                 className="input-field"
-                style={{ flex: 1 }}
+                style={{ flex: 1, minWidth: 0 }}
                 value={model}
                 onChange={e => setModel(e.target.value)}
                 placeholder="deepseek-v4-flash"
@@ -127,14 +107,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
           </div>
         </div>
 
-        <div>
-          <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
+        <div className="settings-field">
+          <label>
             {t('settings.language')}
           </label>
           <select className="input-field" style={{ width: '100%' }} value={locale} onChange={(event) => { void onLocaleChange(event.target.value as Locale); }}>
             {SUPPORTED_LOCALES.map((supportedLocale) => <option key={supportedLocale} value={supportedLocale}>{supportedLocale}</option>)}
           </select>
         </div>
+
+        {fetchError && <ErrorState>{fetchError}</ErrorState>}
 
         <button 
           onClick={() => onSave(apiKey, baseUrl, model)}
@@ -144,8 +126,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialApiKey, initialBas
         >
           {t('common.save')}
         </button>
-      </div>
-    </div>
+    </Modal>
   );
 };
 

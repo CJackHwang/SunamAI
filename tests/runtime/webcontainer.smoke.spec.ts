@@ -9,4 +9,10 @@ test('real WebContainer runtime boots under the production isolation headers', a
   });
   await page.goto('/');
   await expect(page.locator('textarea[placeholder="问 Sunam 任何问题..."]')).toBeEnabled();
+
+  await page.getByRole('button', { name: '终端' }).click();
+  const terminalRows = page.locator('.xterm-rows').nth(1);
+  await expect(terminalRows).toContainText('~/sunam');
+  await expect(terminalRows).not.toContainText(/\.sunam\/workspaces\/c-/);
+  await expect(terminalRows).not.toContainText('cd: no such file or directory');
 });

@@ -11,15 +11,16 @@ function tool(id: string, name: string, args: Record<string, unknown>): AgentMod
 
 class ScriptedClient implements AgentModelClient {
   private index = 0;
-  private readonly responses: AgentModelResponse[];
+  private readonly responses: Array<AgentModelResponse | Error>;
 
-  constructor(responses: AgentModelResponse[]) {
+  constructor(responses: Array<AgentModelResponse | Error>) {
     this.responses = responses;
   }
 
   async complete(): Promise<AgentModelResponse> {
     const response = this.responses[this.index++];
     if (!response) throw new Error('Unexpected model request');
+    if (response instanceof Error) throw response;
     return response;
   }
 }
@@ -40,6 +41,26 @@ class FakeRuntime implements AgentWorkspaceRuntime {
   stopRun(): void {}
   getProcesses(): ProcessStatus[] { return []; }
   subscribe(_listener: (event: RuntimeProcessEvent) => void): () => void { return () => undefined; }
+}
+
+class ConcurrentReadRuntime extends FakeRuntime {
+  activeReads = 0;
+  maxReads = 0;
+
+  override async listWorkspace(): Promise<WorkspaceTreeEntry[]> {
+    this.activeReads += 1;
+    this.maxReads = Math.max(this.maxReads, this.activeReads);
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    this.activeReads -= 1;
+    return [];
+  }
+}
+
+class FailingVerificationRuntime extends FakeRuntime {
+  override async runShell(request: ShellRunRequest): Promise<ShellRunResult> {
+    this.commands.push(request.command);
+    return { timedOut: false, process: { id: 'p-fail', sessionId: request.sessionId, runId: request.runId, containerId: request.containerId, command: request.command, isRunning: false, output: 'failing assertion', cursor: 17, exitCode: 1 } };
+  }
 }
 
 describe('Agent Core v2', () => {
@@ -79,5 +100,56 @@ describe('Agent Core v2', () => {
     await engine.execute();
     expect(engine.getRun().phase).toBe('completed');
     expect(events.some((event) => event.kind === 'tool_finished' && event.result.content.includes('invalid JSON'))).toBe(true);
+  });
+
+  it('caps read-only tool execution at four concurrent calls while preserving result order', async () => {
+    const runtime = new ConcurrentReadRuntime();
+    const events: AgentEvent[] = [];
+    const reads = Array.from({ length: 6 }, (_, index) => ({ id: `read-${index}`, name: 'workspace_tree', arguments: JSON.stringify({ max_depth: index + 1 }) }));
+    const client = new ScriptedClient([
+      { message: { role: 'assistant', content: '', tool_calls: reads.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })) }, toolCalls: reads },
+      tool('finish', 'complete_task', { summary: 'Inspected.', evidence: ['Workspace tree inspected.'] }),
+    ]);
+    const engine = new AgentEngine({ sessionId: 's-3', containerId: 'c-3', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Inspect this workspace.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+    await engine.execute();
+    expect(runtime.maxReads).toBe(4);
+    expect(events.filter((event) => event.kind === 'tool_finished').slice(0, 6).map((event) => event.toolCall.id)).toEqual(reads.map((call) => call.id));
+  });
+
+  it('records a failed verification and refuses to finish the changed workspace run', async () => {
+    const runtime = new FailingVerificationRuntime();
+    const events: AgentEvent[] = [];
+    const client = new ScriptedClient([
+      tool('plan', 'update_plan', { items: [{ id: 'deliver', title: 'Change file', status: 'completed' }] }),
+      tool('patch', 'apply_patch', { changes: [{ path: 'broken.txt', content: 'broken' }] }),
+      tool('verify', 'shell_run', { command: 'npm test', mode: 'foreground' }),
+      tool('finish', 'complete_task', { summary: 'not actually done', evidence: ['npm test failed'] }),
+    ]);
+    const engine = new AgentEngine({ sessionId: 's-4', containerId: 'c-4', persona: 'Sunam 5.14 Saki', model: 'model', input: 'Implement and test a workspace change.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+    await engine.execute();
+    expect(engine.getRun().phase).toBe('failed');
+    expect(events.some((event) => event.kind === 'verification' && !event.passed)).toBe(true);
+    expect(events.some((event) => event.kind === 'tool_finished' && event.toolCall.function.name === 'complete_task' && !event.result.ok)).toBe(true);
+  });
+
+  it('emits an exponential retry event for retryable model failures and can finish afterwards', async () => {
+    const runtime = new FakeRuntime();
+    const events: AgentEvent[] = [];
+    const client = new ScriptedClient([new Error('LLM API Error (429): busy'), { message: { role: 'assistant', content: 'Recovered.' }, toolCalls: [] }]);
+    const engine = new AgentEngine({ sessionId: 's-5', containerId: 'c-5', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Say hi.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+    await engine.execute();
+    expect(engine.getRun().phase).toBe('completed');
+    expect(events.some((event) => event.kind === 'model_retry' && event.delayMs >= 500)).toBe(true);
+  });
+
+  it('cancels its owned run before the first model turn when its signal is aborted', async () => {
+    const runtime = new FakeRuntime();
+    const events: AgentEvent[] = [];
+    const controller = new AbortController();
+    controller.abort();
+    const engine = new AgentEngine({ sessionId: 's-6', containerId: 'c-6', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Stop.', initialMessages: [], client: new ScriptedClient([]), runtime, store: new AgentEventStore(), signal: controller.signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+    await engine.execute();
+    expect(engine.getRun().phase).toBe('cancelled');
+    expect(events.at(-1)).toMatchObject({ kind: 'run_finished', summary: 'Agent stopped by user.' });
   });
 });

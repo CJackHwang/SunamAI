@@ -10,6 +10,7 @@ import { AgentToolRegistry, type ParsedToolCall, type ToolExecutionContext } fro
 import type { AgentBudget, AgentEvent, AgentPhase, AgentRun, AgentToolResult, TaskContract } from './types';
 
 const DEFAULT_BUDGET: AgentBudget = { maxModelTurns: 40, maxToolCalls: 100, maxDurationMs: 15 * 60_000 };
+const MAX_READ_ONLY_CONCURRENCY = 4;
 
 function createId(): string {
   return `r-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -17,6 +18,11 @@ function createId(): string {
 
 function isAbort(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function isRetryableModelError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b429\b|\b5\d\d\b|network|fetch/i.test(message);
 }
 
 function redact(value: string): string {
@@ -40,6 +46,7 @@ function initialTask(objective: string): TaskContract {
     evidence: [],
     changedWorkspace: false,
     verified: false,
+    verificationEvidence: [],
   };
 }
 
@@ -129,7 +136,17 @@ export class AgentEngine {
   private async reflectTask(): Promise<void> {
     await this.updateRun();
     await this.emitter.emit('plan_updated', { task: this.task });
-    await this.emitter.emit('checkpoint', { summary: this.context.getSummary() || this.task.evidence.join('\n') || 'Run checkpoint recorded.' });
+    const summary = this.context.getSummary() || this.task.evidence.join('\n') || 'Run checkpoint recorded.';
+    await this.emitter.emit('checkpoint', { summary });
+    await this.options.store.saveCheckpoint({
+      id: `cp-${this.run.id}-${Date.now().toString(36)}`,
+      runId: this.run.id,
+      sessionId: this.run.sessionId,
+      containerId: this.run.containerId,
+      summary,
+      messages: [...this.transcript],
+      createdAt: Date.now(),
+    });
   }
 
   private assertBudget(): void {
@@ -151,7 +168,10 @@ export class AgentEngine {
       } catch (error) {
         if (isAbort(error)) throw error;
         lastError = error;
-        await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+        if (!isRetryableModelError(error) || attempt === 2) break;
+        const delayMs = Math.min(8_000, 500 * (2 ** attempt)) + Math.round(Math.random() * 150);
+        await this.emitter.emit('model_retry', { attempt: attempt + 1, delayMs, error: error instanceof Error ? error.message : String(error) });
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     }
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
@@ -166,7 +186,11 @@ export class AgentEngine {
     const signature = `${call.name}:${call.arguments}`;
     const count = (this.signatures.get(signature) ?? 0) + 1;
     this.signatures.set(signature, count);
-    if (count >= 3) return { call, result: { ok: false, content: `Recovery required: ${call.name} was requested with identical arguments ${count} times.` } };
+    if (count >= 3) {
+      const message = `Recovery required: ${call.name} was requested with identical arguments ${count} times.`;
+      await this.emitter.emit('recovery_hint', { message });
+      return { call, result: { ok: false, content: message } };
+    }
     const toolCall = this.toToolCall(call);
     await this.emitter.emit('tool_requested', { toolCall });
     await this.emitter.emit('tool_started', { toolCall });
@@ -182,7 +206,10 @@ export class AgentEngine {
     const safeResult = { ...result, content: redact(result.content) };
     await this.emitter.emit('tool_finished', { toolCall, result: safeResult });
     if (safeResult.data && call.name === 'report_progress') await this.emitter.emit('progress_reported', { message: safeResult.content });
-    if (safeResult.verification) await this.emitter.emit('verification', { command: safeResult.verification.command, passed: safeResult.verification.passed, detail: safeResult.content });
+    if (safeResult.verification) {
+      await this.emitter.emit('verification', { command: safeResult.verification.command, passed: safeResult.verification.passed, detail: safeResult.content });
+      if (!safeResult.verification.passed) await this.emitter.emit('recovery_hint', { message: `Verification failed for ${safeResult.verification.command}; inspect the output and repair before completion.` });
+    }
     return { call, result: safeResult };
   }
 
@@ -196,8 +223,11 @@ export class AgentEngine {
       if (metadata?.concurrencySafe) {
         const batch: ParsedToolCall[] = [];
         while (index < calls.length && this.registry.getMetadata(calls[index]!.name)?.concurrencySafe) batch.push(calls[index++]!);
-        const batchResults = await Promise.all(batch.map((toolCall) => this.executeOne(toolCall)));
-        results.push(...batchResults);
+        for (let cursor = 0; cursor < batch.length; cursor += MAX_READ_ONLY_CONCURRENCY) {
+          const group = batch.slice(cursor, cursor + MAX_READ_ONLY_CONCURRENCY);
+          const groupResults = await Promise.all(group.map((toolCall) => this.executeOne(toolCall)));
+          results.push(...groupResults);
+        }
       } else {
         results.push(await this.executeOne(call));
         index += 1;
@@ -221,6 +251,7 @@ export class AgentEngine {
       await this.emitMessage({ role: 'user', content: this.options.input });
       await this.phase(isNonTrivial(this.options.input) ? 'planning' : 'acting');
       let emptyResponses = 0;
+      let noProgressTurns = 0;
 
       while (true) {
         this.assertBudget();
@@ -242,6 +273,14 @@ export class AgentEngine {
             await this.emitMessage({ role: 'tool', tool_call_id: call.id, name: call.name, content: result.content });
           }
           await this.reflectTask();
+          const madeProgress = results.some(({ result }) => result.changedWorkspace || result.verification?.passed || result.stopRun || result.data && typeof result.data === 'object');
+          noProgressTurns = madeProgress ? 0 : noProgressTurns + 1;
+          if (noProgressTurns >= 2) {
+            const message = 'No meaningful progress was recorded. Re-inspect the task contract and workspace, then choose a different corrective action.';
+            this.transcript.push({ role: 'system', content: message });
+            await this.emitter.emit('recovery_hint', { message });
+            noProgressTurns = 0;
+          }
           const terminal = results.find(({ result }) => result.stopRun)?.result;
           if (terminal?.stopRun === 'awaiting_user') {
             await this.emitMessage({ role: 'assistant', content: terminal.content });
@@ -267,18 +306,21 @@ export class AgentEngine {
           return;
         }
         emptyResponses += 1;
-        if (emptyResponses > 2) throw new Error('The model returned empty responses repeatedly.');
+        if (emptyResponses > 2) {
+          await this.emitter.emit('recovery_hint', { message: 'The model returned empty responses repeatedly; the run cannot make further progress.' });
+          throw new Error('The model returned empty responses repeatedly.');
+        }
       }
     } catch (error) {
       if (isAbort(error)) {
-        this.options.runtime.stopRun(this.run.id);
+        this.options.runtime.stopRun({ sessionId: this.run.sessionId, runId: this.run.id, containerId: this.run.containerId });
         await this.phase('cancelled', 'Stopped by user.');
         await this.emitter.emit('run_finished', { summary: 'Agent stopped by user.' });
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
       this.run.error = message;
-      this.options.runtime.stopRun(this.run.id);
+      this.options.runtime.stopRun({ sessionId: this.run.sessionId, runId: this.run.id, containerId: this.run.containerId });
       await this.phase('failed', message);
       await this.emitter.emit('run_failed', { error: message, recoverable: true });
     }
