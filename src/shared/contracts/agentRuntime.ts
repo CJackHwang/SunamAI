@@ -1,12 +1,52 @@
 export interface ProcessStatus {
+  id: string;
+  sessionId: string;
+  runId: string;
+  containerId: string;
+  command: string;
   isRunning: boolean;
   output: string;
+  cursor: number;
+  exitCode?: number;
 }
 
-/** Runtime boundary consumed by the Agent; implemented by the terminal feature. */
-export interface AgentRuntime {
-  spawnAiProcess(command: string, containerId: string): Promise<string>;
-  getAiProcessStatus(processId: string): ProcessStatus | null;
-  sendAiProcessInput(processId: string, input: string): Promise<boolean>;
-  killAiProcess(processId: string): void;
+export interface RuntimeProcessEvent {
+  type: 'started' | 'output' | 'exited' | 'stopped';
+  process: ProcessStatus;
+  chunk?: string;
+}
+
+export interface WorkspaceTreeEntry {
+  path: string;
+  isDirectory: boolean;
+}
+
+export interface ShellRunRequest {
+  command: string;
+  containerId: string;
+  sessionId: string;
+  runId: string;
+  mode: 'foreground' | 'background';
+  timeoutMs?: number;
+}
+
+export interface ShellRunResult {
+  process: ProcessStatus;
+  timedOut: boolean;
+}
+
+/** Browser-safe boundary between the Agent Core and WebContainer. */
+export interface AgentWorkspaceRuntime {
+  ensureContainer(containerId: string): Promise<void>;
+  listWorkspace(containerId: string, maxDepth: number): Promise<WorkspaceTreeEntry[]>;
+  readWorkspaceFile(containerId: string, path: string, startLine?: number, endLine?: number): Promise<string>;
+  searchWorkspace(containerId: string, query: string, maxResults: number): Promise<Array<{ path: string; line: number; content: string }>>;
+  applyWorkspaceChanges(containerId: string, changes: Array<{ path: string; content: string; expectedContent?: string }>): Promise<Array<{ path: string; diff: string }>>;
+  runShell(request: ShellRunRequest): Promise<ShellRunResult>;
+  observeProcess(processId: string, cursor?: number): ProcessStatus | null;
+  sendProcessInput(processId: string, input: string): Promise<boolean>;
+  stopProcess(processId: string): boolean;
+  stopRun(runId: string): void;
+  getProcesses(): ProcessStatus[];
+  subscribe(listener: (event: RuntimeProcessEvent) => void): () => void;
 }

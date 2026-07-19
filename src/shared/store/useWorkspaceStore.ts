@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { loadWorkspaceState, saveWorkspaceState } from '@/entities/workspace/repository';
+import { createInitialWorkspaceState } from '@/entities/workspace/repository';
 import type { Container, Session, SessionStatus, WorkspaceState } from '@/entities/workspace/types';
 
 export type { Container, Session, WorkspaceState } from '@/entities/workspace/types';
@@ -21,8 +21,7 @@ interface WorkspaceStore {
 }
 
 export function createWorkspaceStore(
-  initialState: WorkspaceState = loadWorkspaceState(),
-  persist: (state: WorkspaceState) => void = saveWorkspaceState,
+  initialState: WorkspaceState = createInitialWorkspaceState(),
   now: () => number = Date.now,
 ): WorkspaceStore {
   let state = initialState;
@@ -35,7 +34,6 @@ export function createWorkspaceStore(
     const nextState = updater(state);
     if (nextState === state) return;
     state = nextState;
-    persist(state);
     listeners.forEach((listener) => listener());
   };
   return {

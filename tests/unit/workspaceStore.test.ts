@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createWorkspaceStore } from '@/shared/store/useWorkspaceStore';
 import type { WorkspaceState } from '@/entities/workspace/types';
 
@@ -10,9 +10,8 @@ const initialState: WorkspaceState = {
 };
 
 describe('workspace store', () => {
-  it('creates, selects, pins and removes sessions while persisting every transition', () => {
-    const persist = vi.fn();
-    const store = createWorkspaceStore(initialState, persist, () => 42);
+  it('creates, selects, pins and removes sessions in the current in-memory workspace', () => {
+    const store = createWorkspaceStore(initialState, () => 42);
     const sessionId = store.createSession();
     expect(sessionId).toBe('s-16');
     store.renameSession(sessionId, '重命名');
@@ -22,11 +21,10 @@ describe('workspace store', () => {
     expect(store.getSnapshot().sessions[0]).toMatchObject({ title: '重命名', pinned: true, status: 'idle' });
     store.deleteSession(sessionId);
     expect(store.getSnapshot().activeSessionId).toBe('s-old');
-    expect(persist).toHaveBeenCalledTimes(6);
   });
 
   it('keeps container selection valid after deletion', () => {
-    const store = createWorkspaceStore(initialState, vi.fn(), () => 50);
+    const store = createWorkspaceStore(initialState, () => 50);
     const newId = store.createContainer();
     store.deleteContainer(newId);
     expect(store.getSnapshot().activeContainerId).toBe('c-old');

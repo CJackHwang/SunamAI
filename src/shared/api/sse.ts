@@ -25,8 +25,10 @@ function applyDelta(message: Message, delta: StreamingDelta): void {
         type: toolCall.type ?? 'function',
         function: { name: toolCall.function?.name ?? '', arguments: toolCall.function?.arguments ?? '' },
       };
-    } else if (message.tool_calls[index] && toolCall.function?.arguments) {
-      message.tool_calls[index].function.arguments += toolCall.function.arguments;
+    } else if (message.tool_calls[index]) {
+      const current = message.tool_calls[index];
+      if (toolCall.function?.name) current.function.name = toolCall.function.name;
+      if (toolCall.function?.arguments !== undefined) current.function.arguments += toolCall.function.arguments;
     }
   }
 }

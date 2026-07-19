@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState, type SyntheticEvent } from 'react';
 import type { DualTerminalRef } from '@/features/terminal-session/DualTerminal';
 import type { TerminalLayout, TerminalTab } from '@/features/terminal-session/types';
-import { useReActAgent } from '@/features/chat-agent/useReActAgent';
+import { RunBoard } from '@/features/agent-core/RunBoard';
+import { useAgentV2 } from '@/features/agent-core/useAgentV2';
 import { useChatAutoScroll } from '@/features/chat/hooks/useChatAutoScroll';
 import { ChatComposer } from '@/features/chat/ui/ChatComposer';
 import { ChatMessageList } from '@/features/chat/ui/ChatMessageList';
@@ -28,9 +29,9 @@ interface WorkspaceProps {
 
 export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, updateSessionStatus }: WorkspaceProps) {
   const terminalRef = useRef<DualTerminalRef>(null);
-  const { messages, startTask, stopTask, retryCount } = useReActAgent(apiKey, baseUrl, apiModel, sunamModel, terminalRef, activeSessionId, activeContainerId, updateSessionStatus);
+  const { events, messages, activeRun, latestRun, streamingContent, startTask, stopTask } = useAgentV2(apiKey, baseUrl, apiModel, sunamModel, terminalRef, activeSessionId, activeContainerId, updateSessionStatus);
   const { sessions, createSession, createContainer, renameSession } = useWorkspaceStore();
-  const isRunning = sessions.find((session) => session.id === activeSessionId)?.status === 'running';
+  const isRunning = Boolean(activeRun);
   const [input, setInput] = useState('');
   const [isTerminalReady, setIsTerminalReady] = useState(false);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
@@ -76,7 +77,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
     <div className="workspace-container" data-active-tab={mobileActive}>
       <div className="chat-section" style={{ display: layoutState === 'full' ? 'none' : 'flex' }}>
         <ModelSelector model={sunamModel} isOpen={isModelMenuOpen} onToggle={() => setIsModelMenuOpen((open) => !open)} onSelect={(model) => { setSunamModel(model); setIsModelMenuOpen(false); }} onMobileSidebarToggle={onMobileSidebarToggle} />
-        <ChatMessageList messages={messages} isRunning={Boolean(isRunning)} retryCount={retryCount} containerRef={containerRef} onScroll={onScroll} />
+        <ChatMessageList messages={messages} isRunning={isRunning} retryCount={0} containerRef={containerRef} onScroll={onScroll} runBoard={<RunBoard run={activeRun ?? latestRun} events={events} liveOutput={streamingContent} onResume={() => startTask('Continue from the previous checkpoint. Re-check the task contract, inspect the current workspace, and finish only with truthful verification evidence.')} />} />
         <ChatComposer input={input} isRunning={Boolean(isRunning)} isTerminalReady={isTerminalReady} isAtBottom={isAtBottom} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} />
       </div>
       <div className="terminal-section" style={{ flex: layoutState === 'collapsed' ? '0 0 56px' : '1', minWidth: layoutState === 'collapsed' ? '56px' : '0', transition: 'all var(--motion-base) var(--motion-ease)', borderLeft: 'none', ...(layoutState === 'full' ? { position: 'fixed', inset: 0, zIndex: 100, paddingTop: 0 } : {}) }}>

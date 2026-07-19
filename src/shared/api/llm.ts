@@ -1,6 +1,14 @@
 import type { Message } from '@/entities/message/types';
 import { consumeChatStream } from './sse';
-import { LLM_TOOLS } from './llmTools';
+
+export interface LLMToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
 
 export interface LLMConfig {
   apiKey: string;
@@ -8,14 +16,14 @@ export interface LLMConfig {
   model?: string;
   signal?: AbortSignal;
   onUpdate?: (partialMessage: Message) => void;
+  tools?: LLMToolDefinition[];
 }
 
 export function buildChatRequest(messages: Message[], config: LLMConfig) {
   return {
     model: config.model || 'deepseek-chat',
     messages: messages.map(({ _ui_streaming, _ui_retryCount, ...message }) => message),
-    tools: LLM_TOOLS,
-    tool_choice: 'auto',
+    ...(config.tools?.length ? { tools: config.tools, tool_choice: 'auto' } : {}),
     stream: Boolean(config.onUpdate),
   };
 }

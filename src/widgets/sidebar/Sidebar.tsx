@@ -3,7 +3,8 @@ import { SquarePen, History, Box, Plus, PanelLeftClose, PanelLeft, Settings, Pin
 import { useWorkspaceStore } from '../../shared/store/useWorkspaceStore';
 import { WorkspaceResourceList } from '@/features/session/ui/WorkspaceResourceList';
 import { generateAutoTitle } from '@/features/session/titleService';
-import { loadMessages } from '@/entities/message/repository';
+import { AgentEventStore } from '@/features/agent-core/eventStore';
+import { projectMessages } from '@/features/agent-core/projector';
 import { readAppSettings } from '@/shared/lib/settings';
 import { useI18n } from '@/shared/i18n';
 
@@ -43,6 +44,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
   const [editing, setEditing] = useState<EditingState>(null);
   const [generatingTitleId, setGeneratingTitleId] = useState<string | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
+  const eventStoreRef = useRef(new AgentEventStore());
 
   const {
     sessions,
@@ -94,14 +96,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
     }
     setGeneratingTitleId(id);
 
-    let input: string;
-    if (type === 'session') {
-      input = loadMessages(id).find((message) => message.role === 'user')?.content || '无有效对话记录，请随意发挥。';
-    } else {
-      input = '这是一个容器的自动重命名，请随意起名。';
-    }
-
     try {
+      let input: string;
+      if (type === 'session') {
+        const events = await eventStoreRef.current.loadSessionEvents(id);
+        input = projectMessages(events).find((message) => message.role === 'user')?.content || '无有效对话记录，请随意发挥。';
+      } else {
+        input = '这是一个容器的自动重命名，请随意起名。';
+      }
       const title = await generateAutoTitle(input, { apiKey, baseUrl, model: apiModel });
       if (title) {
         if (type === 'session') renameSession(id, title);

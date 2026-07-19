@@ -1,0 +1,230 @@
+import { z } from 'zod';
+import type { ToolCall } from '@/entities/message/types';
+import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
+import type { AgentPlanItem, AgentToolResult, TaskContract } from './types';
+
+export interface ToolExecutionContext {
+  sessionId: string;
+  runId: string;
+  containerId: string;
+  runtime: AgentWorkspaceRuntime;
+  getTask: () => TaskContract;
+  updateTask: (updater: (current: TaskContract) => TaskContract) => void;
+}
+
+interface ToolDefinition<TInput> {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  schema: z.ZodType<TInput>;
+  readOnly: boolean;
+  concurrencySafe: boolean;
+  execute(input: TInput, context: ToolExecutionContext): Promise<AgentToolResult>;
+}
+
+export interface ParsedToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+const toolDefinitions: ToolDefinition<any>[] = [
+  {
+    name: 'workspace_tree',
+    description: 'Inspect the active workspace tree before editing. node_modules and .git are excluded.',
+    parameters: { type: 'object', properties: { max_depth: { type: 'integer', minimum: 1, maximum: 8 } }, required: ['max_depth'] },
+    schema: z.object({ max_depth: z.number().int().min(1).max(8) }),
+    readOnly: true,
+    concurrencySafe: true,
+    async execute(input, context) {
+      const entries = await context.runtime.listWorkspace(context.containerId, input.max_depth);
+      return { ok: true, content: entries.map((entry) => `${entry.isDirectory ? 'dir ' : 'file'} ${entry.path}`).join('\n') || '(workspace is empty)', data: entries };
+    },
+  },
+  {
+    name: 'read_file',
+    description: 'Read a bounded range from a text file in the active workspace. Read before changing an existing file.',
+    parameters: { type: 'object', properties: { path: { type: 'string' }, start_line: { type: 'integer', minimum: 1 }, end_line: { type: 'integer', minimum: 1, maximum: 10000 } }, required: ['path'] },
+    schema: z.object({ path: z.string().min(1), start_line: z.number().int().min(1).optional(), end_line: z.number().int().min(1).max(10_000).optional() }),
+    readOnly: true,
+    concurrencySafe: true,
+    async execute(input, context) {
+      const content = await context.runtime.readWorkspaceFile(context.containerId, input.path, input.start_line, input.end_line);
+      return { ok: true, content, data: { path: input.path } };
+    },
+  },
+  {
+    name: 'search_workspace',
+    description: 'Search text files in the active workspace. Use this instead of guessing where code lives.',
+    parameters: { type: 'object', properties: { query: { type: 'string' }, max_results: { type: 'integer', minimum: 1, maximum: 100 } }, required: ['query'] },
+    schema: z.object({ query: z.string().min(1), max_results: z.number().int().min(1).max(100).default(30) }),
+    readOnly: true,
+    concurrencySafe: true,
+    async execute(input, context) {
+      const matches = await context.runtime.searchWorkspace(context.containerId, input.query, input.max_results);
+      return { ok: true, content: matches.map((match) => `${match.path}:${match.line}: ${match.content}`).join('\n') || '(no matches)', data: matches };
+    },
+  },
+  {
+    name: 'apply_patch',
+    description: 'Apply one or more full-file changes atomically within the active workspace. expected_content prevents overwriting a file that changed after it was read.',
+    parameters: {
+      type: 'object',
+      properties: {
+        changes: {
+          type: 'array', minItems: 1, maxItems: 12,
+          items: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' }, expected_content: { type: 'string' } }, required: ['path', 'content'] },
+        },
+      },
+      required: ['changes'],
+    },
+    schema: z.object({ changes: z.array(z.object({ path: z.string().min(1), content: z.string(), expected_content: z.string().optional() })).min(1).max(12) }),
+    readOnly: false,
+    concurrencySafe: false,
+    async execute(input, context) {
+      const changes = await context.runtime.applyWorkspaceChanges(context.containerId, input.changes.map((change: { path: string; content: string; expected_content?: string }) => ({ path: change.path, content: change.content, expectedContent: change.expected_content })));
+      context.updateTask((task) => ({ ...task, changedWorkspace: true }));
+      return { ok: true, content: changes.map((change) => change.diff).join('\n\n'), data: changes, changedWorkspace: true };
+    },
+  },
+  {
+    name: 'shell_run',
+    description: 'Run a command inside the active WebContainer. Use foreground for inspection, tests, builds, and short commands; use background only for servers or long tasks.',
+    parameters: { type: 'object', properties: { command: { type: 'string' }, mode: { type: 'string', enum: ['foreground', 'background'] }, timeout_ms: { type: 'integer', minimum: 1000, maximum: 300000 } }, required: ['command', 'mode'] },
+    schema: z.object({ command: z.string().min(1), mode: z.enum(['foreground', 'background']), timeout_ms: z.number().int().min(1_000).max(300_000).optional() }),
+    readOnly: false,
+    concurrencySafe: false,
+    async execute(input, context) {
+      const result = await context.runtime.runShell({ ...input, containerId: context.containerId, sessionId: context.sessionId, runId: context.runId });
+      const process = result.process;
+      const output = process.output || '(no output)';
+      const content = `${result.timedOut ? 'Command still running after timeout.' : `Exit: ${process.exitCode ?? 'running'}`}\nPID: ${process.id}\n${output}`;
+      const isVerificationCommand = input.mode === 'foreground' && /(?:test|check|lint|build|typecheck|verify)/i.test(input.command);
+      const verification = isVerificationCommand ? { command: input.command, passed: !result.timedOut && process.exitCode === 0 } : undefined;
+      if (verification) context.updateTask((task) => ({ ...task, verified: true, evidence: [...task.evidence, `Verified: ${input.command}`] }));
+      return { ok: !result.timedOut && (process.exitCode ?? 0) === 0, content, data: process, verification };
+    },
+  },
+  {
+    name: 'process_observe',
+    description: 'Observe incremental output and exit state of an Agent-owned background process.',
+    parameters: { type: 'object', properties: { process_id: { type: 'string' }, cursor: { type: 'integer', minimum: 0 } }, required: ['process_id'] },
+    schema: z.object({ process_id: z.string().min(1), cursor: z.number().int().min(0).optional() }),
+    readOnly: true,
+    concurrencySafe: true,
+    async execute(input, context) {
+      const process = context.runtime.observeProcess(input.process_id, input.cursor);
+      if (!process) return { ok: false, content: 'Process not found.' };
+      return { ok: true, content: `Running: ${process.isRunning}\nExit: ${process.exitCode ?? 'pending'}\nCursor: ${process.cursor}\n${process.output || '(no new output)'}`, data: process };
+    },
+  },
+  {
+    name: 'process_input',
+    description: 'Send input to an Agent-owned interactive process.',
+    parameters: { type: 'object', properties: { process_id: { type: 'string' }, input: { type: 'string' } }, required: ['process_id', 'input'] },
+    schema: z.object({ process_id: z.string().min(1), input: z.string() }),
+    readOnly: false,
+    concurrencySafe: false,
+    async execute(input, context) {
+      const sent = await context.runtime.sendProcessInput(input.process_id, input.input);
+      return { ok: sent, content: sent ? 'Input sent.' : 'Process is not running.' };
+    },
+  },
+  {
+    name: 'process_stop',
+    description: 'Stop an Agent-owned background process that is no longer needed.',
+    parameters: { type: 'object', properties: { process_id: { type: 'string' } }, required: ['process_id'] },
+    schema: z.object({ process_id: z.string().min(1) }),
+    readOnly: false,
+    concurrencySafe: false,
+    async execute(input, context) {
+      const stopped = context.runtime.stopProcess(input.process_id);
+      return { ok: stopped, content: stopped ? 'Process stopped.' : 'Process is not running.' };
+    },
+  },
+];
+
+const controlToolDefinitions: ToolDefinition<any>[] = [
+  {
+    name: 'update_plan',
+    description: 'Maintain a short execution plan. Use it for non-trivial work before editing and whenever progress changes.',
+    parameters: { type: 'object', properties: { items: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' }, status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'blocked'] } }, required: ['id', 'title', 'status'] } } }, required: ['items'] },
+    schema: z.object({ items: z.array(z.object({ id: z.string().min(1), title: z.string().min(1), status: z.enum(['pending', 'in_progress', 'completed', 'blocked']) })).min(1).max(8) }),
+    readOnly: false,
+    concurrencySafe: false,
+    async execute(input, context) {
+      const plan: AgentPlanItem[] = input.items;
+      context.updateTask((task) => ({ ...task, plan }));
+      return { ok: true, content: `Plan updated with ${plan.length} steps.`, data: plan };
+    },
+  },
+  {
+    name: 'report_progress',
+    description: 'Send a concise public progress update. Do not expose private chain-of-thought.',
+    parameters: { type: 'object', properties: { message: { type: 'string', maxLength: 800 } }, required: ['message'] },
+    schema: z.object({ message: z.string().min(1).max(800) }),
+    readOnly: true,
+    concurrencySafe: true,
+    async execute(input) { return { ok: true, content: input.message, data: { progress: input.message } }; },
+  },
+  {
+    name: 'ask_user',
+    description: 'Ask only when blocked by missing credentials, an unrecoverable ambiguity, or an action outside the workspace.',
+    parameters: { type: 'object', properties: { question: { type: 'string', maxLength: 1000 } }, required: ['question'] },
+    schema: z.object({ question: z.string().min(1).max(1000) }),
+    readOnly: true,
+    concurrencySafe: false,
+    async execute(input) { return { ok: true, content: input.question, stopRun: 'awaiting_user' }; },
+  },
+  {
+    name: 'complete_task',
+    description: 'Finish only after the task contract has evidence. Workspace changes require a successful relevant verification command.',
+    parameters: { type: 'object', properties: { summary: { type: 'string', maxLength: 2000 }, evidence: { type: 'array', items: { type: 'string' }, maxItems: 12 } }, required: ['summary', 'evidence'] },
+    schema: z.object({ summary: z.string().min(1).max(2_000), evidence: z.array(z.string().min(1)).max(12) }),
+    readOnly: true,
+    concurrencySafe: false,
+    async execute(input, context) {
+      const task = context.getTask();
+      if (task.changedWorkspace && !task.verified) return { ok: false, content: 'Completion blocked: workspace changed but no relevant successful verification command has been recorded.' };
+      if (task.requiresPlan && !task.plan.length) return { ok: false, content: 'Completion blocked: this non-trivial task needs a recorded execution plan.' };
+      if (task.plan.some((item) => item.status === 'pending' || item.status === 'in_progress')) return { ok: false, content: 'Completion blocked: the execution plan still has unfinished steps.' };
+      context.updateTask((current) => ({ ...current, evidence: [...current.evidence, ...input.evidence] }));
+      return { ok: true, content: input.summary, finalSummary: input.summary, stopRun: 'completed' };
+    },
+  },
+];
+
+export class AgentToolRegistry {
+  private readonly byName = new Map([...toolDefinitions, ...controlToolDefinitions].map((tool) => [tool.name, tool]));
+
+  getApiDefinitions(): Array<{ type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }> {
+    return Array.from(this.byName.values()).map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } }));
+  }
+
+  getMetadata(name: string): Pick<ToolDefinition<unknown>, 'readOnly' | 'concurrencySafe'> | null {
+    const tool = this.byName.get(name);
+    return tool ? { readOnly: tool.readOnly, concurrencySafe: tool.concurrencySafe } : null;
+  }
+
+  async execute(call: ParsedToolCall, context: ToolExecutionContext): Promise<AgentToolResult> {
+    const tool = this.byName.get(call.name);
+    if (!tool) return { ok: false, content: `Tool ${call.name} is not available.` };
+    let input: unknown;
+    try {
+      input = JSON.parse(call.arguments || '{}');
+    } catch {
+      return { ok: false, content: `Tool ${call.name} received invalid JSON arguments.` };
+    }
+    const parsed = tool.schema.safeParse(input);
+    if (!parsed.success) return { ok: false, content: `Tool ${call.name} input validation failed: ${parsed.error.issues.map((issue) => issue.message).join('; ')}` };
+    try {
+      return await tool.execute(parsed.data, context);
+    } catch (error) {
+      return { ok: false, content: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  toMessageToolCall(call: ParsedToolCall): ToolCall {
+    return { id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } };
+  }
+}

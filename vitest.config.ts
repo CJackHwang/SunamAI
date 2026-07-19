@@ -17,10 +17,10 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary'],
       include: [
-        'src/shared/lib/{storage,settings,async,terminalHistory}.ts',
+        'src/shared/lib/{storage,settings,async}.ts',
         'src/shared/api/{llm,sse,models}.ts',
-        'src/entities/{workspace/repository.ts,message/repository.ts}',
-        'src/features/{chat-agent/agentLoop.ts,file-manager/fileUtils.ts}',
+        'src/entities/workspace/repository.ts',
+        'src/features/file-manager/fileUtils.ts',
       ],
       exclude: ['**/*.d.ts'],
       thresholds: {

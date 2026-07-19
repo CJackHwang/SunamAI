@@ -1,5 +1,4 @@
 import { WebContainer } from '@webcontainer/api';
-import { loadSnapshot } from './persistence.ts';
 
 let webcontainerInstance: WebContainer | null = null;
 let bootPromise: Promise<WebContainer> | null = null;
@@ -23,14 +22,6 @@ export const getWebContainer = async (): Promise<WebContainer> => {
       });
       webcontainerInstance = instance;
       console.log('WebContainer booted successfully.');
-
-      // Restore filesystem from IndexedDB snapshot if one exists
-      const snapshotData = await loadSnapshot();
-      if (snapshotData) {
-        console.log('Restoring filesystem from snapshot...');
-        await instance.mount(snapshotData);
-        console.log('Filesystem restored.');
-      }
 
       return instance;
     } catch (error) {
