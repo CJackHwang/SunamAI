@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { WebContainer } from '@webcontainer/api';
 import { Terminal } from '@xterm/xterm';
-import { Loader2, Maximize2, Minimize2, PanelRightClose, Monitor, Terminal as TerminalIcon, Folder, Server, Trash2, StopCircle, Globe, RotateCw, Search, ArrowLeft } from 'lucide-react';
+import { Loader2, Maximize2, Minimize2, PanelRightClose, Monitor, Terminal as TerminalIcon, Folder, Server, Trash2, StopCircle } from 'lucide-react';
 import TerminalView from '../../entities/container/TerminalView.tsx';
 import { getWebContainer } from '../../shared/lib/webcontainer.ts';
 import { saveSnapshot } from '../../shared/lib/persistence.ts';
@@ -16,8 +16,8 @@ export interface DualTerminalRef {
 
 interface DualTerminalProps {
   onReady?: () => void;
-  activeTab: 'ai' | 'user' | 'files' | 'services' | 'preview';
-  onTabChange: (tab: 'ai' | 'user' | 'files' | 'services' | 'preview') => void;
+  activeTab: 'ai' | 'user' | 'files' | 'services';
+  onTabChange: (tab: 'ai' | 'user' | 'files' | 'services') => void;
   layoutState?: 'half' | 'full' | 'collapsed';
   onLayoutChange?: (state: 'half' | 'full' | 'collapsed') => void;
   activeContainerId?: string | null;
@@ -37,9 +37,8 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
   const [, setProcessVersion] = useState(0);
   const forceUpdateProcesses = () => setProcessVersion(v => v + 1);
 
-  // Track exposed ports and preview URL
+  // Track exposed ports.
   const [activePorts, setActivePorts] = useState<{ port: number, url: string }[]>([]);
-  const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
 
   // Store onReady in a ref to prevent infinite loops if parent passes inline function
   const onReadyRef = useRef(onReady);
@@ -97,7 +96,9 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
   // Setup active container directory
   useEffect(() => {
     if (!wc || !isBooted || !activeContainerId) return;
-    
+    let disposed = false;
+    let unsubscribe: (() => void) | undefined;
+
     const setupContainer = async () => {
       try {
         const containerPath = `/${activeContainerId}`;
@@ -118,14 +119,21 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
             return [...filtered, { port, url }];
           });
         };
-        
-        wc.on('server-ready', handleServerReady);
+
+        if (!disposed) {
+          unsubscribe = wc.on('server-ready', handleServerReady);
+        }
       } catch (err) {
         console.error('Failed to setup container:', err);
       }
     };
     
-    setupContainer();
+    void setupContainer();
+
+    return () => {
+      disposed = true;
+      unsubscribe?.();
+    };
   }, [wc, isBooted, activeContainerId]);
 
   // Auto-save filesystem snapshot every 30s while container is running
@@ -259,10 +267,6 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
             <Server size={16} className="show-on-narrow" />
             <span className="hide-on-narrow">服务</span>
           </button>
-          <button className={`terminal-tab-btn ${activeTab === 'preview' ? 'active' : ''}`} onClick={() => onTabChange('preview')}>
-            <Globe size={16} className="show-on-narrow" />
-            <span className="hide-on-narrow">预览</span>
-          </button>
           <div style={{ flex: 1 }}></div>
           {onLayoutChange && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -308,9 +312,6 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
            <button className={`right-sidebar-btn ${activeTab === 'services' ? 'active' : ''}`} onClick={() => { onTabChange('services'); onLayoutChange?.('half'); }} title="服务">
              <Server size={20} />
            </button>
-           <button className={`right-sidebar-btn ${activeTab === 'preview' ? 'active' : ''}`} onClick={() => { onTabChange('preview'); onLayoutChange?.('half'); }} title="预览">
-             <Globe size={20} />
-           </button>
         </div>
       )}
       <div style={{ flex: 1, padding: activeTab === 'files' ? '0' : '16px', position: 'relative', overflow: 'hidden', display: layoutState === 'collapsed' ? 'none' : 'block' }}>
@@ -333,13 +334,15 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
                   <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', border: '1px solid var(--color-border)', borderRadius: '6px', backgroundColor: 'var(--color-surface)', gap: '12px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
                       <div style={{ fontSize: '14px', fontWeight: 500, color: 'var(--color-text)', whiteSpace: 'nowrap' }}>端口 {p.port}</div>
-                      <button 
-                        onClick={() => { setActivePreviewUrl(p.url); onTabChange('preview'); }} 
-                        style={{ fontSize: '13px', color: 'var(--color-primary)', textDecoration: 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', padding: 0 }} 
+                      <a
+                        href={p.url}
+                        target="_blank"
+                        rel="opener"
+                        style={{ fontSize: '13px', color: 'var(--color-primary)', textDecoration: 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
                         title={p.url}
                       >
                         {p.url} ↗
-                      </button>
+                      </a>
                     </div>
                     <button 
                       onClick={() => setActivePorts(prev => prev.filter(x => x.port !== p.port))}
@@ -401,86 +404,6 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
         </div>
       )}
 
-      {activeTab === 'preview' && (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff', overflow: 'hidden' }}>
-          {activePreviewUrl ? (
-            <>
-              <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)', gap: '12px' }}>
-                <button 
-                  onClick={() => setActivePreviewUrl(null)}
-                  style={{ background: 'none', border: 'none', color: 'var(--color-text)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px', borderRadius: '4px', gap: '4px' }}
-                  onMouseOver={e => e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'}
-                  onMouseOut={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                  title="退出预览"
-                >
-                  <ArrowLeft size={16} />
-                </button>
-                <button 
-                  onClick={() => {
-                    const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
-                    if (iframe) iframe.src = iframe.src;
-                  }}
-                  style={{ background: 'none', border: 'none', color: 'var(--color-text)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px', borderRadius: '4px' }}
-                  onMouseOver={e => e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'}
-                  onMouseOut={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                  title="刷新"
-                >
-                  <RotateCw size={16} />
-                </button>
-                <div style={{ flex: 1, backgroundColor: 'var(--color-bg)', padding: '6px 12px', borderRadius: '4px', fontSize: '13px', color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {activePreviewUrl}
-                </div>
-                <a href={activePreviewUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', padding: '6px', borderRadius: '4px' }} title="在新标签页中尝试打开" onMouseOver={e => e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'} onMouseOut={e => e.currentTarget.style.backgroundColor = 'transparent'}>
-                  <Maximize2 size={16} />
-                </a>
-              </div>
-              <div style={{ flex: 1, position: 'relative' }}>
-                <iframe 
-                  id="preview-iframe"
-                  src={activePreviewUrl} 
-                  style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
-                  allow="cross-origin-isolated"
-                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
-                />
-              </div>
-            </>
-          ) : (
-            <div style={{ containerType: 'inline-size', width: '100%', height: '100%' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', backgroundColor: '#fff', fontFamily: 'arial, sans-serif', padding: '0 20px' }}>
-                <div style={{ fontSize: 'clamp(32px, 15cqw, 84px)', fontWeight: 500, letterSpacing: '-1px', marginBottom: '24px', fontFamily: '"Product Sans", "Google Sans", "Helvetica Neue", Helvetica, Arial, sans-serif', userSelect: 'none', whiteSpace: 'nowrap' }}>
-                <span style={{ color: '#4285F4' }}>G</span>
-                <span style={{ color: '#EA4335' }}>o</span>
-                <span style={{ color: '#FBBC05' }}>l</span>
-                <span style={{ color: '#4285F4' }}>o</span>
-                <span style={{ color: '#34A853' }}>g</span>
-                <span style={{ color: '#EA4335' }}>o</span>
-                <span style={{ color: '#FBBC05' }}>l</span>
-                <span style={{ color: '#4285F4' }}>o</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', width: '100%', maxWidth: '584px', padding: '0 14px', height: '46px', borderRadius: '24px', border: '1px solid #dfe1e5', boxShadow: 'none', transition: 'box-shadow 200ms cubic-bezier(0.4, 0.0, 0.2, 1)' }}
-                   onMouseOver={e => e.currentTarget.style.boxShadow = '0 1px 6px rgba(32,33,36,.28)'}
-                   onMouseOut={e => e.currentTarget.style.boxShadow = 'none'}>
-                 <Search size={20} color="#9aa0a6" />
-                 <input 
-                   type="text" 
-                   readOnly
-                   placeholder="请在右侧“服务”面板中点击端口进行内网预览..." 
-                   style={{ flex: 1, border: 'none', outline: 'none', padding: '0 12px', fontSize: '16px', color: '#202124', backgroundColor: 'transparent', width: '100%', textOverflow: 'ellipsis' }}
-                 />
-              </div>
-              <div style={{ marginTop: '28px', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '12px' }}>
-                <button onClick={() => onTabChange('services')} style={{ backgroundColor: '#f8f9fa', border: '1px solid #f8f9fa', borderRadius: '4px', color: '#3c4043', fontSize: '14px', padding: '0 16px', height: '36px', whiteSpace: 'nowrap', cursor: 'pointer' }} onMouseOver={e => { e.currentTarget.style.border = '1px solid #dadce0'; e.currentTarget.style.boxShadow = '0 1px 1px rgba(0,0,0,.1)'; }} onMouseOut={e => { e.currentTarget.style.border = '1px solid #f8f9fa'; e.currentTarget.style.boxShadow = 'none'; }}>
-                  打开服务面板
-                </button>
-                <button onClick={() => onTabChange('services')} style={{ backgroundColor: '#f8f9fa', border: '1px solid #f8f9fa', borderRadius: '4px', color: '#3c4043', fontSize: '14px', padding: '0 16px', height: '36px', whiteSpace: 'nowrap', cursor: 'pointer' }} onMouseOver={e => { e.currentTarget.style.border = '1px solid #dadce0'; e.currentTarget.style.boxShadow = '0 1px 1px rgba(0,0,0,.1)'; }} onMouseOut={e => { e.currentTarget.style.border = '1px solid #f8f9fa'; e.currentTarget.style.boxShadow = 'none'; }}>
-                  手气不错
-                </button>
-              </div>
-            </div>
-          </div>
-          )}
-        </div>
-      )}
         {!isBooted && (
           <div style={{
             position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',

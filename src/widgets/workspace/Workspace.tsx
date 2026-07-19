@@ -5,7 +5,7 @@ import MarkdownRenderer from '../../components/MarkdownRenderer';
 import type { DualTerminalRef } from '../../features/terminal-session/DualTerminal.tsx';
 import { useReActAgent } from '../../features/chat-agent/useReActAgent.ts';
 import { useWorkspaceStore } from '../../shared/store/useWorkspaceStore.ts';
-import { MessageSquare, Terminal, Monitor, Folder, Send, Server, PanelLeft, Square, Globe, ArrowDown } from 'lucide-react';
+import { MessageSquare, Terminal, Monitor, Folder, Send, Server, PanelLeft, Square, ArrowDown } from 'lucide-react';
 
 // Error boundary to catch rendering errors
 class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean, error: string }> {
@@ -73,16 +73,15 @@ const ThinkingProcess: React.FC<{ content: string }> = ({ content }) => {
 const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, updateSessionStatus }) => {
   const terminalRef = useRef<DualTerminalRef>(null);
   const { messages, startTask, stopTask, retryCount } = useReActAgent(apiKey, baseUrl, apiModel, sunamModel, terminalRef, activeSessionId, activeContainerId, updateSessionStatus);
-  const { sessions } = useWorkspaceStore();
+  const { sessions, createSession, createContainer } = useWorkspaceStore();
   const isRunning = sessions.find(s => s.id === activeSessionId)?.status === 'running';
   
   const [input, setInput] = useState('');
   const [isTermReady, setIsTermReady] = useState(false);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 900);
 
-  const [terminalTab, setTerminalTab] = useState<'ai' | 'user' | 'files' | 'services' | 'preview'>('ai');
-  const [mobileActive, setMobileActive] = useState<'chat' | 'ai' | 'user' | 'files' | 'services' | 'preview'>('chat');
+  const [terminalTab, setTerminalTab] = useState<'ai' | 'user' | 'files' | 'services'>('ai');
+  const [mobileActive, setMobileActive] = useState<'chat' | 'ai' | 'user' | 'files' | 'services'>('chat');
   const [layoutState, setLayoutState] = useState<'half' | 'full' | 'collapsed'>('half');
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -106,17 +105,27 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
     }
   }, [messages, isRunning]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = (e?: React.SyntheticEvent) => {
+    if (e) e.preventDefault();
     if (!input.trim() || isRunning || !isTermReady) return;
-    startTask(input);
+
+    let sessionId = activeSessionId;
+    if (!sessionId) {
+      sessionId = createSession();
+    }
+    
+    let containerId = activeContainerId;
+    if (!containerId) {
+      containerId = createContainer();
+    }
+
+    startTask(input, sessionId, containerId);
     setInput('');
   };
 
   React.useEffect(() => {
     const handleResize = () => {
       const mobile = window.innerWidth <= 900;
-      setIsMobile(mobile);
       if (mobile) {
         setLayoutState('half');
       }
@@ -297,25 +306,60 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
               <ArrowDown size={16} />
             </button>
           )}
-          <form onSubmit={(e) => { handleSubmit(e); setTimeout(scrollToBottom, 50); }} style={{ display: 'flex', gap: '12px', alignItems: 'center', pointerEvents: 'auto', width: '100%' }}>
-            <input
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', pointerEvents: 'auto', width: '100%' }}>
+            <textarea
               className="input-field glass-input"
-              style={{ flex: 1, borderRadius: 'var(--radius-large)', padding: '0 20px 6px 20px', height: '44px' }}
+              rows={1}
+              style={{ 
+                flex: 1, 
+                borderRadius: '22px', 
+                padding: '10px 20px', 
+                minHeight: '44px', 
+                height: '44px',
+                maxHeight: '120px', 
+                resize: 'none',
+                overflowY: 'auto',
+                lineHeight: '24px',
+                fontFamily: 'inherit',
+                boxSizing: 'border-box'
+              }}
               value={input}
-              onChange={e => setInput(e.target.value)}
+              onChange={e => {
+                setInput(e.target.value);
+                e.target.style.height = '44px';
+                e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit(e);
+                  setTimeout(scrollToBottom, 50);
+                  const target = e.target as HTMLTextAreaElement;
+                  target.style.height = '44px';
+                }
+              }}
               disabled={isRunning || !isTermReady}
               placeholder={isTermReady ? "Ask Sunam anything..." : "Booting container..."}
             />
             <button
-              type={isRunning ? "button" : "submit"}
-              onClick={isRunning ? stopTask : undefined}
+              type="button"
+              onClick={(e) => {
+                if (isRunning) {
+                  stopTask();
+                } else {
+                  handleSubmit(e);
+                  setTimeout(scrollToBottom, 50);
+                  const textarea = e.currentTarget.previousElementSibling as HTMLTextAreaElement;
+                  if (textarea) textarea.style.height = '44px';
+                }
+              }}
               disabled={!isRunning && (!isTermReady || !input.trim())}
               className="btn btn-primary glass-btn"
-              style={{ borderRadius: '50%', width: '44px', height: '44px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+              style={{ borderRadius: '50%', width: '44px', height: '44px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginBottom: '0' }}
             >
               {isRunning ? <Square size={16} fill="currentColor" /> : <Send size={20} style={{ marginLeft: '-2px' }} />}
             </button>
-          </form>
+          </div>
         </div>
       </div>
 
@@ -381,13 +425,6 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
           title="服务"
         >
           <Server size={24} />
-        </button>
-        <button
-          className={mobileActive === 'preview' ? 'active' : ''}
-          onClick={() => { setMobileActive('preview'); setTerminalTab('preview'); }}
-          title="预览"
-        >
-          <Globe size={24} />
         </button>
       </div>
     </div>

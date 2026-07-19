@@ -104,12 +104,17 @@ export const useReActAgent = (apiKey: string, baseUrl: string, apiModel: string,
               });
               shouldBreak = true;
             } else if (toolCall.function.name === 'run_terminal_async') {
-              let args = { command: '' };
+              let args = { command: '', waitTime: 0 };
               try { args = JSON.parse(toolCall.function.arguments); } catch(e) {}
               let output = 'Failed to start.';
               if (terminalRef.current && args.command && containerId) {
                 const pid = await terminalRef.current.spawnAiProcess(args.command, containerId);
                 output = `Process started in background. Process ID: ${pid}`;
+                if (typeof args.waitTime === 'number' && args.waitTime > 0) {
+                  // Limit max wait time to 300 seconds to prevent total freeze, though model can specify any.
+                  const waitMs = Math.min(args.waitTime * 1000, 300000);
+                  await new Promise(resolve => setTimeout(resolve, waitMs));
+                }
               }
               newToolResults.push({ role: 'tool', tool_call_id: toolCall.id, name: 'run_terminal_async', content: output });
             } else if (toolCall.function.name === 'check_terminal_status') {
@@ -198,12 +203,28 @@ export const useReActAgent = (apiKey: string, baseUrl: string, apiModel: string,
   };
 
 
-  const startTask = (userPrompt: string) => {
-    if (!activeSessionId) return;
+  const startTask = (userPrompt: string, overrideSessionId?: string, overrideContainerId?: string) => {
+    const sId = overrideSessionId || activeSessionId;
+    const cId = overrideContainerId || activeContainerId;
+    if (!sId) return;
+
+    let currentMessages = messages;
+    if (overrideSessionId && overrideSessionId !== activeSessionId) {
+      currentMessages = [{ role: 'system', content: getSystemPrompt(sunamModel, cId) }];
+    } else if (currentMessages.length === 0) {
+      currentMessages = [{ role: 'system', content: getSystemPrompt(sunamModel, cId) }];
+    }
+
     const newUserMsg: Message = { role: 'user', content: userPrompt };
-    const newMessages = [...messages, newUserMsg];
-    setMessages(newMessages);
-    runLoop(newMessages, activeSessionId, activeContainerId);
+    const newMessages = [...currentMessages, newUserMsg];
+
+    if (overrideSessionId && overrideSessionId !== activeSessionId) {
+      localStorage.setItem(`sunam_messages_${overrideSessionId}`, JSON.stringify(newMessages));
+    } else {
+      setMessages(newMessages);
+    }
+    
+    runLoop(newMessages, sId, cId);
   };
 
   const stopTask = () => {

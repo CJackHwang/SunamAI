@@ -79,6 +79,7 @@ export function useWorkspaceStore() {
       sessions: [newSession, ...prev.sessions],
       activeSessionId: newSession.id,
     }));
+    return newSession.id;
   }, []);
 
   const renameSession = useCallback((id: string, newTitle: string) => {
@@ -138,6 +139,7 @@ export function useWorkspaceStore() {
       containers: [newContainer, ...prev.containers],
       activeContainerId: newContainer.id,
     }));
+    return newContainer.id;
   }, []);
 
   const renameContainer = useCallback((id: string, newName: string) => {

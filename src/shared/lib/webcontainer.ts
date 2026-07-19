@@ -16,7 +16,11 @@ export const getWebContainer = async (): Promise<WebContainer> => {
   bootPromise = (async () => {
     try {
       console.log('Booting WebContainer...');
-      const instance = await WebContainer.boot({ workdirName: 'sunam' });
+      // This must match the COEP header applied by Vite/Vercel.
+      const instance = await WebContainer.boot({
+        workdirName: 'sunam',
+        coep: 'credentialless',
+      });
       webcontainerInstance = instance;
       console.log('WebContainer booted successfully.');
 

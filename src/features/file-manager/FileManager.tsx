@@ -389,7 +389,7 @@ const FileManager: React.FC<FileManagerProps> = ({ wc, rootDir = '/' }) => {
             <input
               ref={newItemInputRef}
               className="input-field"
-              style={{ flex: 1, minWidth: 0, height: '36px', padding: '0 12px 6px' }}
+              style={{ flex: 1, minWidth: 0, height: '36px', padding: '0 12px' }}
               value={newItemName}
               onChange={e => setNewItemName(e.target.value)}
               onKeyDown={e => {
@@ -398,8 +398,8 @@ const FileManager: React.FC<FileManagerProps> = ({ wc, rootDir = '/' }) => {
               }}
               placeholder={newItemType === 'folder' ? '文件夹名称' : '文件名称'}
             />
-            <button className="btn btn-primary" style={{ height: '36px', padding: '0 16px 6px' }} onClick={confirmNewItem}>创建</button>
-            <button className="btn btn-secondary" style={{ height: '36px', padding: '0 16px 6px' }} onClick={() => { setNewItemType(null); setNewItemName(''); }}>取消</button>
+            <button className="btn btn-primary" style={{ height: '36px', padding: '0 16px' }} onClick={confirmNewItem}>创建</button>
+            <button className="btn btn-secondary" style={{ height: '36px', padding: '0 16px' }} onClick={() => { setNewItemType(null); setNewItemName(''); }}>取消</button>
           </div>
         )}
 
@@ -453,7 +453,7 @@ const FileManager: React.FC<FileManagerProps> = ({ wc, rootDir = '/' }) => {
               <input
                 ref={renameInputRef}
                 className="input-field"
-                style={{ flex: 1, minWidth: 0, height: '32px', padding: '0 10px 6px' }}
+                style={{ flex: 1, minWidth: 0, height: '32px', padding: '0 10px' }}
                 value={renameValue}
                 onChange={e => setRenameValue(e.target.value)}
                 onKeyDown={e => {

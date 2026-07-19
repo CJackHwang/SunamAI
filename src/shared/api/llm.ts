@@ -20,9 +20,13 @@ const TOOLS = [
           command: {
             type: 'string',
             description: 'The shell command to execute.'
+          },
+          waitTime: {
+            type: 'number',
+            description: 'The wait time (in seconds) to pause after executing the command before checking the results.'
           }
         },
-        required: ['command']
+        required: ['command', 'waitTime']
       }
     }
   },

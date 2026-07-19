@@ -110,7 +110,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
           </div>
           {!isCollapsed && (
             <>
-              <span className="sidebar-title" style={{ fontSize: '24px', fontWeight: 600, lineHeight: 1, letterSpacing: '-0.5px', transform: 'translateY(-2px)' }}>
+              <span className="sidebar-title" style={{ fontSize: '24px', fontWeight: 600, lineHeight: 1, letterSpacing: '-0.5px' }}>
                 Sunam
               </span>
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -136,7 +136,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
         <div className="sidebar-content">
           {/* Actions */}
           <div className="sidebar-section">
-            <button className="sidebar-action-btn" onClick={createSession}>
+            <button className="sidebar-action-btn" onClick={() => {
+              createSession();
+              if (!activeContainerId) createContainer();
+            }}>
               <SquarePen size={18} />
               {!isCollapsed && <span>新建任务</span>}
             </button>
@@ -158,37 +161,41 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
                 </button>
               </div>
               <div className="sidebar-list">
-                {sortedContainers.map(container => (
-                  <div 
-                    key={container.id} 
-                    className={`sidebar-item ${activeContainerId === container.id ? 'active' : ''}`}
-                    onClick={() => selectContainer(container.id)}
-                    onContextMenu={(e) => handleContextMenu(e, 'container', container.id)}
-                  >
-                    <Box size={16} style={{ flexShrink: 0, color: container.pinned ? 'var(--color-black)' : 'inherit' }} />
-                    {container.pinned && <Pin size={12} fill="currentColor" style={{ flexShrink: 0, marginLeft: '-4px', marginRight: '4px', opacity: 0.8 }} />}
-                    {editing?.id === container.id ? (
-                      <input 
-                        ref={editInputRef}
-                        className="item-text"
-                        style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', padding: 0, minWidth: 0 }}
-                        value={editing.text}
-                        onChange={e => setEditing({ ...editing, text: e.target.value })}
-                        onBlur={handleRenameSubmit}
-                        onKeyDown={e => e.key === 'Enter' && handleRenameSubmit()}
-                        onClick={e => e.stopPropagation()}
-                      />
-                    ) : (
-                      <span className="item-text">{container.name}</span>
-                    )}
-                    <button 
-                      className="item-action" 
-                      onClick={(e) => { e.stopPropagation(); handleContextMenu(e, 'container', container.id); }}
+                {sortedContainers.length === 0 ? (
+                  <div style={{ fontSize: '13px', color: 'var(--color-text-tertiary, #999)', textAlign: 'center', padding: '12px 0' }}>暂无可用容器</div>
+                ) : (
+                  sortedContainers.map(container => (
+                    <div 
+                      key={container.id} 
+                      className={`sidebar-item ${activeContainerId === container.id ? 'active' : ''}`}
+                      onClick={() => selectContainer(container.id)}
+                      onContextMenu={(e) => handleContextMenu(e, 'container', container.id)}
                     >
-                      <MoreHorizontal size={14} />
-                    </button>
-                  </div>
-                ))}
+                      <Box size={16} style={{ flexShrink: 0, color: container.pinned ? 'var(--color-black)' : 'inherit' }} />
+                      {container.pinned && <Pin size={12} fill="currentColor" style={{ flexShrink: 0, marginLeft: '-4px', marginRight: '4px', opacity: 0.8 }} />}
+                      {editing?.id === container.id ? (
+                        <input 
+                          ref={editInputRef}
+                          className="item-text"
+                          style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', padding: 0, minWidth: 0 }}
+                          value={editing.text}
+                          onChange={e => setEditing({ ...editing, text: e.target.value })}
+                          onBlur={handleRenameSubmit}
+                          onKeyDown={e => e.key === 'Enter' && handleRenameSubmit()}
+                          onClick={e => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span className="item-text">{container.name}</span>
+                      )}
+                      <button 
+                        className="item-action" 
+                        onClick={(e) => { e.stopPropagation(); handleContextMenu(e, 'container', container.id); }}
+                      >
+                        <MoreHorizontal size={14} />
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -198,40 +205,44 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
             <div className="sidebar-section">
               <div className="sidebar-section-title">历史对话</div>
               <div className="sidebar-list">
-                {sortedSessions.map(session => (
-                  <div 
-                    key={session.id} 
-                    className={`sidebar-item ${activeSessionId === session.id ? 'active' : ''}`}
-                    onClick={() => selectSession(session.id)}
-                    onContextMenu={(e) => handleContextMenu(e, 'session', session.id)}
-                  >
-                    <History size={16} style={{ flexShrink: 0, color: session.pinned ? 'var(--color-black)' : 'inherit' }} />
-                    {session.pinned && <Pin size={12} fill="currentColor" style={{ flexShrink: 0, marginLeft: '-4px', marginRight: '4px', opacity: 0.8 }} />}
-                    {editing?.id === session.id ? (
-                      <input 
-                        ref={editInputRef}
-                        className="item-text"
-                        style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', padding: 0, minWidth: 0 }}
-                        value={editing.text}
-                        onChange={e => setEditing({ ...editing, text: e.target.value })}
-                        onBlur={handleRenameSubmit}
-                        onKeyDown={e => e.key === 'Enter' && handleRenameSubmit()}
-                        onClick={e => e.stopPropagation()}
-                      />
-                    ) : (
-                      <span className="item-text">{session.title}</span>
-                    )}
-                    {session.status === 'running' && <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-primary)' }} />}
-                    {session.status === 'completed_unread' && <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />}
-                    {session.status === 'failed_unread' && <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }} />}
-                    <button 
-                      className="item-action" 
-                      onClick={(e) => { e.stopPropagation(); handleContextMenu(e, 'session', session.id); }}
+                {sortedSessions.length === 0 ? (
+                  <div style={{ fontSize: '13px', color: 'var(--color-text-tertiary, #999)', textAlign: 'center', padding: '12px 0' }}>暂无对话记录</div>
+                ) : (
+                  sortedSessions.map(session => (
+                    <div 
+                      key={session.id} 
+                      className={`sidebar-item ${activeSessionId === session.id ? 'active' : ''}`}
+                      onClick={() => selectSession(session.id)}
+                      onContextMenu={(e) => handleContextMenu(e, 'session', session.id)}
                     >
-                      <MoreHorizontal size={14} />
-                    </button>
-                  </div>
-                ))}
+                      <History size={16} style={{ flexShrink: 0, color: session.pinned ? 'var(--color-black)' : 'inherit' }} />
+                      {session.pinned && <Pin size={12} fill="currentColor" style={{ flexShrink: 0, marginLeft: '-4px', marginRight: '4px', opacity: 0.8 }} />}
+                      {editing?.id === session.id ? (
+                        <input 
+                          ref={editInputRef}
+                          className="item-text"
+                          style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', padding: 0, minWidth: 0 }}
+                          value={editing.text}
+                          onChange={e => setEditing({ ...editing, text: e.target.value })}
+                          onBlur={handleRenameSubmit}
+                          onKeyDown={e => e.key === 'Enter' && handleRenameSubmit()}
+                          onClick={e => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span className="item-text">{session.title}</span>
+                      )}
+                      {session.status === 'running' && <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-primary)' }} />}
+                      {session.status === 'completed_unread' && <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />}
+                      {session.status === 'failed_unread' && <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }} />}
+                      <button 
+                        className="item-action" 
+                        onClick={(e) => { e.stopPropagation(); handleContextMenu(e, 'session', session.id); }}
+                      >
+                        <MoreHorizontal size={14} />
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
