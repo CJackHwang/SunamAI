@@ -8,6 +8,11 @@ const catalogues: Partial<Record<Locale, TranslationCatalogue>> = { 'zh-CN': zhC
 const isLocale = (value: string): value is Locale => SUPPORTED_LOCALES.includes(value as Locale);
 async function getCatalogue(locale: Locale): Promise<TranslationCatalogue> {
   if (catalogues[locale]) return catalogues[locale];
+  if (locale === 'ja-JP') {
+    const module = await import('./locales/ja-JP');
+    catalogues['ja-JP'] = module.jaJP;
+    return module.jaJP;
+  }
   const module = await import('./locales/en-US');
   catalogues['en-US'] = module.enUS;
   return module.enUS;
