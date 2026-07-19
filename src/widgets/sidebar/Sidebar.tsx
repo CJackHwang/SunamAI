@@ -165,13 +165,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
                     onClick={() => selectContainer(container.id)}
                     onContextMenu={(e) => handleContextMenu(e, 'container', container.id)}
                   >
-                    <Box size={16} style={{ color: container.pinned ? 'var(--color-black)' : 'inherit' }} />
-                    {container.pinned && <Pin size={12} fill="currentColor" style={{ marginLeft: '-4px', marginRight: '4px', opacity: 0.8 }} />}
+                    <Box size={16} style={{ flexShrink: 0, color: container.pinned ? 'var(--color-black)' : 'inherit' }} />
+                    {container.pinned && <Pin size={12} fill="currentColor" style={{ flexShrink: 0, marginLeft: '-4px', marginRight: '4px', opacity: 0.8 }} />}
                     {editing?.id === container.id ? (
                       <input 
                         ref={editInputRef}
                         className="item-text"
-                        style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', padding: 0 }}
+                        style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', padding: 0, minWidth: 0 }}
                         value={editing.text}
                         onChange={e => setEditing({ ...editing, text: e.target.value })}
                         onBlur={handleRenameSubmit}
@@ -205,13 +205,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
                     onClick={() => selectSession(session.id)}
                     onContextMenu={(e) => handleContextMenu(e, 'session', session.id)}
                   >
-                    <History size={16} style={{ color: session.pinned ? 'var(--color-black)' : 'inherit' }} />
-                    {session.pinned && <Pin size={12} fill="currentColor" style={{ marginLeft: '-4px', marginRight: '4px', opacity: 0.8 }} />}
+                    <History size={16} style={{ flexShrink: 0, color: session.pinned ? 'var(--color-black)' : 'inherit' }} />
+                    {session.pinned && <Pin size={12} fill="currentColor" style={{ flexShrink: 0, marginLeft: '-4px', marginRight: '4px', opacity: 0.8 }} />}
                     {editing?.id === session.id ? (
                       <input 
                         ref={editInputRef}
                         className="item-text"
-                        style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', padding: 0 }}
+                        style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', padding: 0, minWidth: 0 }}
                         value={editing.text}
                         onChange={e => setEditing({ ...editing, text: e.target.value })}
                         onBlur={handleRenameSubmit}

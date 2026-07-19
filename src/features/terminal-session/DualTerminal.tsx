@@ -265,7 +265,8 @@ const DualTerminal = React.forwardRef<DualTerminalRef, DualTerminalProps>(({ onR
           </button>
           <div style={{ flex: 1 }}></div>
           {onLayoutChange && (
-            <div style={{ display: 'flex', gap: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <div style={{ width: '1px', height: '16px', backgroundColor: 'var(--color-border)', margin: '0 12px 0 8px' }}></div>
               {layoutState === 'half' ? (
                 <button 
                   className="desktop-only-btn terminal-icon-btn" 

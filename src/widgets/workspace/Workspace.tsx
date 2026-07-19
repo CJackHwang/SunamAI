@@ -173,8 +173,20 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamM
 
             {isModelMenuOpen && (
               <>
-                <div className={`context-overlay ${isMobile ? 'dimmed' : ''}`} onClick={() => setIsModelMenuOpen(false)} />
-                <div className="context-menu" style={{ position: 'absolute', top: '100%', left: '0', marginTop: '4px' }}>
+                <div 
+                  className="context-overlay dimmed"
+                  onClick={() => setIsModelMenuOpen(false)} 
+                  style={{ 
+                    top: '-100vh', bottom: '-100vh', left: '-100vw', right: '-100vw', 
+                    zIndex: 900
+                  }} 
+                />
+                <div style={{ 
+                  position: 'absolute', top: '100%', left: '0', marginTop: '4px',
+                  backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-medium)',
+                  boxShadow: 'var(--elevation-4)', padding: '4px', minWidth: '180px', zIndex: 1001,
+                  display: 'flex', flexDirection: 'column'
+                }}>
                   <button className="context-item" onClick={() => { setSunamModel('Sunam 1.14 Homo'); localStorage.setItem('sunam_model', 'Sunam 1.14 Homo'); setIsModelMenuOpen(false); }}>Sunam 1.14 Homo</button>
                   <button className="context-item" onClick={() => { setSunamModel('Sunam 1.14 Saki'); localStorage.setItem('sunam_model', 'Sunam 1.14 Saki'); setIsModelMenuOpen(false); }}>Sunam 1.14 Saki</button>
                   <button className="context-item" onClick={() => { setSunamModel('Sunam 5.14 Homo'); localStorage.setItem('sunam_model', 'Sunam 5.14 Homo'); setIsModelMenuOpen(false); }}>Sunam 5.14 Homo</button>
