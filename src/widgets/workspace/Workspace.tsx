@@ -20,8 +20,9 @@ class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError:
 interface WorkspaceProps {
   apiKey: string;
   baseUrl: string;
-  model: string;
-  setModel: (model: string) => void;
+  apiModel: string;
+  sunamModel: string;
+  setSunamModel: (model: string) => void;
   onMobileSidebarToggle?: () => void;
 }
 
@@ -65,9 +66,9 @@ const ThinkingProcess: React.FC<{ content: string }> = ({ content }) => {
   );
 };
 
-const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model, setModel, onMobileSidebarToggle }) => {
+const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle }) => {
   const terminalRef = useRef<DualTerminalRef>(null);
-  const { messages, startTask, stopTask, isRunning, retryCount } = useReActAgent(apiKey, baseUrl, model, terminalRef);
+  const { messages, startTask, stopTask, isRunning, retryCount } = useReActAgent(apiKey, baseUrl, apiModel, sunamModel, terminalRef);
   const [input, setInput] = useState('');
   const [isTermReady, setIsTermReady] = useState(false);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
@@ -136,7 +137,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model, setModel,
                 transform: 'translateY(-4px)'
               }}
             >
-              {model}
+              {sunamModel}
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-text-secondary)' }}><path d="m6 9 6 6 6-6" /></svg>
             </button>
 
@@ -144,11 +145,11 @@ const Workspace: React.FC<WorkspaceProps> = ({ apiKey, baseUrl, model, setModel,
               <>
                 <div className={`context-overlay ${isMobile ? 'dimmed' : ''}`} onClick={() => setIsModelMenuOpen(false)} />
                 <div className="context-menu" style={{ position: 'absolute', top: '100%', left: '0', marginTop: '4px' }}>
-                  <button className="context-item" onClick={() => { setModel('Sunam 1.14 Homo'); localStorage.setItem('sunam_model', 'Sunam 1.14 Homo'); setIsModelMenuOpen(false); }}>Sunam 1.14 Homo</button>
-                  <button className="context-item" onClick={() => { setModel('Sunam 1.14 Saki'); localStorage.setItem('sunam_model', 'Sunam 1.14 Saki'); setIsModelMenuOpen(false); }}>Sunam 1.14 Saki</button>
-                  <button className="context-item" onClick={() => { setModel('Sunam 5.14 Homo'); localStorage.setItem('sunam_model', 'Sunam 5.14 Homo'); setIsModelMenuOpen(false); }}>Sunam 5.14 Homo</button>
-                  <button className="context-item" onClick={() => { setModel('Sunam 5.14 Saki'); localStorage.setItem('sunam_model', 'Sunam 5.14 Saki'); setIsModelMenuOpen(false); }}>Sunam 5.14 Saki</button>
-                  <button className="context-item" onClick={() => { setModel('Sunam NEGA 69B'); localStorage.setItem('sunam_model', 'Sunam NEGA 69B'); setIsModelMenuOpen(false); }}>Sunam NEGA 69B</button>
+                  <button className="context-item" onClick={() => { setSunamModel('Sunam 1.14 Homo'); localStorage.setItem('sunam_model', 'Sunam 1.14 Homo'); setIsModelMenuOpen(false); }}>Sunam 1.14 Homo</button>
+                  <button className="context-item" onClick={() => { setSunamModel('Sunam 1.14 Saki'); localStorage.setItem('sunam_model', 'Sunam 1.14 Saki'); setIsModelMenuOpen(false); }}>Sunam 1.14 Saki</button>
+                  <button className="context-item" onClick={() => { setSunamModel('Sunam 5.14 Homo'); localStorage.setItem('sunam_model', 'Sunam 5.14 Homo'); setIsModelMenuOpen(false); }}>Sunam 5.14 Homo</button>
+                  <button className="context-item" onClick={() => { setSunamModel('Sunam 5.14 Saki'); localStorage.setItem('sunam_model', 'Sunam 5.14 Saki'); setIsModelMenuOpen(false); }}>Sunam 5.14 Saki</button>
+                  <button className="context-item" onClick={() => { setSunamModel('Sunam NEGA 69B'); localStorage.setItem('sunam_model', 'Sunam NEGA 69B'); setIsModelMenuOpen(false); }}>Sunam NEGA 69B</button>
                 </div>
               </>
             )}

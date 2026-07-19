@@ -3,8 +3,10 @@ import type { Message } from '../../entities/message/types.ts';
 import { callLLM } from '../../shared/api/llm.ts';
 import type { DualTerminalRef } from '../terminal-session/DualTerminal.tsx';
 
-const SYSTEM_PROMPT = `You are Sunam, a pure frontend serverless AI assistant.
-You are running in a browser-based container environment (WebContainer).
+const personaPrompts: Record<string, string> = import.meta.glob('../../assets/ACT_system_prompt/*.txt', { query: '?raw', import: 'default', eager: true });
+
+const getSystemPrompt = (sunamModel: string) => {
+  const basePrompt = `You are running in a browser-based container environment (WebContainer).
 You have maximum privileges in this environment. 
 You MUST explore the environment to fulfill user requests. Do not ask for environment info upfront.
 You have a dedicated terminal called "Sunam's Computer".
@@ -14,15 +16,32 @@ If you need to talk to the user (e.g. ask questions, provide updates, show resul
 Keep your text responses concise and professional.
 CRITICAL: DO NOT use any emojis in your text output. Emojis are strictly prohibited globally in this UI.`;
 
-export const useReActAgent = (apiKey: string, baseUrl: string, model: string, terminalRef: React.RefObject<DualTerminalRef | null>) => {
+  const personaKey = Object.keys(personaPrompts).find(key => key.endsWith(`/${sunamModel}.txt`));
+  const personaText = personaKey ? personaPrompts[personaKey].trim() : '';
+
+  if (personaText) {
+    return `${personaText}\n\n${basePrompt}`;
+  }
+  return basePrompt;
+};
+
+export const useReActAgent = (apiKey: string, baseUrl: string, apiModel: string, sunamModel: string, terminalRef: React.RefObject<DualTerminalRef | null>) => {
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'system', content: SYSTEM_PROMPT }
+    { role: 'system', content: getSystemPrompt(sunamModel) }
   ]);
   const [isRunning, setIsRunning] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const abortControllerRef = React.useRef<AbortController | null>(null);
 
-
+  React.useEffect(() => {
+    setMessages(prev => {
+      const newMessages = [...prev];
+      if (newMessages.length > 0 && newMessages[0].role === 'system') {
+        newMessages[0].content = getSystemPrompt(sunamModel);
+      }
+      return newMessages;
+    });
+  }, [sunamModel]);
 
   const runLoop = async (initialMessages: Message[]) => {
     setIsRunning(true);
@@ -38,7 +57,7 @@ export const useReActAgent = (apiKey: string, baseUrl: string, model: string, te
         }
         
         const responseMessage = await callLLM(currentMessages, { 
-          apiKey, baseUrl, model,
+          apiKey, baseUrl, model: apiModel,
           signal: abortControllerRef.current.signal,
           onUpdate: (partial) => {
             setMessages([...currentMessages, partial]);
