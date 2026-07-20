@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/header-max.png" alt="Sunam — The useless AI agent" width="100%" />
+</p>
+
 # Sunam
 
 Sunam 是运行在浏览器中的开源 AI 编程助手。它通过 OpenAI-compatible Chat Completions API 连接模型，并使用 [WebContainer](https://webcontainers.io/) 在浏览器内提供隔离的文件系统、终端和本地服务预览。
