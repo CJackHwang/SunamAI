@@ -1,9 +1,10 @@
 import { Edit2, Pin, Sparkles, Trash2 } from 'lucide-react';
-import type { CSSProperties } from 'react';
+import { useRef, type CSSProperties } from 'react';
+import { usePresence } from '@/shared/ui/usePresence';
 import type { SidebarContextMenuState, SidebarResource } from './sidebarResources';
 
 interface SidebarResourceContextMenuProps {
-  menu: SidebarContextMenuState;
+  menu: SidebarContextMenuState | null;
   resource?: SidebarResource;
   dimmed: boolean;
   labels: { rename: string; generateTitle: string; pin: string; unpin: string; delete: string };
@@ -15,13 +16,17 @@ interface SidebarResourceContextMenuProps {
 }
 
 export function SidebarResourceContextMenu({ menu, resource, dimmed, labels, onClose, onRename, onGenerateTitle, onTogglePin, onDelete }: SidebarResourceContextMenuProps) {
-  const position = { '--context-menu-x': `${menu.x}px`, '--context-menu-y': `${menu.y}px` } as CSSProperties;
+  const { presentValue: presentMenu, isExiting } = usePresence(menu);
+  const lastResource = useRef(resource);
+  if (resource) lastResource.current = resource;
+  if (!presentMenu) return null;
+  const position = { '--context-menu-x': `${presentMenu.x}px`, '--context-menu-y': `${presentMenu.y}px` } as CSSProperties;
   return <>
-    <div className={`context-overlay ${dimmed ? 'dimmed' : ''}`} onClick={onClose} />
-    <div className="context-menu context-menu-positioned sidebar-context-menu" style={position}>
+    <div className={`context-overlay ${dimmed ? 'dimmed' : ''} ${isExiting ? 'is-exiting' : ''}`} onClick={onClose} />
+    <div className={`context-menu context-menu-positioned sidebar-context-menu ${isExiting ? 'is-exiting' : ''}`} style={position}>
       <button className="context-item" onClick={onRename}><Edit2 size={16} className="context-item-icon" />{labels.rename}</button>
       <button className="context-item" onClick={onGenerateTitle}><Sparkles size={16} className="context-item-icon" />{labels.generateTitle}</button>
-      <button className="context-item" onClick={onTogglePin}><Pin size={16} className="context-item-icon" />{resource?.pinned ? labels.unpin : labels.pin}</button>
+      <button className="context-item" onClick={onTogglePin}><Pin size={16} className="context-item-icon" />{lastResource.current?.pinned ? labels.unpin : labels.pin}</button>
       <div className="context-divider" />
       <button className="context-item danger" onClick={onDelete}><Trash2 size={16} className="context-item-icon" />{labels.delete}</button>
     </div>

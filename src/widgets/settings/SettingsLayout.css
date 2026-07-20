@@ -24,6 +24,9 @@
   background-color: rgba(0, 0, 0, 0.5);
 }
 
+.modal-backdrop.is-exiting { pointer-events: none; animation: settings-overlay-out var(--motion-base) ease-in both; }
+.settings-modal-content.is-exiting { animation: settings-modal-out var(--motion-base) cubic-bezier(.4, 0, 1, 1) both; }
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -70,10 +73,26 @@
 
   @media (prefers-reduced-motion: no-preference) {
     .settings-modal-content.motion-panel-in { animation-name: settings-sheet-in; animation-timing-function: var(--motion-sheet); }
+    .settings-modal-content.is-exiting { animation-name: settings-sheet-out; animation-timing-function: cubic-bezier(.4, 0, 1, 1); }
   }
 }
 
 @keyframes settings-sheet-in {
   from { opacity: 0; transform: translateY(100%); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes settings-sheet-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(100%); }
+}
+
+@keyframes settings-modal-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(8px) scale(.985); }
+}
+
+@keyframes settings-overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }

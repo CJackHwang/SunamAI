@@ -14,9 +14,10 @@ interface SettingsModalProps {
   onLocaleChange: (locale: Locale) => Promise<void>;
   onSave: (apiKey: string, baseUrl: string, model: string) => void;
   onClose: () => void;
+  isExiting?: boolean;
 }
 
-const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, onLocaleChange, onSave, onClose }: SettingsModalProps) => {
+const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, onLocaleChange, onSave, onClose, isExiting = false }: SettingsModalProps) => {
   const { t } = useI18n();
   const [apiKey, setApiKey] = useState(initialApiKey);
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
@@ -43,7 +44,7 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
   };
 
   return (
-    <Modal title={t('settings.title')} onDismiss={initialApiKey ? onClose : undefined}>
+    <Modal title={t('settings.title')} onDismiss={initialApiKey ? onClose : undefined} isExiting={isExiting}>
         
         <div className="settings-field">
           <label>

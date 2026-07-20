@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import SettingsModal from '../widgets/settings/SettingsModal.tsx';
 import { Sidebar } from '../widgets/sidebar/Sidebar.tsx';
 import { useWorkspaceStore } from '@/entities/workspace/store';
@@ -21,13 +21,40 @@ const MainPage: React.FC = () => {
   const [sunamModel, setSunamModel] = useState<SunamModel>(initialSettings.sunamModel);
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(!apiKey);
+  const [isSettingsClosing, setIsSettingsClosing] = useState(false);
+  const settingsCloseTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (settingsCloseTimer.current !== null) window.clearTimeout(settingsCloseTimer.current);
+  }, []);
+
+  const openSettings = () => {
+    if (settingsCloseTimer.current !== null) window.clearTimeout(settingsCloseTimer.current);
+    settingsCloseTimer.current = null;
+    setIsSettingsClosing(false);
+    setIsSettingsOpen(true);
+  };
+
+  const closeSettings = () => {
+    if (isSettingsClosing) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      setIsSettingsOpen(false);
+      return;
+    }
+    setIsSettingsClosing(true);
+    settingsCloseTimer.current = window.setTimeout(() => {
+      setIsSettingsOpen(false);
+      setIsSettingsClosing(false);
+      settingsCloseTimer.current = null;
+    }, 240);
+  };
 
   const handleSaveSettings = (key: string, url: string, newApiModel: string) => {
     setApiKey(key);
     setBaseUrl(url);
     setApiModel(newApiModel);
     saveConnectionSettings({ apiKey: key, baseUrl: url, apiModel: newApiModel });
-    setIsSettingsOpen(false);
+    closeSettings();
   };
 
   const handleSunamModelChange = (model: SunamModel) => {
@@ -39,7 +66,7 @@ const MainPage: React.FC = () => {
   return (
     <div className="app-container">
       <Sidebar 
-        onOpenSettings={() => setIsSettingsOpen(true)} 
+        onOpenSettings={openSettings}
         isMobileOpen={isMobileOpen} 
         onCloseMobile={() => setIsMobileOpen(false)} 
       />
@@ -80,7 +107,8 @@ const MainPage: React.FC = () => {
           locale={locale}
           onLocaleChange={(nextLocale: Locale) => setLocale(nextLocale)}
           onSave={handleSaveSettings}
-          onClose={() => apiKey && setIsSettingsOpen(false)}
+          onClose={() => apiKey && closeSettings()}
+          isExiting={isSettingsClosing}
         />
       )}
     </div>

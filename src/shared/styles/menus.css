@@ -11,6 +11,11 @@
   background-color: rgba(0, 0, 0, 0.4);
 }
 
+.context-overlay.is-exiting {
+  pointer-events: none;
+  animation: context-overlay-out 160ms ease-in both;
+}
+
 .context-menu,
 .avatar-menu {
   position: fixed;
@@ -32,6 +37,11 @@
   top: min(var(--context-menu-y), calc(100vh - 250px));
 }
 
+.context-menu.is-exiting {
+  pointer-events: none;
+  animation: context-menu-out 160ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
 @keyframes context-menu-in {
   from {
     opacity: 0;
@@ -42,6 +52,16 @@
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
+
+@keyframes context-menu-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-4px) scale(.98); }
+}
+
+@keyframes context-overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 .context-item {
@@ -97,6 +117,8 @@
     animation: context-sheet-up var(--motion-slow) var(--motion-sheet);
   }
 
+  .context-menu.is-exiting { animation: context-sheet-down var(--motion-base) cubic-bezier(0.4, 0, 1, 1) both; }
+
   @keyframes context-sheet-up {
     from {
       transform: translateY(100%);
@@ -107,6 +129,11 @@
       transform: translateY(0);
       opacity: 1;
     }
+  }
+
+  @keyframes context-sheet-down {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(100%); }
   }
 
   .context-item {
