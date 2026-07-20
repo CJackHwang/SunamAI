@@ -1,4 +1,6 @@
-# Sunam Agent Core v2：能力内核与荒诞外观的分离设计
+# Sunam Agent Core v2：执行内核设计
+
+本文记录已经实施的 Agent Core v2 约束和明确留待后续阶段的扩展边界。它既是架构决策记录，也是修改 Agent、工具、恢复或持久化逻辑时的行为契约；模块边界见 [架构说明](architecture.md)。
 
 ## 0. 范围与结论
 
@@ -112,7 +114,7 @@ preparing → planning → acting → observing / verifying
 4. **子 Agent**：独立 Run/sidechain/event stream，父 Run 只能接收经过摘要和证据归并的结果；不共享取消域或未审核的写权限。
 5. **更强恢复校验**：为 checkpoint 添加消息数、事件尾序号、workspace snapshot revision，恢复时检测 drift 并提示用户重新检查，而不是静默拼接。
 
-## 9. 验收指标
+## 9. 维护时必须保持的性质
 
 - 旧纯 loop Agent 完全删除，生产路径只能创建 `AgentEngine`；
 - 100% 工具调用 schema 校验，所有运行时行为事件化；
@@ -121,3 +123,5 @@ preparing → planning → acting → observing / verifying
 - 只读并发上限为 4，写入/命令无竞态；
 - 核心测试覆盖率门槛：lines/statements/functions ≥85%，branches ≥80%；
 - v2 repository 只提供当前运行链使用的读写、隔离与按作用域删除接口，不预留未接入产品的导入导出代码。
+
+相关自动化和人工发布场景见 [发布与重构验收清单](refactor-acceptance.md)。

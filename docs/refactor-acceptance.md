@@ -1,8 +1,12 @@
-# 重构验收清单
+# 发布与重构验收清单
+
+本清单用于影响 Agent、工作区持久化、WebContainer 或交互布局的发布前验证。它区分每次代码变更可自动执行的门禁，以及需要真实 Chromium 环境确认的场景。
 
 ## 自动化门禁
 
-- `npm run typecheck`、`npm run lint`、`npm run test:coverage`、`npm run build`、`npm run check:bundle`、`npm run test:e2e` 全部通过。
+- `npm run check` 必须通过；它依次执行 TypeScript、Oxlint、覆盖率测试、生产构建和包体检查。
+- 涉及页面交互时运行 `npm run test:e2e`；涉及视觉样式时运行 `npm run test:visual` 并审查基线变化。
+- 涉及 WebContainer、终端、端口服务、跨源隔离或快照恢复时运行 `npm run test:runtime`。
 - 核心领域与基础服务覆盖率最低为 lines/statements 85%、functions 85%、branches 80%。
 - Playwright 以 Chromium 验证首次 API 配置门禁，并在 1440×900 与 390×844 保存视觉基线，最大像素差异比为 0.2%。
 - `npm run test:runtime` 使用假 API Key 启动真实 WebContainer，不发送模型请求，用于验证生产 COEP/COOP 环境。
@@ -24,3 +28,7 @@
 5. 在容器中创建服务，确认端口列表；创建、上传、改名、移动、预览和下载文件。
 6. 创建文件、启动/停止服务、输出 Agent 日志后刷新页面，确认 v2 workspace、快照和终端历史恢复；在 900px 断点两侧检查移动导航和服务列表内部滚动。
 7. 服务链接必须以 `noopener noreferrer` 打开；在 Chrome 中点击本地服务后不得自动打开 DevTools 或保留 `window.opener`。
+
+## 记录结果
+
+发布说明或 Pull Request 应记录实际执行过的命令、未执行的项目及原因，以及任何需要人工复核的视觉基线或浏览器差异。不要把未运行的检查标为通过；这与 Agent 的验证证据规则一致。
