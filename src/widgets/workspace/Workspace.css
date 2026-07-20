@@ -2,7 +2,7 @@
 .chat-section { position: relative; display: flex; min-width: 0; flex: 1; flex-direction: column; border-right: 1px solid var(--color-border); background: var(--color-bg); }
 .workspace-container[data-layout="full"] .chat-section { display: none; }
 .terminal-section { display: flex; min-width: 0; flex: 0 0 50%; flex-direction: column; border-left: 0; background: var(--color-surface); transition: flex-basis var(--motion-slow) var(--motion-sheet); }
-.workspace-container[data-layout="collapsed"] .terminal-section { min-width: 56px; flex-basis: 56px; }
+.workspace-container[data-layout="collapsed"] .terminal-section { min-width: var(--nav-rail-width); flex-basis: var(--nav-rail-width); }
 .workspace-container[data-layout="full"] .terminal-section { position: fixed; inset: 0; z-index: 100; padding-top: 0; }
 .workspace-lazy-state { height: 100%; }
 .workspace-runtime-error { position: absolute; right: 16px; bottom: 16px; max-width: 420px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--color-danger) 35%, var(--color-border)); border-radius: var(--radius-small); background: var(--color-surface); color: var(--color-danger); }

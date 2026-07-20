@@ -2,7 +2,7 @@
 .terminal-tabs-spacer { flex: 1; }
 .terminal-layout-actions { display: flex; align-items: center; gap: 4px; }
 .terminal-tabs-divider { width: 1px; height: 16px; margin: 0 12px 0 8px; background: var(--color-border); }
-.collapsed-terminal-nav { display: flex; width: 56px; height: 100%; flex-direction: column; align-items: center; gap: var(--nav-icon-gap); padding-top: 16px; background: var(--color-surface); }
+.collapsed-terminal-nav { display: flex; width: var(--nav-rail-width); height: 100%; flex-direction: column; align-items: center; gap: var(--nav-icon-gap); padding-top: 16px; background: var(--color-surface); }
 .right-sidebar-btn { display: flex; width: 36px; min-height: 36px; flex-shrink: 0; align-items: center; justify-content: center; margin: 0 auto; padding: 0; border: 0; border-radius: var(--radius-medium); background: transparent; color: var(--color-text-secondary); cursor: pointer; transition: background-color var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-fast) var(--motion-snappy); }
 .right-sidebar-btn.active { background: var(--color-gray-100); color: var(--color-black); }
 .right-sidebar-btn:hover { background: var(--color-gray-200); }
