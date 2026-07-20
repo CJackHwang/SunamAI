@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent, type TouchEvent } from 'react';
 import type { WebContainer } from '@webcontainer/api';
-import { AlertCircle, Upload, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { AlertCircle, FileText, Folder, Upload, X } from 'lucide-react';
 import type { FileEntry } from '@/entities/file/types';
 import { useI18n } from '@/shared/i18n';
 import { IMAGE_EXTENSIONS, getExtension, isPreviewableFile, TEXT_EXTENSIONS } from './fileUtils';
@@ -11,6 +12,18 @@ import { FileContextMenu, type FileContextMenuState } from './FileContextMenu';
 import './FileManager.css';
 
 interface FileManagerProps { wc: WebContainer | null; rootDir?: string; rootLabel?: string; }
+
+interface TouchGesture {
+  entry: FileEntry;
+  startX: number;
+  startY: number;
+  x: number;
+  y: number;
+  armed: boolean;
+  cancelled: boolean;
+  dragging: boolean;
+  target: string | null;
+}
 
 export default function FileManager({ wc, rootDir = '/', rootLabel }: FileManagerProps) {
   const { t, format } = useI18n();
@@ -24,8 +37,11 @@ export default function FileManager({ wc, rootDir = '/', rootLabel }: FileManage
   const [isDragOver, setIsDragOver] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
+  const [touchDrag, setTouchDrag] = useState<{ entry: FileEntry; x: number; y: number } | null>(null);
   const dragCounter = useRef(0);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchGestureRef = useRef<TouchGesture | null>(null);
+  const touchMoveBlockerRef = useRef<((event: globalThis.TouchEvent) => void) | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -39,6 +55,10 @@ export default function FileManager({ wc, rootDir = '/', rootLabel }: FileManage
     renameInputRef.current.setSelectionRange(0, dotIndex > 0 ? dotIndex : renameValue.length);
   }, [renamingEntry, renameValue]);
   useEffect(() => { if (newItemType) newItemInputRef.current?.focus(); }, [newItemType]);
+  useEffect(() => () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    if (touchMoveBlockerRef.current) document.removeEventListener('touchmove', touchMoveBlockerRef.current);
+  }, []);
 
   const handleDownload = useCallback(async (entry: FileEntry) => {
     try {
@@ -106,11 +126,68 @@ export default function FileManager({ wc, rootDir = '/', rootLabel }: FileManage
     else void handleDownload(entry);
   };
   const openContextMenu = (entry: FileEntry, x: number, y: number) => setContextMenu({ x, y, entry });
-  const handleLongPressStart = (event: TouchEvent, entry: FileEntry) => {
-    isLongPressing.current = false;
-    longPressTimer.current = setTimeout(() => { isLongPressing.current = true; const touch = event.touches[0]; setContextMenu({ x: touch.clientX, y: touch.clientY, entry }); }, 400);
+  const clearLongPressTimer = () => { if (longPressTimer.current) clearTimeout(longPressTimer.current); longPressTimer.current = null; };
+  const clearTouchMoveBlocker = () => {
+    if (touchMoveBlockerRef.current) document.removeEventListener('touchmove', touchMoveBlockerRef.current);
+    touchMoveBlockerRef.current = null;
   };
-  const handleLongPressEnd = () => { if (longPressTimer.current) clearTimeout(longPressTimer.current); longPressTimer.current = null; };
+  const findTouchDropTarget = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-fm-drop-target]')?.dataset.fmDropTarget ?? null;
+  const handleTouchStart = (event: TouchEvent, entry: FileEntry) => {
+    if (event.touches.length !== 1) return;
+    clearLongPressTimer();
+    const touch = event.touches[0];
+    const gesture: TouchGesture = { entry, startX: touch.clientX, startY: touch.clientY, x: touch.clientX, y: touch.clientY, armed: false, cancelled: false, dragging: false, target: null };
+    touchGestureRef.current = gesture;
+    isLongPressing.current = false;
+    longPressTimer.current = setTimeout(() => {
+      if (touchGestureRef.current !== gesture || gesture.cancelled) return;
+      gesture.armed = true;
+      isLongPressing.current = true;
+      const blockTouchScroll = (moveEvent: globalThis.TouchEvent) => { if (touchGestureRef.current?.armed) moveEvent.preventDefault(); };
+      touchMoveBlockerRef.current = blockTouchScroll;
+      document.addEventListener('touchmove', blockTouchScroll, { passive: false });
+      navigator.vibrate?.(10);
+    }, 400);
+  };
+  const handleTouchMove = (event: TouchEvent) => {
+    const gesture = touchGestureRef.current;
+    const touch = event.touches[0];
+    if (!gesture || !touch) return;
+    gesture.x = touch.clientX;
+    gesture.y = touch.clientY;
+    const distance = Math.hypot(gesture.x - gesture.startX, gesture.y - gesture.startY);
+    if (!gesture.armed) {
+      if (distance > 8) { gesture.cancelled = true; clearLongPressTimer(); }
+      return;
+    }
+    if (distance <= 6) return;
+    gesture.dragging = true;
+    gesture.target = findTouchDropTarget(gesture.x, gesture.y);
+    if (gesture.target === gesture.entry.name) gesture.target = null;
+    setDragOverFolder(gesture.target);
+    setTouchDrag({ entry: gesture.entry, x: gesture.x, y: gesture.y });
+  };
+  const finishTouchGesture = () => {
+    clearLongPressTimer();
+    clearTouchMoveBlocker();
+    touchGestureRef.current = null;
+    setTouchDrag(null);
+    setDragOverFolder(null);
+    window.setTimeout(() => { isLongPressing.current = false; }, 0);
+  };
+  const handleTouchEnd = (event: TouchEvent) => {
+    const gesture = touchGestureRef.current;
+    if (!gesture) return;
+    if (gesture.dragging) {
+      if (gesture.target === '..' && fs.parentPath) void fs.moveFile(gesture.entry.name, fs.parentPath);
+      else if (gesture.target) void fs.moveFile(gesture.entry.name, fs.currentPath === '/' ? `/${gesture.target}` : `${fs.currentPath}/${gesture.target}`);
+    } else if (gesture.armed && !gesture.cancelled) {
+      const touch = event.changedTouches[0];
+      setContextMenu({ x: touch?.clientX ?? gesture.x, y: touch?.clientY ?? gesture.y, entry: gesture.entry });
+    }
+    finishTouchGesture();
+  };
+  const handleTouchCancel = () => finishTouchGesture();
   const handleDragEnter = (event: DragEvent) => { event.preventDefault(); dragCounter.current += 1; if (event.dataTransfer.types.includes('Files')) setIsDragOver(true); };
   const handleDragLeave = (event: DragEvent) => { event.preventDefault(); dragCounter.current -= 1; if (dragCounter.current === 0) setIsDragOver(false); };
   const handleDrop = async (event: DragEvent) => { event.preventDefault(); dragCounter.current = 0; setIsDragOver(false); if (event.dataTransfer.files.length) await fs.uploadFiles(event.dataTransfer.files); };
@@ -118,12 +195,13 @@ export default function FileManager({ wc, rootDir = '/', rootLabel }: FileManage
   const handleParentDrop = async (event: DragEvent) => { event.preventDefault(); event.stopPropagation(); setDragOverFolder(null); const source = event.dataTransfer.getData('text/plain'); if (source && fs.parentPath) await fs.moveFile(source, fs.parentPath); };
   const handleFileInputChange = async (event: ChangeEvent<HTMLInputElement>) => { if (event.target.files?.length) { await fs.uploadFiles(event.target.files); event.target.value = ''; } };
 
-  return <div className={`fm-container ${isDragOver ? 'fm-drop-active' : ''}`} onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
+  return <div className={`fm-container ${isDragOver ? 'fm-drop-active' : ''} ${touchDrag ? 'fm-touch-dragging' : ''}`} onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
     <input ref={fileInputRef} type="file" multiple className="fm-hidden-input" onChange={handleFileInputChange} />
     <FileManagerToolbar rootDir={rootDir} rootLabel={rootLabel} currentPath={fs.currentPath} onNavigate={(path) => { void fs.navigateTo(path); }} onRefresh={fs.refresh} onCreateFile={() => { setNewItemType('file'); setNewItemName(''); }} onCreateFolder={() => { setNewItemType('folder'); setNewItemName(''); }} onUpload={() => fileInputRef.current?.click()} />
     {(fs.error || operationError) && <div className="fm-error motion-notice-in"><AlertCircle size={14} />{fs.error || operationError}<button className="fm-error-dismiss" onClick={() => { fs.clearError(); setOperationError(null); }}><X size={14} /></button></div>}
     {isDragOver && <div className="fm-drop-label motion-pop-in"><Upload size={24} className="fm-drop-icon" />{t('files.dropToUpload')}</div>}
-    <FileEntryList entries={fs.entries} isLoading={fs.isLoading} selectedItem={selectedItem} dragOverFolder={dragOverFolder} renamingEntry={renamingEntry} renameValue={renameValue} newItemType={newItemType} newItemName={newItemName} showParentEntry={Boolean(fs.parentPath)} isParentDragOver={dragOverFolder === '..'} listRef={listRef} renameInputRef={renameInputRef} newItemInputRef={newItemInputRef} onClearSelection={() => setSelectedItem(null)} onGoUp={fs.goUp} onParentDragOver={(event) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setDragOverFolder('..'); }} onParentDrop={(event) => { void handleParentDrop(event); }} onItemClick={handleItemClick} onItemDoubleClick={handleItemDoubleClick} onOpenContextMenu={openContextMenu} onLongPressStart={handleLongPressStart} onLongPressEnd={handleLongPressEnd} onDragStart={(event, entry) => { event.dataTransfer.setData('text/plain', entry.name); event.dataTransfer.effectAllowed = 'move'; }} onFolderDragOver={(event, name) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setDragOverFolder(name); }} onFolderDragLeave={() => setDragOverFolder(null)} onFolderDrop={handleFolderDrop} onRenameChange={setRenameValue} onRenameConfirm={() => { void confirmRename(); }} onRenameCancel={cancelRename} onNewNameChange={setNewItemName} onNewConfirm={() => { void confirmNewItem(); }} onNewCancel={cancelNewItem} />
+    <FileEntryList entries={fs.entries} isLoading={fs.isLoading} selectedItem={selectedItem} dragOverFolder={dragOverFolder} renamingEntry={renamingEntry} renameValue={renameValue} newItemType={newItemType} newItemName={newItemName} showParentEntry={Boolean(fs.parentPath)} isParentDragOver={dragOverFolder === '..'} listRef={listRef} renameInputRef={renameInputRef} newItemInputRef={newItemInputRef} onClearSelection={() => setSelectedItem(null)} onGoUp={fs.goUp} onParentDragOver={(event) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setDragOverFolder('..'); }} onParentDrop={(event) => { void handleParentDrop(event); }} onItemClick={handleItemClick} onItemDoubleClick={handleItemDoubleClick} onOpenContextMenu={openContextMenu} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchCancel} onDragStart={(event, entry) => { event.dataTransfer.setData('text/plain', entry.name); event.dataTransfer.effectAllowed = 'move'; }} onFolderDragOver={(event, name) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setDragOverFolder(name); }} onFolderDragLeave={() => setDragOverFolder(null)} onFolderDrop={handleFolderDrop} onRenameChange={setRenameValue} onRenameConfirm={() => { void confirmRename(); }} onRenameCancel={cancelRename} onNewNameChange={setNewItemName} onNewConfirm={() => { void confirmNewItem(); }} onNewCancel={cancelNewItem} />
     <FileContextMenu menu={contextMenu} onClose={closeContextMenu} onPreview={(entry) => { void handlePreview(entry); }} onDownload={(entry) => { void handleDownload(entry); }} onRename={startRename} onDelete={(entry) => { void handleDelete(entry); }} />
+    {touchDrag && createPortal(<div className="fm-touch-drag-preview" style={{ left: touchDrag.x, top: touchDrag.y }}>{touchDrag.entry.isDirectory ? <Folder size={18} /> : <FileText size={18} />}<span>{touchDrag.entry.name}</span></div>, document.body)}
   </div>;
 }

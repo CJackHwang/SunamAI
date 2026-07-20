@@ -157,6 +157,11 @@
 .fm-parent-item .fm-item-name { color: var(--color-text-secondary); font-weight: 500; }
 .fm-parent-icon { color: var(--color-text-secondary); }
 
+.fm-touch-dragging { touch-action: none; }
+.fm-touch-drag-preview { position: fixed; z-index: 1400; display: flex; max-width: min(260px, calc(100vw - 24px)); align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid var(--color-border); border-radius: 12px; background: color-mix(in srgb, var(--color-surface) 92%, transparent); box-shadow: 0 8px 24px rgb(0 0 0 / 16%); color: var(--color-text); font-size: 13px; pointer-events: none; transform: translate(-50%, calc(-100% - 14px)); }
+.fm-touch-drag-preview svg { flex: 0 0 auto; }
+.fm-touch-drag-preview span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .fm-item-icon {
   width: 24px;
   height: 24px;
