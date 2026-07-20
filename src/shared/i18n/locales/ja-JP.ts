@@ -97,6 +97,7 @@ export const jaJP = {
   'files.folder': 'フォルダ',
   'files.preview': 'プレビュー',
   'files.download': 'ダウンロード',
+  'files.actions': 'ファイル操作',
   'files.previewUnsupported': '"{{name}}" はプレビューできません。このファイルをダウンロードしますか？',
   'files.confirmDelete': '{{type}} "{{name}}" を削除してもよろしいですか？',
   'files.emptyHint': 'ファイルをここにドラッグしてアップロードするか、ツールバーのボタンをクリックして新しく作成します',

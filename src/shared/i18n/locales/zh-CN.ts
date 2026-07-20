@@ -95,6 +95,7 @@ export const zhCN = {
   'files.folder': '文件夹',
   'files.preview': '预览',
   'files.download': '下载',
+  'files.actions': '文件操作',
   'files.previewUnsupported': '无法预览 "{{name}}"，是否下载此文件？',
   'files.confirmDelete': '确定删除{{type}} "{{name}}" 吗？',
   'files.emptyHint': '拖拽文件到此处上传，或点击工具栏按钮新建',

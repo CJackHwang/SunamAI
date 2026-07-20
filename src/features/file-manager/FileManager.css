@@ -304,7 +304,8 @@
 .fm-new-item-action { height: 36px; padding: 0 16px; }
 .fm-empty-hint { font-size: 12px; }
 .fm-rename-input { height: 32px; min-width: 0; flex: 1; padding: 0 10px; }
-.fm-item-menu { display: none; width: 32px; height: 32px; }
+.fm-item-menu { display: flex; width: 32px; height: 32px; opacity: 0; transform: translateX(4px) scale(.94); pointer-events: none; transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--motion-spring); }
+.fm-item:hover .fm-item-menu, .fm-item:focus-within .fm-item-menu { opacity: 1; transform: translateX(0) scale(1); pointer-events: auto; }
 .fm-hidden-input { display: none; }
 .fm-error-dismiss { margin-left: auto; }
 .fm-drop-icon { margin-right: 8px; }
@@ -349,6 +350,8 @@
   .fm-item-size {
     display: none;
   }
+
+  .fm-item-menu { opacity: 1; transform: none; pointer-events: auto; }
 
 
 

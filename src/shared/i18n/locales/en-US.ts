@@ -97,6 +97,7 @@ export const enUS = {
   'files.folder': 'folder',
   'files.preview': 'Preview',
   'files.download': 'Download',
+  'files.actions': 'File actions',
   'files.previewUnsupported': 'Cannot preview "{{name}}". Download this file instead?',
   'files.confirmDelete': 'Delete {{type}} "{{name}}"?',
   'files.emptyHint': 'Drop files here to upload, or use the toolbar to create one',
