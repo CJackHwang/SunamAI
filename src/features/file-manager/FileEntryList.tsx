@@ -1,5 +1,5 @@
 import type { CSSProperties, DragEvent, MouseEvent, RefObject, TouchEvent } from 'react';
-import { FileText, Folder, FolderOpen, MoreVertical } from 'lucide-react';
+import { FileText, Folder, FolderOpen, FolderUp, MoreVertical } from 'lucide-react';
 import type { FileEntry } from '@/entities/file/types';
 import { useI18n } from '@/shared/i18n';
 import { formatSize } from './fileUtils';
@@ -13,10 +13,15 @@ interface FileEntryListProps {
   renameValue: string;
   newItemType: 'file' | 'folder' | null;
   newItemName: string;
+  showParentEntry: boolean;
+  isParentDragOver: boolean;
   listRef: RefObject<HTMLDivElement | null>;
   renameInputRef: RefObject<HTMLInputElement | null>;
   newItemInputRef: RefObject<HTMLInputElement | null>;
   onClearSelection: () => void;
+  onGoUp: () => void;
+  onParentDragOver: (event: DragEvent) => void;
+  onParentDrop: (event: DragEvent) => void;
   onItemClick: (event: MouseEvent, entry: FileEntry) => void;
   onItemDoubleClick: (event: MouseEvent, entry: FileEntry) => void;
   onOpenContextMenu: (entry: FileEntry, x: number, y: number) => void;
@@ -37,6 +42,10 @@ interface FileEntryListProps {
 export function FileEntryList(props: FileEntryListProps) {
   const { t } = useI18n();
   return <div className="fm-list" ref={props.listRef} onClick={props.onClearSelection}>
+    {props.showParentEntry && <button type="button" className={`fm-item fm-parent-item ${props.isParentDragOver ? 'drag-over' : ''}`} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => { event.stopPropagation(); props.onGoUp(); }} onKeyDown={(event) => { if (event.key === 'Enter') props.onGoUp(); }} onDragOver={props.onParentDragOver} onDragLeave={props.onFolderDragLeave} onDrop={props.onParentDrop}>
+      <span className="fm-item-icon fm-parent-icon"><FolderUp size={22} /></span>
+      <span className="fm-item-name">{t('files.goUp')}</span>
+    </button>}
     {props.newItemType && <div className="fm-new-item motion-rise-in"><input ref={props.newItemInputRef} className="input-field fm-new-item-input" value={props.newItemName} onChange={(event) => props.onNewNameChange(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') props.onNewConfirm(); if (event.key === 'Escape') props.onNewCancel(); }} placeholder={props.newItemType === 'folder' ? t('files.folderName') : t('files.fileName')} /><button className="btn btn-primary fm-new-item-action" onClick={props.onNewConfirm}>{t('common.create')}</button><button className="btn btn-secondary fm-new-item-action" onClick={props.onNewCancel}>{t('common.cancel')}</button></div>}
     {props.isLoading && props.entries.length === 0 && [1, 2, 3, 4, 5].map((item) => <div key={item} className="fm-skeleton"><div className="fm-skeleton-icon" /><div className="fm-skeleton-text" style={{ '--skeleton-width': `${40 + item * 8}%` } as CSSProperties} /></div>)}
     {!props.isLoading && props.entries.length === 0 && <div className="fm-empty motion-fade-in"><FolderOpen size={40} color="var(--color-black)" /><span>{t('files.empty')}</span><span className="fm-empty-hint">{t('files.emptyHint')}</span></div>}

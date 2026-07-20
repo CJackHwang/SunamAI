@@ -10,9 +10,15 @@ const entry = { name: 'notes.txt', isDirectory: false, size: 12 };
 describe('desktop file actions', () => {
   it('opens the context menu with desktop pointer coordinates', () => {
     const onOpenContextMenu = vi.fn();
-    render(<I18nProvider><FileEntryList entries={[entry]} isLoading={false} selectedItem={null} dragOverFolder={null} renamingEntry={null} renameValue="" newItemType={null} newItemName="" listRef={createRef()} renameInputRef={createRef()} newItemInputRef={createRef()} onClearSelection={vi.fn()} onItemClick={vi.fn()} onItemDoubleClick={vi.fn()} onOpenContextMenu={onOpenContextMenu} onLongPressStart={vi.fn()} onLongPressEnd={vi.fn()} onDragStart={vi.fn()} onFolderDragOver={vi.fn()} onFolderDragLeave={vi.fn()} onFolderDrop={vi.fn()} onRenameChange={vi.fn()} onRenameConfirm={vi.fn()} onRenameCancel={vi.fn()} onNewNameChange={vi.fn()} onNewConfirm={vi.fn()} onNewCancel={vi.fn()} /></I18nProvider>);
+    const onGoUp = vi.fn();
+    render(<I18nProvider><FileEntryList entries={[entry]} isLoading={false} selectedItem={null} dragOverFolder={null} renamingEntry={null} renameValue="" newItemType={null} newItemName="" showParentEntry isParentDragOver={false} listRef={createRef()} renameInputRef={createRef()} newItemInputRef={createRef()} onClearSelection={vi.fn()} onGoUp={onGoUp} onParentDragOver={vi.fn()} onParentDrop={vi.fn()} onItemClick={vi.fn()} onItemDoubleClick={vi.fn()} onOpenContextMenu={onOpenContextMenu} onLongPressStart={vi.fn()} onLongPressEnd={vi.fn()} onDragStart={vi.fn()} onFolderDragOver={vi.fn()} onFolderDragLeave={vi.fn()} onFolderDrop={vi.fn()} onRenameChange={vi.fn()} onRenameConfirm={vi.fn()} onRenameCancel={vi.fn()} onNewNameChange={vi.fn()} onNewConfirm={vi.fn()} onNewCancel={vi.fn()} /></I18nProvider>);
     fireEvent.contextMenu(screen.getByText('notes.txt').closest('.fm-item')!, { clientX: 640, clientY: 320 });
     expect(onOpenContextMenu).toHaveBeenCalledWith(entry, 640, 320);
+    const parentEntry = screen.getByRole('button', { name: '返回上级' });
+    fireEvent.click(parentEntry);
+    expect(onGoUp).not.toHaveBeenCalled();
+    fireEvent.doubleClick(parentEntry);
+    expect(onGoUp).toHaveBeenCalledOnce();
   });
 
   it('portals the menu outside transformed terminal ancestors', () => {

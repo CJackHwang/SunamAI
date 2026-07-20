@@ -16,6 +16,12 @@ function isWithinRoot(path: string, rootDir: string): boolean {
   return rootDir === '/' || path === rootDir || path.startsWith(`${rootDir}/`);
 }
 
+function getParentPath(path: string, rootDir: string): string | null {
+  if (path === rootDir || path === '/') return null;
+  const parent = path.substring(0, path.lastIndexOf('/')) || '/';
+  return rootDir !== '/' && !parent.startsWith(rootDir) ? rootDir : parent;
+}
+
 async function movePath(wc: WebContainer, source: string, destination: string): Promise<void> {
   await wc.fs.rename(source, destination);
 }
@@ -91,11 +97,10 @@ export function useFileSystem(wc: WebContainer | null, rootDir = '/') {
     try { await operation(); refresh(); }
     catch (caught) { setError(`${fallbackError}: ${caught instanceof Error ? caught.message : String(caught)}`); }
   }, [refresh]);
+  const parentPath = getParentPath(currentPath, rootDir);
   const goUp = useCallback(() => {
-    if (currentPath === rootDir || currentPath === '/') return;
-    const parent = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/';
-    void navigateTo(rootDir !== '/' && !parent.startsWith(rootDir) ? rootDir : parent);
-  }, [currentPath, navigateTo, rootDir]);
+    if (parentPath) void navigateTo(parentPath);
+  }, [navigateTo, parentPath]);
   const createFile = useCallback(async (name: string, content = '') => { if (!wc) return; await run(async () => { validate(name); await wc.fs.writeFile(joinPath(currentPathRef.current, name), content); }, 'Failed to create file'); }, [run, wc]);
   const createDir = useCallback(async (name: string) => { if (!wc) return; await run(async () => { validate(name); await wc.fs.mkdir(joinPath(currentPathRef.current, name), { recursive: true }); }, 'Failed to create directory'); }, [run, wc]);
   const remove = useCallback(async (name: string) => { if (!wc) return; await run(async () => { validate(name); await wc.fs.rm(joinPath(currentPathRef.current, name), { recursive: true }); }, 'Failed to delete'); }, [run, wc]);
@@ -106,5 +111,5 @@ export function useFileSystem(wc: WebContainer | null, rootDir = '/') {
   const uploadFile = useCallback(async (file: File) => { if (!wc) return; await run(async () => { validate(file.name); await wc.fs.writeFile(joinPath(currentPathRef.current, file.name), new Uint8Array(await file.arrayBuffer())); }, 'Failed to upload'); }, [run, wc]);
   const uploadFiles = useCallback(async (files: FileList | File[]) => { for (const file of Array.from(files)) await uploadFile(file); }, [uploadFile]);
 
-  return { entries, currentPath, isLoading, error, clearError: () => setError(null), navigateTo, refresh, goUp, createFile, createDir, remove, rename, moveFile, readFile, readFileRaw, uploadFile, uploadFiles };
+  return { entries, currentPath, parentPath, isLoading, error, clearError: () => setError(null), navigateTo, refresh, goUp, createFile, createDir, remove, rename, moveFile, readFile, readFileRaw, uploadFile, uploadFiles };
 }

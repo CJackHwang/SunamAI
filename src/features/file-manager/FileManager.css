@@ -153,6 +153,10 @@
   outline-offset: -2px;
 }
 
+.fm-parent-item { width: 100%; color: var(--color-text-secondary); text-align: left; }
+.fm-parent-item .fm-item-name { color: var(--color-text-secondary); font-weight: 500; }
+.fm-parent-icon { color: var(--color-text-secondary); }
+
 .fm-item-icon {
   width: 24px;
   height: 24px;

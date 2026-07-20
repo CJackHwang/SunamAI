@@ -46,6 +46,12 @@ describe('useFileSystem', () => {
     await waitFor(() => expect(nodes.has('/c/renamed.txt')).toBe(true));
     await act(async () => { await result.current.moveFile('renamed.txt', '/c/target'); });
     await waitFor(() => expect(nodes.has('/c/target/renamed.txt')).toBe(true));
+    await act(async () => { await result.current.navigateTo('/c/target'); });
+    expect(result.current.parentPath).toBe('/c');
+    await act(async () => { await result.current.moveFile('renamed.txt', result.current.parentPath!); });
+    await waitFor(() => expect(nodes.has('/c/renamed.txt')).toBe(true));
+    act(() => { result.current.goUp(); });
+    await waitFor(() => expect(result.current.currentPath).toBe('/c'));
     await act(async () => { await result.current.remove('existing.txt'); });
     await waitFor(() => expect(nodes.has('/c/existing.txt')).toBe(false));
     await act(async () => { await result.current.createFile('../escape.txt'); });
