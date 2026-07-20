@@ -33,7 +33,7 @@ export default function SyntaxCodeBlock({ language, children }: SyntaxCodeBlockP
       style={vscDarkPlus}
       language={language}
       PreTag="div"
-      customStyle={{ margin: 0, padding: '16px', fontSize: '13px', lineHeight: '1.5' }}
+      customStyle={{ maxWidth: '100%', margin: 0, overflowX: 'auto', padding: '16px', fontSize: '13px', lineHeight: '1.5', overscrollBehaviorX: 'contain' }}
     >
       {children}
     </SyntaxHighlighter>

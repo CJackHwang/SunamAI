@@ -1,6 +1,6 @@
-.chat-message { max-width: 100%; align-self: flex-start; padding: 16px 20px; border: 1px solid var(--color-border); border-radius: var(--radius-large); background: var(--color-surface); color: var(--color-text); line-height: 1.6; overflow-wrap: anywhere; }
+.chat-message { max-width: 100%; min-width: 0; align-self: flex-start; padding: 16px 20px; border: 1px solid var(--color-border); border-radius: var(--radius-large); background: var(--color-surface); color: var(--color-text); line-height: 1.6; overflow-wrap: anywhere; }
 .chat-message[data-role="user"] { max-width: 80%; align-self: flex-end; border: 0; background: var(--color-black); color: var(--color-white); white-space: pre-wrap; }
-.chat-answer, .chat-user-content, .chat-ask-user { font-size: 14.5px; }
+.chat-answer, .chat-user-content, .chat-ask-user { max-width: 100%; min-width: 0; font-size: 14.5px; }
 .chat-answer[data-has-tools="true"] { margin-bottom: 12px; }
 .chat-tool-list, .chat-tool { display: flex; flex-direction: column; gap: 8px; }
 .chat-tool-heading { display: flex; align-items: center; gap: 6px; color: var(--color-text); font-size: 13px; font-weight: 500; }

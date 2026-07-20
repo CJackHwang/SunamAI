@@ -29,6 +29,7 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
             </code>
           );
         },
+        pre: ({ node: _node, ...props }) => <pre className="markdown-pre" {...props} />,
         table: ({ node: _node, ...props }) => <div className="markdown-table-wrap"><table className="markdown-table" {...props} /></div>,
         th: ({ node: _node, ...props }) => <th className="markdown-th" {...props} />,
         td: ({ node: _node, ...props }) => <td className="markdown-td" {...props} />,
