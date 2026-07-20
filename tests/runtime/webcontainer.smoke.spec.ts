@@ -53,6 +53,8 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await page.goto('/');
   const composer = page.locator('textarea[placeholder="问 Sunam 任何问题..."]');
   await expect(composer).toBeEnabled();
+  await expect(page.locator('.sidebar-toggle-btn.desktop-only-btn')).toBeVisible();
+  await expect(page.locator('.sidebar-toggle-btn.mobile-sidebar-close')).toBeHidden();
   await page.locator('.sidebar-toggle-btn.desktop-only-btn').click();
   const leftNavigationGap = await page.locator('.sidebar.collapsed .sidebar-section').first().evaluate((element) => getComputedStyle(element).gap);
   const disabledSend = page.locator('.chat-submit');
@@ -98,6 +100,14 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(mobileNavigation.getByRole('button')).toHaveCount(5);
   await mobileNavigation.getByRole('button', { name: '对话' }).click();
   await expect(page.locator('.workspace-container')).toHaveAttribute('data-active-tab', 'chat');
+  await page.locator('.mobile-sidebar-toggle').click();
+  const mobileSidebar = page.locator('.sidebar');
+  await expect(mobileSidebar).toHaveClass(/mobile-open/);
+  const mobileSidebarClose = mobileSidebar.getByRole('button', { name: '收起侧栏' });
+  await expect(mobileSidebarClose).toBeVisible();
+  await mobileSidebarClose.click();
+  await expect(mobileSidebar).not.toHaveClass(/mobile-open/);
+  await expect(page.locator('.mobile-overlay')).toHaveCount(0);
   await mobileNavigation.getByRole('button', { name: '服务' }).click();
   await expect(page.locator('.workspace-container')).toHaveAttribute('data-active-tab', 'services');
   const mobileLayout = await page.evaluate(() => {
