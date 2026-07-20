@@ -3,7 +3,8 @@
   position: fixed;
   inset: 0;
   z-index: 1000;
-  transition: background-color 0.2s ease;
+  animation: sunam-overlay-in var(--motion-base) ease-out both;
+  transition: background-color var(--motion-base) ease;
 }
 
 .context-overlay.dimmed {
@@ -20,7 +21,8 @@
   padding: 4px;
   min-width: 180px;
   z-index: 1001;
-  animation: context-menu-in 0.12s ease-out;
+  transform-origin: top left;
+  animation: context-menu-in var(--motion-base) var(--motion-spring);
   display: flex;
   flex-direction: column;
 }
@@ -33,12 +35,12 @@
 @keyframes context-menu-in {
   from {
     opacity: 0;
-    transform: scale(0.95);
+    transform: translateY(-5px) scale(0.96);
   }
 
   to {
     opacity: 1;
-    transform: scale(1);
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -51,7 +53,7 @@
   font-weight: 500;
   color: var(--color-text);
   border-radius: var(--radius-small);
-  transition: background-color 0.12s;
+  transition: background-color var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-fast) var(--motion-snappy);
   width: 100%;
   text-align: left;
   border: none;
@@ -91,7 +93,8 @@
     min-width: 100%;
     padding: 8px;
     padding-bottom: max(8px, env(safe-area-inset-bottom));
-    animation: context-sheet-up 0.2s ease-out;
+    transform-origin: bottom center;
+    animation: context-sheet-up var(--motion-slow) var(--motion-sheet);
   }
 
   @keyframes context-sheet-up {

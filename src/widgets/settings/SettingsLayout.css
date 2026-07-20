@@ -10,6 +10,7 @@
   display: flex;
   flex-direction: column;
   gap: 20px;
+  transform-origin: center;
 }
 
 .modal-backdrop {
@@ -66,4 +67,13 @@
   .settings-modal-content { width: 100%; max-height: min(88dvh, 760px); gap: 16px; padding: 22px 18px max(22px, env(safe-area-inset-bottom)); border-radius: 22px 22px 0 0; }
   .settings-model-row { flex-direction: column; }
   .settings-model-row .btn { width: 100%; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .settings-modal-content.motion-panel-in { animation-name: settings-sheet-in; animation-timing-function: var(--motion-sheet); }
+  }
+}
+
+@keyframes settings-sheet-in {
+  from { opacity: 0; transform: translateY(100%); }
+  to { opacity: 1; transform: translateY(0); }
 }

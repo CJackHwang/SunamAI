@@ -16,11 +16,12 @@
 .model-selector-header { position: absolute; inset: 0 0 auto; z-index: 50; display: flex; height: 54px; flex: 0 0 auto; align-items: center; padding: 0 16px; border-bottom: 0; background: color-mix(in srgb, var(--color-bg) 75%, transparent); backdrop-filter: blur(16px); }
 .model-selector-header .workspace-header-left { margin: 0; }
 .mobile-sidebar-toggle { display: none; }
-.model-selector-btn { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 0; border-radius: var(--radius-small); background: transparent; color: var(--color-text); font-size: 18px; font-weight: 600; cursor: pointer; transition: background-color .2s; }
+.model-selector-btn { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 0; border-radius: var(--radius-small); background: transparent; color: var(--color-text); font-size: 18px; font-weight: 600; cursor: pointer; transition: background-color var(--motion-fast) ease; }
 .model-selector-btn:hover { background: var(--color-gray-200); }
-.model-selector-chevron { color: var(--color-text-secondary); }
+.model-selector-chevron { color: var(--color-text-secondary); transition: transform var(--motion-base) var(--motion-spring); }
+.model-selector-btn[aria-expanded="true"] .model-selector-chevron { transform: rotate(180deg); }
 .model-selector-overlay { inset: -100vh -100vw; z-index: 900; }
-.model-selector-menu { position: absolute; top: 100%; left: 0; z-index: 1001; display: flex; min-width: 180px; flex-direction: column; margin-top: 4px; padding: 4px; border: 1px solid var(--color-border); border-radius: var(--radius-medium); background: var(--color-surface); box-shadow: var(--elevation-4); }
+.model-selector-menu { position: absolute; top: 100%; left: 0; z-index: 1001; display: flex; min-width: 180px; flex-direction: column; margin-top: 4px; padding: 4px; border: 1px solid var(--color-border); border-radius: var(--radius-medium); background: var(--color-surface); box-shadow: var(--elevation-4); transform-origin: top left; }
 .chat-input-row { display: flex; width: 100%; align-items: flex-end; gap: 12px; pointer-events: auto; }
 .chat-input { height: 44px; min-height: 44px; max-height: 120px; flex: 1; resize: none; overflow-y: auto; box-sizing: border-box; padding: 10px 20px; border-radius: 22px; font-family: inherit; line-height: 24px; }
 .chat-submit { display: flex; width: 44px; height: 44px; flex: 0 0 auto; align-items: center; justify-content: center; margin-bottom: 0; padding: 0; border-radius: 50%; }

@@ -98,7 +98,7 @@ function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel
           <DualTerminal runtime={runtime} webcontainer={webcontainer} onReady={() => setIsTerminalReady(true)} activeTab={terminalTab} onTabChange={selectTerminalTab} layoutState={layoutState} onLayoutChange={setLayoutState} activeContainerId={activeContainerId} activeContainerName={activeContainer?.name ?? null} activeSessionId={activeSessionId} rootDir={activeContainerId ? getContainerRoot(activeContainerId) : '/'} />
         </Suspense>
       </div>
-      {(runtimeError || agentPersistenceError) && <div role="alert" className="workspace-runtime-error">{runtimeError || agentPersistenceError}</div>}
+      {(runtimeError || agentPersistenceError) && <div role="alert" className="workspace-runtime-error motion-notice-in">{runtimeError || agentPersistenceError}</div>}
       <MobileNavigation active={mobileActive} onChange={(tab) => tab === 'chat' ? setMobileActive('chat') : selectTerminalTab(tab)} />
     </div>
   );

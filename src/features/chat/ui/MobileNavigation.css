@@ -16,12 +16,16 @@
   color: var(--color-text-secondary);
   border-radius: 0;
   border-top: 2px solid transparent;
-  transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+  transition: color var(--motion-base) ease, background-color var(--motion-fast) ease, border-color var(--motion-base) ease;
 }
+
+.mobile-bottom-bar button svg { transition: transform var(--motion-base) var(--motion-spring); }
 
 .mobile-bottom-bar button.active {
   color: var(--color-black);
   border-top-color: var(--color-black);
 }
+
+.mobile-bottom-bar button.active svg { transform: translateY(-1px) scale(1.08); }
 
 @media (max-width: 900px) { .mobile-bottom-bar { display: flex; } }

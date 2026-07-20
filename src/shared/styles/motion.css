@@ -1,8 +1,11 @@
 :root {
-  --motion-fast: 120ms;
-  --motion-base: 180ms;
-  --motion-slow: 220ms;
-  --motion-ease: cubic-bezier(0.2, 0, 0, 1);
+  --motion-fast: 140ms;
+  --motion-base: 240ms;
+  --motion-slow: 360ms;
+  --motion-ease: cubic-bezier(0.25, 1, 0.5, 1);
+  --motion-snappy: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-sheet: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -11,11 +14,23 @@
   }
 
   .motion-pop-in {
-    animation: sunam-pop-in var(--motion-fast) var(--motion-ease) both;
+    animation: sunam-pop-in var(--motion-base) var(--motion-spring) both;
   }
 
   .motion-panel-in {
-    animation: sunam-panel-in var(--motion-slow) var(--motion-ease) both;
+    animation: sunam-panel-in var(--motion-slow) var(--motion-sheet) both;
+  }
+
+  .motion-overlay-in {
+    animation: sunam-overlay-in var(--motion-base) ease-out both;
+  }
+
+  .motion-notice-in {
+    animation: sunam-notice-in var(--motion-slow) var(--motion-spring) both;
+  }
+
+  .motion-rise-in {
+    animation: sunam-rise-in var(--motion-base) var(--motion-spring) both;
   }
 }
 
@@ -25,13 +40,28 @@
 }
 
 @keyframes sunam-pop-in {
-  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  from { opacity: 0; transform: translateY(-6px) scale(0.965); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @keyframes sunam-panel-in {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(14px) scale(0.99); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes sunam-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sunam-notice-in {
+  from { opacity: 0; transform: translateY(-12px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes sunam-rise-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -116,7 +116,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
   return (
     <>
       {isMobileOpen && (
-        <div className="mobile-overlay" onClick={onCloseMobile} />
+        <div className="mobile-overlay motion-overlay-in" onClick={onCloseMobile} />
       )}
       <div className={`sidebar ${isCollapsed ? 'collapsed' : 'expanded'} ${isMobileOpen ? 'mobile-open' : ''}`}>
         {/* Header */}

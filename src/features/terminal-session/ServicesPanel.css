@@ -30,6 +30,13 @@
 .panel-empty-state { padding: 16px; color: var(--color-text-secondary); font-size: 13px; text-align: center; }
 .panel-inline-error { margin-top: 8px; color: var(--color-danger); font-size: 12px; }
 
+@media (prefers-reduced-motion: no-preference) {
+  .service-row { animation: sunam-rise-in var(--motion-base) var(--motion-spring) both; }
+  .service-row:nth-child(2) { animation-delay: 24ms; }
+  .service-row:nth-child(3) { animation-delay: 48ms; }
+  .service-row:nth-child(n + 4) { animation-delay: 64ms; }
+}
+
 @media (max-width: 520px) {
   .services-ports, .services-processes { padding-right: 12px; padding-left: 12px; }
   .services-scope { display: none; }

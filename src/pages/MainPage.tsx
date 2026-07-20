@@ -45,7 +45,7 @@ const MainPage: React.FC = () => {
       />
 
       <main className="app-main">
-        {persistenceError && <div className="persistence-error" role="alert"><span>{t('persistence.unavailable')}: {persistenceError}</span><button className="btn btn-secondary" onClick={() => { void reloadWorkspace(); }}>{t('common.retry')}</button></div>}
+        {persistenceError && <div className="persistence-error motion-notice-in" role="alert"><span>{t('persistence.unavailable')}: {persistenceError}</span><button className="btn btn-secondary" onClick={() => { void reloadWorkspace(); }}>{t('common.retry')}</button></div>}
         {/* Main Workspace Area */}
         <div className="app-workspace">
           {apiKey && hydrated ? (
