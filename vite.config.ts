@@ -39,7 +39,7 @@ export default defineConfig({
     coepPlugin(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'icons.svg', 'sunam-app.png'],
+      includeAssets: ['favicon.svg', 'icons.svg', 'sunam-appicon.png', 'sunam-webicon.png'],
       manifest: {
         name: 'Sunam',
         short_name: 'Sunam',
@@ -49,8 +49,8 @@ export default defineConfig({
         display: 'standalone',
         icons: [
           {
-            src: 'sunam-app.png',
-            sizes: '500x500',
+            src: 'sunam-appicon.png',
+            sizes: '1254x1254',
             type: 'image/png'
           }
         ]

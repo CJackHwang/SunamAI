@@ -35,9 +35,9 @@ async function processImage(filepath, outputSize) {
 }
 
 async function main() {
-  // Let's force both to be perfect tight 500x500 squares
+  // Keep the legacy transparent icon tightly fitted. The app icon has an
+  // intentional white background and must not be trimmed.
   await processImage('public/icon.png', 500);
-  await processImage('public/sunam-app.png', 500);
 }
 
 main();
