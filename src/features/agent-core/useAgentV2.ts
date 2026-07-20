@@ -7,7 +7,8 @@ import { AgentEngine } from './engine';
 import { AgentEventStore } from './eventStore';
 import { OpenAIChatModelClient } from './modelClient';
 import { projectMessages, projectModelMessages } from './projector';
-import type { AgentEvent, AgentRun } from './types';
+import { isActiveAgentPhase, type AgentEvent, type AgentRun } from './types';
+import { toErrorMessage } from '@/shared/lib/errors';
 
 type UpdateSessionStatus = (id: string, status: SessionStatus) => void;
 
@@ -23,7 +24,7 @@ export function recoveredSessionStatus(runs: AgentRun[]): SessionStatus | null {
 }
 
 function toSessionStatus(run: AgentRun): SessionStatus {
-  if (['preparing', 'planning', 'acting', 'observing', 'verifying', 'cancelling'].includes(run.phase)) return 'running';
+  if (isActiveAgentPhase(run.phase)) return 'running';
   if (run.phase === 'failed') return 'failed_unread';
   if (run.phase === 'completed') return 'completed_unread';
   return 'idle';
@@ -46,6 +47,7 @@ export function useAgentV2(
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingReasoning, setStreamingReasoning] = useState('');
+  const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const sessionRef = useRef(activeSessionId);
   sessionRef.current = activeSessionId;
 
@@ -79,7 +81,8 @@ export function useAgentV2(
         setStreamingContent('');
         setStreamingReasoning('');
       }
-    })();
+      setPersistenceError(null);
+    })().catch((error) => { if (mounted) setPersistenceError(toErrorMessage(error)); });
     return () => { mounted = false; };
   }, [activeSessionId, updateSessionStatus]);
 
@@ -136,9 +139,11 @@ export function useAgentV2(
       onRunChange: updateRun,
     });
     updateRun(engine.getRun());
-    void engine.execute().finally(() => {
-      if (controllersRef.current.get(sessionId) === controller) controllersRef.current.delete(sessionId);
-    });
+    void engine.execute()
+      .catch((error) => setPersistenceError(toErrorMessage(error)))
+      .finally(() => {
+        if (controllersRef.current.get(sessionId) === controller) controllersRef.current.delete(sessionId);
+      });
   }, [activeContainerId, activeSessionId, apiKey, apiModel, appendEvent, baseUrl, events, runtime, sunamModel, updateRun]);
 
   const startTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, attachments?: ChatAttachment[]) => {
@@ -153,7 +158,7 @@ export function useAgentV2(
       const checkpointSummary = checkpoint?.summary ?? target.summary ?? 'reassess the interrupted task';
       const prompt = `Continue from checkpoint: ${checkpointSummary}. Inspect the current workspace, preserve truthful evidence, and finish only after verification.`;
       launchTask(prompt, target.sessionId, target.containerId, inherited);
-    }).catch((error) => console.error('Failed to load v2 checkpoint:', error));
+    }).catch((error) => setPersistenceError(toErrorMessage(error)));
   }, [events, launchTask, runs]);
 
   const stopTask = useCallback(() => {
@@ -161,8 +166,8 @@ export function useAgentV2(
   }, [activeSessionId]);
 
   const messages = useMemo(() => projectMessages(events), [events]);
-  const activeRun = useMemo(() => runs.find((run) => ['preparing', 'planning', 'acting', 'observing', 'verifying', 'cancelling'].includes(run.phase)) ?? null, [runs]);
+  const activeRun = useMemo(() => runs.find((run) => isActiveAgentPhase(run.phase)) ?? null, [runs]);
   const latestRun = runs[0] ?? null;
 
-  return { events, runs, messages, activeRun, latestRun, streamingContent, streamingReasoning, startTask, resumeTask, stopTask };
+  return { events, runs, messages, activeRun, latestRun, streamingContent, streamingReasoning, persistenceError, startTask, resumeTask, stopTask };
 }

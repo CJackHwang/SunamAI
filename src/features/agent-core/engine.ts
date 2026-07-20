@@ -9,22 +9,12 @@ import { buildAgentSystemPrompt, createChaosContract } from './prompt';
 import { sanitizeToolTranscript } from './projector';
 import { AgentToolRegistry, type ParsedToolCall, type ToolExecutionContext } from './tools';
 import type { AgentBudget, AgentEvent, AgentPhase, AgentRun, AgentToolResult, TaskContract } from './types';
+import { createId } from '@/shared/lib/ids';
+import { isAbortError, retryModelRequest } from './modelRetry';
+import { scheduleToolBatch } from './toolBatchScheduler';
 
 const DEFAULT_BUDGET: AgentBudget = { maxModelTurns: 40, maxToolCalls: 100, maxDurationMs: 15 * 60_000 };
 const MAX_READ_ONLY_CONCURRENCY = 4;
-
-function createId(): string {
-  return `r-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
-}
-
-function isRetryableModelError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /\b429\b|\b5\d\d\b|network|fetch/i.test(message);
-}
 
 function redact(value: string): string {
   return value
@@ -81,7 +71,7 @@ export class AgentEngine {
 
   constructor(options: AgentEngineOptions) {
     this.options = options;
-    const id = createId();
+    const id = createId('r');
     this.task = initialTask(options.input);
     this.run = {
       id,
@@ -141,7 +131,7 @@ export class AgentEngine {
     const summary = this.context.getSummary() || this.task.evidence.join('\n') || 'Run checkpoint recorded.';
     await this.emitter.emit('checkpoint', { summary });
     await this.options.store.saveCheckpoint({
-      id: `cp-${this.run.id}-${Date.now().toString(36)}`,
+      id: createId(`cp-${this.run.id}`),
       runId: this.run.id,
       sessionId: this.run.sessionId,
       containerId: this.run.containerId,
@@ -159,41 +149,20 @@ export class AgentEngine {
   }
 
   private async completeModelRequest(messages: Message[]): Promise<Awaited<ReturnType<AgentModelClient['complete']>> > {
-    let lastError: unknown;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    return retryModelRequest(async () => {
       let streamedContent = '';
       let streamedReasoning = '';
-      try {
-        const response = await this.options.client.complete(sanitizeToolTranscript(messages), {
-          signal: this.options.signal,
-          tools: this.registry.getApiDefinitions(),
-          onDelta: (message) => {
-            streamedContent = message.content;
-            streamedReasoning = message.reasoning_content ?? '';
-            void this.emitter.emit('assistant_delta', { content: streamedContent, reasoningContent: streamedReasoning, transient: true });
-          },
-        });
-        // Some compatible providers expose reasoning only in SSE deltas and omit
-        // it from the final object. Preserve what the user already saw instead
-        // of replacing the streaming bubble with a lossy persisted message.
-        return {
-          ...response,
-          message: {
-            ...response.message,
-            content: response.message.content || streamedContent,
-            reasoning_content: response.message.reasoning_content || streamedReasoning || undefined,
-          },
-        };
-      } catch (error) {
-        if (isAbort(error)) throw error;
-        lastError = error;
-        if (!isRetryableModelError(error) || attempt === 2) break;
-        const delayMs = Math.min(8_000, 500 * (2 ** attempt)) + Math.round(Math.random() * 150);
-        await this.emitter.emit('model_retry', { attempt: attempt + 1, delayMs, error: error instanceof Error ? error.message : String(error) });
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
-    }
-    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+      const response = await this.options.client.complete(sanitizeToolTranscript(messages), {
+        signal: this.options.signal,
+        tools: this.registry.getApiDefinitions(),
+        onDelta: (message) => {
+          streamedContent = message.content;
+          streamedReasoning = message.reasoning_content ?? '';
+          void this.emitter.emit('assistant_delta', { content: streamedContent, reasoningContent: streamedReasoning, transient: true });
+        },
+      });
+      return { ...response, message: { ...response.message, content: response.message.content || streamedContent, reasoning_content: response.message.reasoning_content || streamedReasoning || undefined } };
+    }, async (attempt, delayMs, error) => this.emitter.emit('model_retry', { attempt, delayMs, error }));
   }
 
   private toToolCall(call: ParsedToolCall): ToolCall {
@@ -232,27 +201,14 @@ export class AgentEngine {
     return { call, result: safeResult };
   }
 
-  private async executeTools(calls: ParsedToolCall[]): Promise<Array<{ call: ParsedToolCall; result: AgentToolResult }>> {
-    const results: Array<{ call: ParsedToolCall; result: AgentToolResult }> = [];
-    let index = 0;
-    while (index < calls.length) {
-      this.assertBudget();
-      const call = calls[index]!;
-      const metadata = this.registry.getMetadata(call.name);
-      if (metadata?.concurrencySafe) {
-        const batch: ParsedToolCall[] = [];
-        while (index < calls.length && this.registry.getMetadata(calls[index]!.name)?.concurrencySafe) batch.push(calls[index++]!);
-        for (let cursor = 0; cursor < batch.length; cursor += MAX_READ_ONLY_CONCURRENCY) {
-          const group = batch.slice(cursor, cursor + MAX_READ_ONLY_CONCURRENCY);
-          const groupResults = await Promise.all(group.map((toolCall) => this.executeOne(toolCall)));
-          results.push(...groupResults);
-        }
-      } else {
-        results.push(await this.executeOne(call));
-        index += 1;
-      }
-    }
-    return results;
+  private executeTools(calls: ParsedToolCall[]): Promise<Array<{ call: ParsedToolCall; result: AgentToolResult }>> {
+    return scheduleToolBatch({
+      calls,
+      isConcurrencySafe: (call) => Boolean(this.registry.getMetadata(call.name)?.concurrencySafe),
+      execute: (call) => this.executeOne(call),
+      assertCanContinue: () => this.assertBudget(),
+      maxConcurrency: MAX_READ_ONLY_CONCURRENCY,
+    });
   }
 
   private async finish(summary: string, phase: 'completed' | 'awaiting_user' = 'completed'): Promise<void> {
@@ -333,7 +289,7 @@ export class AgentEngine {
         }
       }
     } catch (error) {
-      if (isAbort(error)) {
+      if (isAbortError(error)) {
         this.options.runtime.stopRun({ sessionId: this.run.sessionId, runId: this.run.id, containerId: this.run.containerId });
         await this.phase('cancelled', 'Stopped by user.');
         await this.emitter.emit('run_finished', { summary: 'Agent stopped by user.' });

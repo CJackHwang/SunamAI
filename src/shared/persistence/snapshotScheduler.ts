@@ -12,11 +12,13 @@ export class V2SnapshotScheduler {
   private readonly repository: V2PersistenceRepository;
   private readonly capture: (containerId: string) => Promise<FileSystemTree>;
   private readonly delayMs: number;
+  private readonly onError: (error: unknown) => void;
 
-  constructor(repository: V2PersistenceRepository, capture: (containerId: string) => Promise<FileSystemTree>, delayMs = 750) {
+  constructor(repository: V2PersistenceRepository, capture: (containerId: string) => Promise<FileSystemTree>, delayMs = 750, onError: (error: unknown) => void = () => undefined) {
     this.repository = repository;
     this.capture = capture;
     this.delayMs = delayMs;
+    this.onError = onError;
   }
 
   schedule(containerId: string): void {
@@ -24,7 +26,7 @@ export class V2SnapshotScheduler {
     if (existing) clearTimeout(existing);
     this.timers.set(containerId, setTimeout(() => {
       this.timers.delete(containerId);
-      void this.flush(containerId);
+      void this.flush(containerId).catch(this.onError);
     }, this.delayMs));
   }
 

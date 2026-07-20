@@ -16,19 +16,17 @@ export const ChatMessage = memo(function ChatMessage({ message, toolOutputs }: C
   const { t } = useI18n();
   if (message.role === 'tool' || (message.role === 'user' && message.content.startsWith('SYSTEM ERROR:'))) return null;
   return (
-    <div className={`motion-fade-in chat-message ${message._ui_streaming ? 'streaming' : ''}`} style={{
-      alignSelf: message.role === 'user' ? 'flex-end' : 'flex-start', backgroundColor: message.role === 'user' ? 'var(--color-black)' : 'var(--color-surface)', color: message.role === 'user' ? 'var(--color-white)' : 'var(--color-text)', padding: '16px 20px', borderRadius: 'var(--radius-large)', maxWidth: message.role === 'user' ? '80%' : '100%', border: message.role === 'user' ? 'none' : '1px solid var(--color-border)', wordBreak: 'break-word', whiteSpace: message.role === 'user' ? 'pre-wrap' : 'normal', lineHeight: '1.6',
-    }}>
+    <div className={`motion-fade-in chat-message ${message._ui_streaming ? 'streaming' : ''}`} data-role={message.role}>
       {message.reasoning_content && <ThinkingProcess content={message.reasoning_content} streaming={message._ui_streaming} />}
-      {message.content.trim() && message.role !== 'user' && <div className="streaming-answer" style={{ fontSize: '14.5px', marginBottom: message.tool_calls ? '12px' : '0' }}><RenderErrorBoundary label={t('common.error')}><MarkdownRenderer content={message.content} /></RenderErrorBoundary></div>}
-      {message.role === 'user' && !message.tool_calls && <><div style={{ fontSize: '14.5px' }}>{message._ui_displayContent ?? message.content}</div>{message._ui_attachments && message._ui_attachments.length > 0 && <div className="message-attachments">{message._ui_attachments.map((attachment, index) => <span key={`${attachment.name}-${index}`}><FileText size={13} />{attachment.name}</span>)}</div>}</>}
-      {message.tool_calls && <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>{message.tool_calls.map((call) => {
+      {message.content.trim() && message.role !== 'user' && <div className="streaming-answer chat-answer" data-has-tools={Boolean(message.tool_calls)}><RenderErrorBoundary label={t('common.error')}><MarkdownRenderer content={message.content} /></RenderErrorBoundary></div>}
+      {message.role === 'user' && !message.tool_calls && <><div className="chat-user-content">{message._ui_displayContent ?? message.content}</div>{message._ui_attachments && message._ui_attachments.length > 0 && <div className="message-attachments">{message._ui_attachments.map((attachment, index) => <span key={`${attachment.name}-${index}`}><FileText size={13} />{attachment.name}</span>)}</div>}</>}
+      {message.tool_calls && <div className="chat-tool-list">{message.tool_calls.map((call) => {
         const output = toolOutputs.find((candidate) => candidate.tool_call_id === call.id);
-        if (call.function.name === 'ask_user') return <div key={call.id} style={{ fontSize: '14.5px' }}><RenderErrorBoundary label={t('common.error')}><MarkdownRenderer content={extractChatContent(call.function.arguments)} /></RenderErrorBoundary></div>;
-        return <div key={call.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div style={{ fontSize: '13px', color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 500 }}><Terminal size={14} />{t('chat.running')} {call.function.name}</div>
-          {call.function.arguments && <pre style={{ fontSize: '12px', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-bg)', padding: '8px', borderRadius: '4px', overflowX: 'auto', margin: 0 }}>{call.function.arguments}</pre>}
-          {output && <div style={{ marginTop: '4px', fontSize: '12px', borderTop: '1px solid var(--color-border)', paddingTop: '8px' }}><div style={{ color: 'var(--color-text-secondary)', fontWeight: 600, marginBottom: '4px' }}>{t('chat.result')}</div><div style={{ color: 'var(--color-text)', whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto', backgroundColor: 'var(--color-gray-100)', padding: '8px', borderRadius: '4px' }}>{output.content}</div></div>}
+        if (call.function.name === 'ask_user') return <div key={call.id} className="chat-ask-user"><RenderErrorBoundary label={t('common.error')}><MarkdownRenderer content={extractChatContent(call.function.arguments)} /></RenderErrorBoundary></div>;
+        return <div key={call.id} className="chat-tool">
+          <div className="chat-tool-heading"><Terminal size={14} />{t('chat.running')} {call.function.name}</div>
+          {call.function.arguments && <pre className="chat-tool-arguments">{call.function.arguments}</pre>}
+          {output && <div className="chat-tool-result"><div className="chat-tool-result-label">{t('chat.result')}</div><div className="chat-tool-result-content">{output.content}</div></div>}
         </div>;
       })}</div>}
     </div>

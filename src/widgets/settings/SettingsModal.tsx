@@ -3,6 +3,8 @@ import { listModels } from '@/shared/api/models';
 import { SUPPORTED_LOCALES, type Locale, useI18n } from '@/shared/i18n';
 import { Modal } from '@/shared/ui/Modal';
 import { ErrorState } from '@/shared/ui/AsyncState';
+import './SettingsModal.css';
+import './SettingsLayout.css';
 
 interface SettingsModalProps {
   initialApiKey: string;
@@ -33,8 +35,7 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
       if (ids.length > 0 && !ids.includes(model)) {
         setModel(ids[0]);
       }
-    } catch (error) {
-      console.error(error);
+    } catch {
       setFetchError(t('settings.fetchModelsError'));
     } finally {
       setIsFetchingModels(false);
@@ -49,8 +50,7 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
             {t('settings.baseUrl')}
           </label>
           <input 
-            className="input-field"
-            style={{ width: '100%' }}
+            className="input-field settings-control"
             value={baseUrl}
             onChange={e => setBaseUrl(e.target.value)}
             placeholder="https://api.deepseek.com/v1"
@@ -62,8 +62,7 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
             {t('settings.apiKey')}
           </label>
           <input 
-            className="input-field"
-            style={{ width: '100%' }}
+            className="input-field settings-control"
             type="password"
             value={apiKey}
             onChange={e => setApiKey(e.target.value)}
@@ -78,8 +77,7 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
           <div className="settings-model-row">
             {modelsList.length > 0 ? (
               <select
-                className="input-field"
-                style={{ flex: 1, minWidth: 0 }}
+                className="input-field settings-model-control"
                 value={model}
                 onChange={e => setModel(e.target.value)}
               >
@@ -89,8 +87,7 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
               </select>
             ) : (
               <input 
-                className="input-field"
-                style={{ flex: 1, minWidth: 0 }}
+                className="input-field settings-model-control"
                 value={model}
                 onChange={e => setModel(e.target.value)}
                 placeholder="deepseek-v4-flash"
@@ -99,8 +96,7 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
             <button 
               onClick={handleFetchModels}
               disabled={isFetchingModels || !apiKey || !baseUrl}
-              className="btn btn-secondary"
-              style={{ whiteSpace: 'nowrap' }}
+              className="btn btn-secondary settings-fetch-button"
             >
               {isFetchingModels ? t('settings.fetchingModels') : t('settings.fetchModels')}
             </button>
@@ -111,7 +107,7 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
           <label>
             {t('settings.language')}
           </label>
-          <select className="input-field" style={{ width: '100%' }} value={locale} onChange={(event) => { void onLocaleChange(event.target.value as Locale); }}>
+          <select className="input-field settings-control" value={locale} onChange={(event) => { void onLocaleChange(event.target.value as Locale); }}>
             {SUPPORTED_LOCALES.map((supportedLocale) => <option key={supportedLocale} value={supportedLocale}>{supportedLocale}</option>)}
           </select>
         </div>
@@ -121,8 +117,7 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
         <button 
           onClick={() => onSave(apiKey, baseUrl, model)}
           disabled={!apiKey || !model}
-          className="btn btn-primary"
-          style={{ width: '100%', marginTop: '10px' }}
+          className="btn btn-primary settings-save-button"
         >
           {t('common.save')}
         </button>

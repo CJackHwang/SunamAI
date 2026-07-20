@@ -16,27 +16,8 @@ function isWithinRoot(path: string, rootDir: string): boolean {
   return rootDir === '/' || path === rootDir || path.startsWith(`${rootDir}/`);
 }
 
-async function copyDirRecursive(wc: WebContainer, source: string, destination: string): Promise<void> {
-  await wc.fs.mkdir(destination, { recursive: true });
-  const entries = await wc.fs.readdir(source, { withFileTypes: true });
-  await Promise.all(entries.map(async (entry) => {
-    const sourcePath = joinPath(source, entry.name);
-    const destinationPath = joinPath(destination, entry.name);
-    if (entry.isDirectory()) await copyDirRecursive(wc, sourcePath, destinationPath);
-    else await wc.fs.writeFile(destinationPath, await wc.fs.readFile(sourcePath));
-  }));
-}
-
 async function movePath(wc: WebContainer, source: string, destination: string): Promise<void> {
-  try {
-    await wc.fs.rename(source, destination);
-  } catch {
-    const entries = await wc.fs.readdir(source.substring(0, source.lastIndexOf('/')) || '/', { withFileTypes: true });
-    const entry = entries.find((item) => item.name === source.split('/').at(-1));
-    if (entry?.isDirectory()) await copyDirRecursive(wc, source, destination);
-    else await wc.fs.writeFile(destination, await wc.fs.readFile(source));
-    await wc.fs.rm(source, { recursive: true });
-  }
+  await wc.fs.rename(source, destination);
 }
 
 /** A root-bounded, watched filesystem facade around WebContainer's API. */
@@ -70,7 +51,7 @@ export function useFileSystem(wc: WebContainer | null, rootDir = '/') {
           sizeCacheRef.current.set(path, size);
           return { name: entry.name, isDirectory: false, size };
         } catch {
-          return { name: entry.name, isDirectory: false, size: 0 };
+          return { name: entry.name, isDirectory: false, size: null };
         }
       });
       listed.sort((left, right) => left.isDirectory !== right.isDirectory ? (left.isDirectory ? -1 : 1) : left.name.localeCompare(right.name));
@@ -127,5 +108,3 @@ export function useFileSystem(wc: WebContainer | null, rootDir = '/') {
 
   return { entries, currentPath, isLoading, error, clearError: () => setError(null), navigateTo, refresh, goUp, createFile, createDir, remove, rename, moveFile, readFile, readFileRaw, uploadFile, uploadFiles };
 }
-
-export type FileSystemController = ReturnType<typeof useFileSystem>;

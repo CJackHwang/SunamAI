@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { AgentEventStore } from '@/features/agent-core/eventStore';
 import type { AgentRun } from '@/features/agent-core/types';
 import { V2PersistenceRepository } from '@/shared/persistence/v2Repository';
+import { clearV2Database } from '../helpers/v2Database';
 
 function run(id: string, sessionId: string): AgentRun {
   return {
@@ -15,7 +16,7 @@ function run(id: string, sessionId: string): AgentRun {
 describe('AgentEventStore', () => {
   it('marks unfinished v2 Runs as interrupted on recovery', async () => {
     const repository = new V2PersistenceRepository();
-    await repository.clearAll();
+    await clearV2Database();
     const store = new AgentEventStore(repository);
     const sessionId = `v2-${Date.now()}`;
     const active = run(`r-${Date.now()}`, sessionId);

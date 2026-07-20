@@ -100,7 +100,7 @@ preparing → planning → acting → observing / verifying
 - checkpoint 保存摘要与恢复所需 transcript；
 - 文件快照在 WebContainer mount 前恢复，并通过防抖调度串行导出；
 - 未知版本/畸形 record 进入 quarantine，用户可检查或删除；
-- JSON 备份对 `Uint8Array` 使用标记编码，导入时可逆解码；冲突 ID 重映射，孤立恢复记录自动补建 session/container 元数据。
+- IndexedDB 不可用或读取失败时暴露错误并暂停写入，避免用临时内存状态伪装持久化成功。
 
 恢复流程为：加载 workspace → mount snapshot → 恢复终端历史与 event/run → 将活动 Run 置为 interrupted → 用户显式继续产生新 Run。此流程的重点是复原可验证的工作事实，而不是伪装一条从未中断的执行链。
 
@@ -120,4 +120,4 @@ preparing → planning → acting → observing / verifying
 - 刷新后的活动 Run 不得显示为仍在运行，继续必须产生新 runId；
 - 只读并发上限为 4，写入/命令无竞态；
 - 核心测试覆盖率门槛：lines/statements/functions ≥85%，branches ≥80%；
-- v2 repository 已提供检查、导出、导入与清空的类型化接口，供后续产品设计接入；当前不暴露数据管理 UI，且这些接口从不触及旧数据。
+- v2 repository 只提供当前运行链使用的读写、隔离与按作用域删除接口，不预留未接入产品的导入导出代码。

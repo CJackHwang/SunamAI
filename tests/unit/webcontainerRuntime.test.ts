@@ -82,6 +82,31 @@ function createFilesystemRuntime() {
 }
 
 describe('WebContainerAgentRuntime process ownership', () => {
+  it('lists all and only running processes in the requested container', async () => {
+    const { runtime } = createRuntime();
+    const first = await runtime.runShell({ command: 'one', mode: 'background', sessionId: 's-1', runId: 'r-1', containerId: 'c-1' });
+    await runtime.runShell({ command: 'two', mode: 'background', sessionId: 's-2', runId: 'r-2', containerId: 'c-2' });
+    expect(runtime.getProcesses({ containerId: 'c-1' }).map((process) => process.command)).toEqual(['one']);
+    expect(runtime.getProcesses()).toHaveLength(2);
+    expect(runtime.stopProcess(first.process.id, { sessionId: 's-1', runId: 'r-1', containerId: 'c-1' })).toBe(true);
+    expect(runtime.getProcesses({ containerId: 'c-1' })).toEqual([]);
+  });
+
+  it('publishes output-stream failures and still removes the exited process', async () => {
+    const { runtime, webcontainer } = createRuntime();
+    const events: string[] = [];
+    runtime.subscribe((event) => events.push(event.type));
+    vi.mocked(webcontainer.spawn).mockResolvedValueOnce({
+      input: new WritableStream<string>(),
+      output: new ReadableStream<string>({ start(controller) { controller.error(new Error('stream broke')); } }),
+      exit: Promise.resolve(1),
+      kill: vi.fn(),
+    } as never);
+    await runtime.runShell({ command: 'broken', mode: 'foreground', sessionId: 's-1', runId: 'r-1', containerId: 'c-1' });
+    expect(events).toEqual(expect.arrayContaining(['started', 'error', 'exited']));
+    expect(runtime.getProcesses({ containerId: 'c-1' })).toEqual([]);
+  });
+
   it('rejects cross-session, cross-run, and cross-container process operations', async () => {
     const { runtime, kill } = createRuntime();
     const result = await runtime.runShell({ command: 'npm run dev', mode: 'background', sessionId: 's-1', runId: 'r-1', containerId: 'c-1' });
@@ -117,7 +142,7 @@ describe('WebContainerAgentRuntime process ownership', () => {
     expect(await runtime.searchWorkspace('c-1', 'needle', 5)).toEqual([{ path: 'src/main.txt', line: 2, content: 'needle line' }]);
 
     const changes = await runtime.applyWorkspaceChanges('c-1', [{ path: 'src/main.txt', content: 'updated', expectedContent: 'line one\nneedle line\nline three' }, { path: 'new.txt', content: 'new' }]);
-    expect(changes[0]?.diff).toContain('+++ src/main.txt');
+    expect(changes[0]).toEqual({ path: 'src/main.txt', kind: 'updated', beforeBytes: 31, afterBytes: 7 });
     expect(new TextDecoder().decode(files.get('.sunam/workspaces/c-1/new.txt'))).toBe('new');
     await expect(runtime.applyWorkspaceChanges('c-1', [{ path: 'src/main.txt', content: 'nope', expectedContent: 'stale' }])).rejects.toThrow('Refusing to overwrite');
 
@@ -125,7 +150,7 @@ describe('WebContainerAgentRuntime process ownership', () => {
     await Promise.resolve();
     const ownership = { sessionId: 's-1', runId: 'r-1', containerId: 'c-1' };
     expect(result.timedOut).toBe(false);
-    expect(runtime.getProcesses(ownership)).toHaveLength(1);
+    expect(runtime.getProcesses(ownership)).toHaveLength(0);
     expect(await runtime.sendProcessInput(result.process.id, ownership, 'input')).toBe(false);
     expect(events).toEqual(expect.arrayContaining(['started', 'output', 'exited']));
     await runtime.flushSnapshots();

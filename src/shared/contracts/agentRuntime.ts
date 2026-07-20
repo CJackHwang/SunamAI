@@ -11,9 +11,16 @@ export interface ProcessStatus {
 }
 
 export interface RuntimeProcessEvent {
-  type: 'started' | 'output' | 'exited' | 'stopped';
+  type: 'started' | 'output' | 'exited' | 'stopped' | 'error';
   process: ProcessStatus;
   chunk?: string;
+}
+
+export interface WorkspaceChangeSummary {
+  path: string;
+  kind: 'created' | 'updated';
+  beforeBytes: number;
+  afterBytes: number;
 }
 
 export interface WorkspaceTreeEntry {
@@ -47,7 +54,7 @@ export interface AgentWorkspaceRuntime {
   listWorkspace(containerId: string, maxDepth: number): Promise<WorkspaceTreeEntry[]>;
   readWorkspaceFile(containerId: string, path: string, startLine?: number, endLine?: number): Promise<string>;
   searchWorkspace(containerId: string, query: string, maxResults: number): Promise<Array<{ path: string; line: number; content: string }>>;
-  applyWorkspaceChanges(containerId: string, changes: Array<{ path: string; content: string; expectedContent?: string }>): Promise<Array<{ path: string; diff: string }>>;
+  applyWorkspaceChanges(containerId: string, changes: Array<{ path: string; content: string; expectedContent?: string }>): Promise<WorkspaceChangeSummary[]>;
   runShell(request: ShellRunRequest): Promise<ShellRunResult>;
   observeProcess(processId: string, ownership: ProcessOwnership, cursor?: number): ProcessStatus | null;
   sendProcessInput(processId: string, ownership: ProcessOwnership, input: string): Promise<boolean>;

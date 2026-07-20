@@ -1,0 +1,11 @@
+.markdown-code-block { margin: 8px 0; overflow: hidden; border-radius: 8px; box-shadow: var(--elevation-2); }
+.markdown-code-fallback { margin: 0; overflow-x: auto; padding: 16px; }
+.markdown-inline-code { padding: 2px 6px; border-radius: 4px; background: color-mix(in srgb, var(--color-black) 6%, transparent); color: var(--color-code); font-family: var(--font-mono); font-size: .9em; }
+.markdown-table-wrap { margin: 12px 0; overflow-x: auto; border: 1px solid var(--color-border); border-radius: 8px; }
+.markdown-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.markdown-th { padding: 10px 12px; border-bottom: 1px solid var(--color-border); background: var(--color-bg); text-align: left; font-weight: 600; }
+.markdown-td { padding: 10px 12px; border-bottom: 1px solid var(--color-border); }
+.markdown-link { color: var(--color-link); text-decoration: none; }
+.markdown-paragraph, .markdown-list { margin: 0 0 12px; }
+.markdown-list { padding-left: 24px; }
+.markdown-quote { margin: 0 0 12px; padding-left: 12px; border-left: 4px solid var(--color-border); color: var(--color-text-secondary); font-style: italic; }

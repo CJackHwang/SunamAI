@@ -1,0 +1,4 @@
+.settings-control { width: 100%; }
+.settings-model-control { min-width: 0; flex: 1; }
+.settings-fetch-button { white-space: nowrap; }
+.settings-save-button { width: 100%; margin-top: 10px; }

@@ -1,29 +1,21 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { WebContainer } from '@webcontainer/api';
 import { Loader2 } from 'lucide-react';
-import TerminalView from '@/entities/container/TerminalView';
+import TerminalView from './TerminalView';
 import { useI18n } from '@/shared/i18n';
 import { getContainerRoot } from '@/shared/lib/containerPaths';
-import { appendAgentTerminalBuffer, getAgentTerminalBuffer, restoreAgentTerminalBuffer } from './agentTerminalBuffer';
+import { toErrorMessage } from '@/shared/lib/errors';
+import { appendAgentTerminalBuffer, flushAgentTerminalBuffers, subscribeAgentTerminalPersistence } from './agentTerminalBuffer';
 import { WebContainerAgentRuntime } from './WebContainerAgentRuntime';
 import { CollapsedTerminalNav, TerminalTabs } from './TerminalTabs';
 import { ServicesPanel } from './ServicesPanel';
 import type { TerminalLayout, TerminalTab } from './types';
+import { toDisplayWorkspacePath } from './displayPaths';
+import './DualTerminal.css';
+import './DualTerminalLayout.css';
+import { AgentTerminalPanel } from './AgentTerminalPanel';
 
 const FileManager = lazy(() => import('../file-manager/FileManager'));
-
-function toDisplayShellOutput(value: string, containerName: string): string {
-  // WebContainer needs a real per-container cwd, but exposing its generated
-  // storage path makes the interactive shell look like an implementation leak.
-  // Keep the container identity visible in prompts and `pwd`, while hiding the
-  // generated storage path used internally by WebContainer.
-  const safeName = Array.from(containerName, (character) => {
-    const code = character.charCodeAt(0);
-    return code < 32 || code === 127 || character === '/' || character === '\\' ? '-' : character;
-  }).join('').trim() || 'unnamed';
-  const visibleRoot = `/containers/${safeName}`;
-  return value.replace(/\/?\.sunam\/workspaces\/c-[a-z0-9_-]+/gi, () => visibleRoot);
-}
 
 interface DualTerminalProps {
   webcontainer: WebContainer | null;
@@ -45,7 +37,7 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
   const userTermRef = useRef<import('@xterm/xterm').Terminal | null>(null);
   const [isUserTermReady, setIsUserTermReady] = useState(false);
   const [isBooted, setIsBooted] = useState(false);
-  const [processVersion, setProcessVersion] = useState(0);
+  const [, setProcessVersion] = useState(0);
   const [activePorts, setActivePorts] = useState<Array<{ port: number; url: string }>>([]);
   const userShellWriterRef = useRef<WritableStreamDefaultWriter<string> | null>(null);
   const sessionIdRef = useRef(activeSessionId);
@@ -58,14 +50,28 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
   }, [onReady, runtime]);
 
   useEffect(() => {
+    const unsubscribe = subscribeAgentTerminalPersistence((sessionId, error) => {
+      if (error && sessionIdRef.current === sessionId) aiTermRef.current?.write(`\r\n[Terminal history persistence error: ${error}]\r\n`);
+    });
+    const flush = () => { void flushAgentTerminalBuffers(); };
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flush();
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!runtime) return;
     return runtime.subscribe((event) => {
-      const prefix = event.type === 'started' ? `\r\n[Agent process ${event.process.id}] Admin@Sunam ~ # ${event.process.command}\r\n` : event.type === 'exited' ? `\r\n[Process ${event.process.id} exited with code ${event.process.exitCode}]\r\n` : event.type === 'stopped' ? `\r\n[Process ${event.process.id} stopped]\r\n` : event.chunk ?? '';
+      const command = toDisplayWorkspacePath(event.process.command, containerLabel);
+      const prefix = event.type === 'started' ? `\r\n[Agent process ${event.process.id}] Admin@Sunam ~ # ${command}\r\n` : event.type === 'exited' ? `\r\n[Process ${event.process.id} exited with code ${event.process.exitCode}]\r\n` : event.type === 'stopped' ? `\r\n[Process ${event.process.id} stopped]\r\n` : event.type === 'error' ? `\r\n[Process ${event.process.id} output error: ${event.chunk ?? 'unknown error'}]\r\n` : event.chunk ?? '';
       appendAgentTerminalBuffer(event.process.sessionId, prefix);
       if (sessionIdRef.current === event.process.sessionId && prefix) aiTermRef.current?.write(prefix);
       setProcessVersion((version) => version + 1);
     });
-  }, [runtime]);
+  }, [containerLabel, runtime]);
 
   useEffect(() => {
     if (!webcontainer || !isUserTermReady || !userTermRef.current) return;
@@ -84,14 +90,17 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
       let receivedOutput = false;
       void process.output.pipeTo(new WritableStream<string>({
         write(data) {
-          userTermRef.current?.write(toDisplayShellOutput(data, containerLabel));
+          userTermRef.current?.write(toDisplayWorkspacePath(data, containerLabel));
           if (!receivedOutput) { receivedOutput = true; setIsBooted(true); }
         },
-      })).catch(() => undefined);
+      })).catch((error) => {
+        userTermRef.current?.write(`\r\n[Terminal output error: ${toErrorMessage(error)}]\r\n`);
+        setIsBooted(true);
+      });
       const writer = process.input.getWriter();
       userShellWriterRef.current = writer;
-      onDataDisposable = userTermRef.current?.onData((data) => { void writer.write(data); });
-    })();
+      onDataDisposable = userTermRef.current?.onData((data) => { void writer.write(data).catch((error) => userTermRef.current?.write(`\r\n[Terminal input error: ${toErrorMessage(error)}]\r\n`)); });
+    })().catch((error) => { userTermRef.current?.write(`\r\n[Terminal startup error: ${toErrorMessage(error)}]\r\n`); setIsBooted(true); });
     return () => {
       active = false;
       process?.kill();
@@ -114,33 +123,17 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
     return () => clearTimeout(timer);
   }, [activeTab]);
 
-  useEffect(() => {
-    if (!aiTermRef.current) return;
-    aiTermRef.current.clear();
-    const history = getAgentTerminalBuffer(activeSessionId ?? null);
-    if (history) aiTermRef.current.write(history);
-    void restoreAgentTerminalBuffer(activeSessionId ?? null).then((restored) => {
-      if (restored && aiTermRef.current) {
-        aiTermRef.current.clear();
-        aiTermRef.current.write(restored);
-      }
-    }).catch((error) => console.error('Failed to restore terminal history:', error));
-  }, [activeSessionId]);
+  const processes = activeContainerId ? runtime?.getProcesses({ containerId: activeContainerId }) ?? [] : [];
 
-  const processes = runtime?.getProcesses(activeSessionId ? { sessionId: activeSessionId } : undefined) ?? [];
-  void processVersion;
-
-  return <div style={{ display: 'flex', flexDirection: layoutState === 'collapsed' ? 'row' : 'column', height: '100%', overflow: 'hidden' }}>
+  return <div className="dual-terminal" data-layout={layoutState}>
     {layoutState === 'collapsed' ? <CollapsedTerminalNav activeTab={activeTab} onTabChange={onTabChange} onExpand={() => onLayoutChange?.('half')} /> : <TerminalTabs activeTab={activeTab} onTabChange={onTabChange} layoutState={layoutState} onLayoutChange={onLayoutChange} />}
-    {layoutState !== 'collapsed' && <div className="terminal-environment-bar" title={activeContainerId ?? undefined}><span className="terminal-environment-dot" />{containerIdentity}<span className="terminal-environment-path">/containers/{containerLabel}</span></div>}
-    <div style={{ flex: 1, padding: activeTab === 'files' ? '0' : '16px', position: 'relative', overflow: 'hidden', display: layoutState === 'collapsed' ? 'none' : 'block' }}>
-      {activeTab === 'services' && <ServicesPanel ports={activePorts} processes={processes} onClearPort={(port) => setActivePorts((ports) => ports.filter((item) => item.port !== port))} onKillProcess={(process) => { runtime?.stopProcess(process.id, { sessionId: process.sessionId, runId: process.runId, containerId: process.containerId }); }} />}
-      {!isBooted && <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--color-surface)', zIndex: 10 }}><Loader2 className="lucide-spin" style={{ width: '32px', height: '32px', color: 'var(--color-text-secondary)', animation: 'spin 2s linear infinite' }} /><span style={{ marginTop: '16px', color: 'var(--color-text-secondary)', fontSize: '14px' }}>{t('terminal.booting')}</span></div>}
-      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-        <div style={{ position: 'absolute', inset: 0, opacity: activeTab === 'ai' ? 1 : 0, pointerEvents: activeTab === 'ai' ? 'auto' : 'none', zIndex: activeTab === 'ai' ? 2 : 1 }}><TerminalView readOnly onTerminalReady={(terminal) => { aiTermRef.current = terminal; const history = getAgentTerminalBuffer(activeSessionId ?? null); if (history) terminal.write(history); void restoreAgentTerminalBuffer(activeSessionId ?? null).then((restored) => { if (restored && aiTermRef.current === terminal) { terminal.clear(); terminal.write(restored); } }).catch((error) => console.error('Failed to restore terminal history:', error)); }} /></div>
-        <div style={{ position: 'absolute', inset: 0, opacity: activeTab === 'user' ? 1 : 0, pointerEvents: activeTab === 'user' ? 'auto' : 'none', zIndex: activeTab === 'user' ? 2 : 1 }}><TerminalView readOnly={false} onTerminalReady={(terminal) => { userTermRef.current = terminal; setIsUserTermReady(true); }} /></div>
-        <div style={{ position: 'absolute', inset: 0, opacity: activeTab === 'files' ? 1 : 0, pointerEvents: activeTab === 'files' ? 'auto' : 'none', zIndex: activeTab === 'files' ? 2 : 1 }}>{isBooted && <Suspense fallback={null}><FileManager wc={webcontainer} rootDir={rootDir} rootLabel={containerLabel} /></Suspense>}</div>
-      </div>
+    {layoutState !== 'collapsed' && <div className="terminal-environment-bar" title={activeContainerId ?? undefined}>{containerIdentity}<span className="terminal-environment-path">/containers/{containerLabel}</span></div>}
+    <div className="terminal-content" data-tab={activeTab}>
+      {!isBooted && activeTab !== 'services' && <div className="terminal-boot-state"><Loader2 className="lucide-spin" /><span>{t('terminal.booting')}</span></div>}
+      <div className="terminal-panel" data-active={activeTab === 'ai'}><AgentTerminalPanel sessionId={activeSessionId ?? null} terminalRef={aiTermRef} /></div>
+      <div className="terminal-panel" data-active={activeTab === 'user'}><TerminalView readOnly={false} onTerminalReady={(terminal) => { userTermRef.current = terminal; setIsUserTermReady(true); }} /></div>
+      <div className="terminal-panel terminal-file-panel" data-active={activeTab === 'files'}>{isBooted && <Suspense fallback={null}><FileManager wc={webcontainer} rootDir={rootDir} rootLabel={containerLabel} /></Suspense>}</div>
+      {activeTab === 'services' && <div className="terminal-panel terminal-services-panel" data-active="true"><ServicesPanel ports={activePorts} processes={processes} containerName={containerLabel} onKillProcess={(process) => { runtime?.stopProcess(process.id, { sessionId: process.sessionId, runId: process.runId, containerId: process.containerId }); }} /></div>}
     </div>
   </div>;
 };

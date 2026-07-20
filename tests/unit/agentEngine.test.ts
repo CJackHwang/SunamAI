@@ -46,7 +46,7 @@ class FakeRuntime implements AgentWorkspaceRuntime {
   async listWorkspace(): Promise<WorkspaceTreeEntry[]> { return []; }
   async readWorkspaceFile(_containerId: string, path: string): Promise<string> { return this.files.get(path) ?? ''; }
   async searchWorkspace(): Promise<Array<{ path: string; line: number; content: string }>> { return []; }
-  async applyWorkspaceChanges(_containerId: string, changes: Array<{ path: string; content: string }>): Promise<Array<{ path: string; diff: string }>> { changes.forEach((change) => this.files.set(change.path, change.content)); return changes.map((change) => ({ path: change.path, diff: `+++ ${change.path}` })); }
+  async applyWorkspaceChanges(_containerId: string, changes: Array<{ path: string; content: string }>) { changes.forEach((change) => this.files.set(change.path, change.content)); return changes.map((change) => ({ path: change.path, kind: 'updated' as const, beforeBytes: 0, afterBytes: change.content.length })); }
   async runShell(request: ShellRunRequest): Promise<ShellRunResult> { this.commands.push(request.command); return { timedOut: false, process: { id: 'p-1', sessionId: request.sessionId, runId: request.runId, containerId: request.containerId, command: request.command, isRunning: false, output: 'passed', cursor: 6, exitCode: 0 } }; }
   observeProcess(): ProcessStatus | null { return null; }
   async sendProcessInput(): Promise<boolean> { return false; }

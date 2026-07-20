@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mapWithConcurrency } from '@/shared/lib/async';
-import { formatSize, getExtension, isSafeEntryName } from '@/features/file-manager/fileUtils';
+import { formatSize, getExtension, isPreviewableFile, isSafeEntryName } from '@/features/file-manager/fileUtils';
 
 describe('file helpers', () => {
   it('formats and validates file metadata', () => {
@@ -9,6 +9,11 @@ describe('file helpers', () => {
     expect(formatSize(0)).toBe('—');
     expect(formatSize(12)).toBe('12 B');
     expect(formatSize(1024 * 1024)).toBe('1.0 MB');
+    expect(formatSize(null)).toBe('未知');
+    expect(isPreviewableFile('README.md')).toBe(true);
+    expect(isPreviewableFile('.env')).toBe(true);
+    expect(isPreviewableFile('photo.png')).toBe(true);
+    expect(isPreviewableFile('archive.zip')).toBe(false);
     expect(isSafeEntryName('../secret')).toBe(false);
     expect(isSafeEntryName('')).toBe(false);
     expect(isSafeEntryName('src')).toBe(true);

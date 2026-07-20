@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import './MarkdownRenderer.css';
 
 const SyntaxCodeBlock = lazy(() => import('./SyntaxCodeBlock'));
 
@@ -13,29 +14,29 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
-        code({ inline, className, children, ...props }: any) {
+        code({ className, children, ...props }) {
           const match = /language-(\w+)/.exec(className || '');
           const source = String(children).replace(/\n$/, '');
-          return !inline && match ? (
-            <div style={{ borderRadius: '8px', overflow: 'hidden', margin: '8px 0', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-              <Suspense fallback={<pre style={{ margin: 0, padding: '16px', overflowX: 'auto' }}><code>{source}</code></pre>}>
+          return match ? (
+            <div className="markdown-code-block">
+              <Suspense fallback={<pre className="markdown-code-fallback"><code>{source}</code></pre>}>
                 <SyntaxCodeBlock language={match[1]}>{source}</SyntaxCodeBlock>
               </Suspense>
             </div>
           ) : (
-            <code {...props} className={className} style={{ backgroundColor: 'rgba(0,0,0,0.06)', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '0.9em', color: '#d63384' }}>
+            <code {...props} className={`${className ?? ''} markdown-inline-code`}>
               {children}
             </code>
           );
         },
-        table: ({ node: _node, ...props }) => <div style={{ overflowX: 'auto', margin: '12px 0', borderRadius: '8px', border: '1px solid var(--color-border)' }}><table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '13px' }} {...props} /></div>,
-        th: ({ node: _node, ...props }) => <th style={{ borderBottom: '1px solid var(--color-border)', padding: '10px 12px', backgroundColor: 'var(--color-bg)', textAlign: 'left', fontWeight: 600 }} {...props} />,
-        td: ({ node: _node, ...props }) => <td style={{ borderBottom: '1px solid var(--color-border)', padding: '10px 12px' }} {...props} />,
-        a: ({ node: _node, ...props }) => <a style={{ color: '#0969da', textDecoration: 'none' }} target="_blank" rel="noopener noreferrer" {...props} />,
-        p: ({ node: _node, ...props }) => <p style={{ margin: '0 0 12px 0' }} {...props} />,
-        ul: ({ node: _node, ...props }) => <ul style={{ margin: '0 0 12px 0', paddingLeft: '24px' }} {...props} />,
-        ol: ({ node: _node, ...props }) => <ol style={{ margin: '0 0 12px 0', paddingLeft: '24px' }} {...props} />,
-        blockquote: ({ node: _node, ...props }) => <blockquote style={{ borderLeft: '4px solid var(--color-border)', margin: '0 0 12px 0', paddingLeft: '12px', color: 'var(--color-text-secondary)', fontStyle: 'italic' }} {...props} />,
+        table: ({ node: _node, ...props }) => <div className="markdown-table-wrap"><table className="markdown-table" {...props} /></div>,
+        th: ({ node: _node, ...props }) => <th className="markdown-th" {...props} />,
+        td: ({ node: _node, ...props }) => <td className="markdown-td" {...props} />,
+        a: ({ node: _node, ...props }) => <a className="markdown-link" target="_blank" rel="noopener noreferrer" {...props} />,
+        p: ({ node: _node, ...props }) => <p className="markdown-paragraph" {...props} />,
+        ul: ({ node: _node, ...props }) => <ul className="markdown-list" {...props} />,
+        ol: ({ node: _node, ...props }) => <ol className="markdown-list" {...props} />,
+        blockquote: ({ node: _node, ...props }) => <blockquote className="markdown-quote" {...props} />,
       }}
     >
       {content}

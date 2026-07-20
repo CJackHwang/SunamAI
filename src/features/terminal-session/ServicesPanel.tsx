@@ -1,101 +1,67 @@
-import { StopCircle, Trash2 } from 'lucide-react';
+import { Check, Copy, ExternalLink, StopCircle } from 'lucide-react';
+import { useState } from 'react';
 import { useI18n } from '@/shared/i18n';
 import type { ProcessStatus } from '@/shared/contracts/agentRuntime';
+import { toErrorMessage } from '@/shared/lib/errors';
+import { toDisplayWorkspacePath } from './displayPaths';
+import { EmptyState, ErrorState } from '@/shared/ui/AsyncState';
+import './ServicesPanel.css';
 
 interface ServicePanelProps {
   ports: Array<{ port: number; url: string }>;
   processes: ProcessStatus[];
-  onClearPort: (port: number) => void;
+  containerName: string;
   onKillProcess: (process: ProcessStatus) => void;
 }
 
-const cardStyle = {
-  flex: 1,
-  minHeight: '180px',
-  padding: '24px',
-  backgroundColor: 'var(--color-bg)',
-  borderRadius: 'var(--radius-large)',
-};
-
-const headingStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  marginBottom: '12px',
-  color: 'var(--color-text)',
-  fontSize: '14px',
-  fontWeight: 600,
-};
-
-const emptyStateStyle = {
-  padding: '16px',
-  color: 'var(--color-text-secondary)',
-  fontSize: '13px',
-  textAlign: 'center' as const,
-};
-
-export function ServicesPanel({ ports, processes, onClearPort, onKillProcess }: ServicePanelProps) {
+export function ServicesPanel({ ports, processes, containerName, onKillProcess }: ServicePanelProps) {
   const { t, format } = useI18n();
-  const runningProcesses = processes.filter((process) => process.isRunning);
+  const [copiedPort, setCopiedPort] = useState<number | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
 
-  return (
-    <div
-      className="motion-panel-in"
-      style={{
-        display: 'flex',
-        flex: 1,
-        flexDirection: 'column',
-        gap: '16px',
-        height: '100%',
-        overflowY: 'auto',
-        padding: '16px',
-        backgroundColor: 'var(--color-surface)',
-        borderRadius: 'var(--radius-large)',
-      }}
-    >
-      <section className="services-section" style={cardStyle}>
-        <h3 style={headingStyle}>
-          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--color-success)' }} />
-          {t('services.ports')}
-        </h3>
-        {ports.length === 0 ? (
-          <div style={emptyStateStyle}>{t('services.noPorts')}</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {ports.map((port) => (
-              <div key={port.port} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px', border: '1px solid var(--color-border)', borderRadius: '6px', backgroundColor: 'var(--color-surface)' }}>
-                <div style={{ display: 'flex', flex: 1, alignItems: 'center', gap: '12px', minWidth: 0 }}>
-                  <span style={{ color: 'var(--color-text)', fontSize: '14px', fontWeight: 500, whiteSpace: 'nowrap' }}>{format('services.port', { port: port.port })}</span>
-                  <a href={port.url} target="_blank" rel="noopener noreferrer" title={port.url} style={{ overflow: 'hidden', color: 'var(--color-primary)', fontSize: '13px', textOverflow: 'ellipsis', textDecoration: 'none', whiteSpace: 'nowrap' }}>{port.url} ↗</a>
-                </div>
-                <button onClick={() => onClearPort(port.port)} title={t('services.clear')} style={{ display: 'flex', flexShrink: 0, padding: '6px', borderRadius: '4px', color: '#ff4d4f' }}><Trash2 size={16} /></button>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+  const copyAddress = async (port: number, url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyError(null);
+      setCopiedPort(port);
+      window.setTimeout(() => setCopiedPort((current) => current === port ? null : current), 1_500);
+    } catch (error) {
+      setCopyError(`${t('services.copyFailed')}: ${toErrorMessage(error)}`);
+    }
+  };
 
-      <section className="services-section" style={cardStyle}>
-        <h3 style={headingStyle}>
-          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--color-primary)' }} />
-          {t('services.processes')}
-        </h3>
-        {runningProcesses.length === 0 ? (
-          <div style={emptyStateStyle}>{t('services.noProcesses')}</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {runningProcesses.map((process) => (
-              <div key={process.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px', border: '1px solid var(--color-border)', borderRadius: '6px', backgroundColor: 'var(--color-surface)' }}>
-                <div style={{ display: 'flex', flex: 1, flexDirection: 'column', gap: '4px', minWidth: 0, overflow: 'hidden' }}>
-                  <div style={{ color: 'var(--color-text-secondary)', fontFamily: 'monospace', fontSize: '12px' }}>{process.id}</div>
-                  <div title={`$ ${process.command}`} style={{ overflow: 'hidden', color: 'var(--color-text)', fontSize: '14px', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>$ {process.command}</div>
-                </div>
-                <button onClick={() => onKillProcess(process)} title={t('services.kill')} style={{ display: 'flex', flexShrink: 0, padding: '6px', borderRadius: '4px', color: '#ff4d4f' }}><StopCircle size={18} /></button>
-              </div>
-            ))}
+  return <div className="services-panel motion-panel-in">
+    <section className="services-ports" aria-labelledby="runtime-ports-heading">
+      <div className="services-heading-row">
+        <h3 id="runtime-ports-heading"><span className="status-dot status-dot-success" />{t('services.ports')}</h3>
+        <span className="services-scope">{t('services.runtimeScope')}</span>
+      </div>
+      {ports.length === 0
+        ? <EmptyState className="panel-empty-state">{t('services.noPorts')}</EmptyState>
+        : <div className="services-port-list">{ports.map((port) => <div className="service-row list-row service-port-row" key={port.port}>
+          <span className="service-port-number">{format('services.port', { port: port.port })}</span>
+          <a href={port.url} target="_blank" rel="noopener noreferrer" title={port.url}>{port.url}<ExternalLink size={14} /></a>
+          <button className="icon-button" onClick={() => { void copyAddress(port.port, port.url); }} title={t('services.copy')} aria-label={format('services.copyPort', { port: port.port })}>
+            {copiedPort === port.port ? <Check size={16} /> : <Copy size={16} />}
+          </button>
+        </div>)}</div>}
+      {copyError && <ErrorState className="panel-inline-error">{copyError}</ErrorState>}
+    </section>
+
+    <section className="services-processes" aria-labelledby="container-processes-heading">
+      <div className="services-heading-row">
+        <h3 id="container-processes-heading"><span className="status-dot" />{t('services.processes')}</h3>
+        <span className="services-count">{processes.length}</span>
+      </div>
+      <div className="services-process-list scroll-region">{processes.length === 0
+        ? <EmptyState className="panel-empty-state services-process-empty">{t('services.noProcesses')}</EmptyState>
+        : processes.map((process) => <div className="service-row list-row service-process-row" key={process.id}>
+          <div className="service-process-details">
+            <span className="service-process-id">{process.id}</span>
+            <span className="service-process-command" title={`$ ${toDisplayWorkspacePath(process.command, containerName)}`}>$ {toDisplayWorkspacePath(process.command, containerName)}</span>
           </div>
-        )}
-      </section>
-    </div>
-  );
+          <button className="icon-button icon-button-danger" onClick={() => onKillProcess(process)} title={t('services.kill')} aria-label={`${t('services.kill')} ${process.id}`}><StopCircle size={18} /></button>
+        </div>)}</div>
+    </section>
+  </div>;
 }

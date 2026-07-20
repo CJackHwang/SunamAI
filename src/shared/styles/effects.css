@@ -1,0 +1,35 @@
+/* ===== Glassmorphism Effects ===== */
+.glass-header {
+  background-color: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+
+.glass-input {
+  background-color: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: none;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+
+.glass-btn {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: none;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+
+.glass-btn:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-black) 75%, transparent);
+  border: none;
+}
+
+.glass-btn:disabled {
+  background-color: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  color: var(--color-text-secondary);
+  box-shadow: none;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+}

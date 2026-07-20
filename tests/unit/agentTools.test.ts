@@ -10,7 +10,7 @@ function createContext() {
     listWorkspace: vi.fn(async () => [{ path: 'a.ts', isDirectory: false }]),
     readWorkspaceFile: vi.fn(async () => 'content'),
     searchWorkspace: vi.fn(async () => [{ path: 'a.ts', line: 1, content: 'needle' }]),
-    applyWorkspaceChanges: vi.fn(async () => [{ path: 'a.ts', diff: '+++ a.ts' }]),
+    applyWorkspaceChanges: vi.fn(async () => [{ path: 'a.ts', kind: 'updated' as const, beforeBytes: 1, afterBytes: 2 }]),
     runShell: vi.fn(async (request) => ({ timedOut: false, process: { id: 'p-1', sessionId: request.sessionId, runId: request.runId, containerId: request.containerId, command: request.command, isRunning: false, output: 'ok', cursor: 2, exitCode: 0 } })),
     observeProcess: vi.fn(() => null),
     sendProcessInput: vi.fn(async () => true),

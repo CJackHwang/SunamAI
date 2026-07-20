@@ -1,10 +1,12 @@
 import React, { lazy, Suspense, useState } from 'react';
 import SettingsModal from '../widgets/settings/SettingsModal.tsx';
 import { Sidebar } from '../widgets/sidebar/Sidebar.tsx';
-import { useWorkspaceStore } from '../shared/store/useWorkspaceStore.ts';
+import { useWorkspaceStore } from '@/entities/workspace/store';
 import { readAppSettings, saveConnectionSettings, saveSunamModel } from '@/shared/lib/settings';
 import type { SunamModel } from '@/shared/config/models';
 import { useI18n, type Locale } from '@/shared/i18n';
+import { LoadingState } from '@/shared/ui/AsyncState';
+import './MainPage.css';
 
 const Workspace = lazy(() => import('../widgets/workspace/Workspace.tsx'));
 
@@ -14,7 +16,7 @@ const MainPage: React.FC = () => {
   const [baseUrl, setBaseUrl] = useState(initialSettings.baseUrl);
   const [apiModel, setApiModel] = useState(initialSettings.apiModel);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const { activeSessionId, activeContainerId, updateSessionStatus } = useWorkspaceStore();
+  const { activeSessionId, activeContainerId, updateSessionStatus, hydrated, persistenceError, reloadWorkspace } = useWorkspaceStore();
   const { locale, setLocale, t } = useI18n();
   const [sunamModel, setSunamModel] = useState<SunamModel>(initialSettings.sunamModel);
   
@@ -35,18 +37,19 @@ const MainPage: React.FC = () => {
 
 
   return (
-    <div className="app-container" style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden' }}>
+    <div className="app-container">
       <Sidebar 
         onOpenSettings={() => setIsSettingsOpen(true)} 
         isMobileOpen={isMobileOpen} 
         onCloseMobile={() => setIsMobileOpen(false)} 
       />
 
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative', backgroundColor: 'var(--color-bg)' }}>
+      <main className="app-main">
+        {persistenceError && <div className="persistence-error" role="alert"><span>{t('persistence.unavailable')}: {persistenceError}</span><button className="btn btn-secondary" onClick={() => { void reloadWorkspace(); }}>{t('common.retry')}</button></div>}
         {/* Main Workspace Area */}
-        <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-          {apiKey ? (
-            <Suspense fallback={<div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>{t('common.loading')}</div>}>
+        <div className="app-workspace">
+          {apiKey && hydrated ? (
+            <Suspense fallback={<LoadingState className="app-centered-state">{t('common.loading')}</LoadingState>}>
               <Workspace
                 apiKey={apiKey}
                 baseUrl={baseUrl}
@@ -59,8 +62,10 @@ const MainPage: React.FC = () => {
                 updateSessionStatus={updateSessionStatus}
               />
             </Suspense>
+          ) : apiKey ? (
+            <LoadingState className="app-centered-state">{persistenceError ? t('persistence.unavailable') : t('common.loading')}</LoadingState>
           ) : (
-            <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+            <div className="app-centered-state">
               <p>{t('main.configureApiKey')}</p>
             </div>
           )}

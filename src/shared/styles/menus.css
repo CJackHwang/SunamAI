@@ -1,0 +1,113 @@
+/* ===== Shared Context Menu Styles ===== */
+.context-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  transition: background-color 0.2s ease;
+}
+
+.context-overlay.dimmed {
+  background-color: rgba(0, 0, 0, 0.4);
+}
+
+.context-menu,
+.avatar-menu {
+  position: fixed;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  box-shadow: var(--elevation-4);
+  padding: 4px;
+  min-width: 180px;
+  z-index: 1001;
+  animation: context-menu-in 0.12s ease-out;
+  display: flex;
+  flex-direction: column;
+}
+
+.context-menu-positioned {
+  left: min(var(--context-menu-x), calc(100vw - 200px));
+  top: min(var(--context-menu-y), calc(100vh - 250px));
+}
+
+@keyframes context-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.context-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  border-radius: var(--radius-small);
+  transition: background-color 0.12s;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.context-item:hover {
+  background-color: var(--color-gray-100);
+}
+
+.context-item.danger {
+  color: var(--color-danger);
+}
+
+.context-item.danger:hover {
+  background-color: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface));
+}
+
+.context-item-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.context-divider {
+  height: 1px;
+  background-color: var(--color-border);
+  margin: 4px 8px;
+}
+
+@media (max-width: 900px) {
+  .context-menu {
+    /* Bottom sheet style on mobile */
+    inset: auto 0 0;
+    border-radius: var(--radius-large) var(--radius-large) 0 0;
+    min-width: 100%;
+    padding: 8px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    animation: context-sheet-up 0.2s ease-out;
+  }
+
+  @keyframes context-sheet-up {
+    from {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  .context-item {
+    padding: 14px 16px;
+    font-size: 15px;
+  }
+}

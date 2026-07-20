@@ -13,20 +13,23 @@ export function WorkspaceRuntimeProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     let active = true;
     let currentRuntime: WebContainerAgentRuntime | null = null;
+    let unsubscribeErrors: (() => void) | undefined;
     void getWebContainer().then((instance) => {
       if (!active) return;
       currentRuntime = new WebContainerAgentRuntime(instance);
+      unsubscribeErrors = currentRuntime.subscribeErrors((message) => { if (active) setError(message); });
       setWebcontainer(instance);
       setRuntime(currentRuntime);
     }).catch((caught) => {
       if (active) setError(caught instanceof Error ? caught.message : String(caught));
     });
-    const flush = () => { void currentRuntime?.flushSnapshots(); };
+    const flush = () => { void currentRuntime?.flushSnapshots().catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : String(caught)); }); };
     window.addEventListener('pagehide', flush);
     return () => {
       active = false;
       window.removeEventListener('pagehide', flush);
-      void currentRuntime?.flushSnapshots().finally(() => currentRuntime?.dispose());
+      unsubscribeErrors?.();
+      void currentRuntime?.flushSnapshots().catch(() => undefined).finally(() => currentRuntime?.dispose());
     };
   }, []);
 

@@ -1,5 +1,16 @@
 import type { ReactNode } from 'react';
+import './AsyncState.css';
 
-export function LoadingState({ children }: { children: ReactNode }) { return <div role="status" style={{ padding: '16px', color: 'var(--color-text-secondary)' }}>{children}</div>; }
-export function EmptyState({ children }: { children: ReactNode }) { return <div style={{ padding: '16px', color: 'var(--color-text-secondary)', textAlign: 'center' }}>{children}</div>; }
-export function ErrorState({ children }: { children: ReactNode }) { return <div role="alert" style={{ padding: '12px', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '6px' }}>{children}</div>; }
+interface AsyncStateProps { children: ReactNode; className?: string }
+
+export function LoadingState({ children, className = '' }: AsyncStateProps) {
+  return <div role="status" className={`async-state async-loading-state ${className}`}>{children}</div>;
+}
+
+export function EmptyState({ children, className = '' }: AsyncStateProps) {
+  return <div className={`async-state async-empty-state ${className}`}>{children}</div>;
+}
+
+export function ErrorState({ children, className = '' }: AsyncStateProps) {
+  return <div role="alert" className={`async-state async-error-state ${className}`}>{children}</div>;
+}

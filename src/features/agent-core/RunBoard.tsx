@@ -35,16 +35,16 @@ export function RunBoard({ run, events, liveOutput, onResume }: RunBoardProps) {
     <div className="task-list-content" aria-hidden={!isExpanded} inert={!isExpanded}>
       <div className="task-list-scroll">
         <div className="task-list-objective">{run.task.objective}</div>
-        {run.error && <div style={{ fontSize: '12px', whiteSpace: 'pre-wrap' }}>{run.error}</div>}
+        {run.error && <div className="task-list-error">{run.error}</div>}
         {checkpoint && <div className="task-list-note"><strong>{t('agent.checkpoint')}:</strong> {checkpoint.summary}</div>}
-        {(progress || liveOutput) && <div style={{ fontSize: '13px', color: 'var(--color-text)', whiteSpace: 'pre-wrap', maxHeight: '90px', overflowY: 'auto' }}>{progress || liveOutput}</div>}
-        {run.task.plan.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>{run.task.plan.map((item) => <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', color: item.status === 'completed' ? 'var(--color-text-secondary)' : 'var(--color-text)' }}>{item.status === 'completed' ? <CheckCircle2 size={14} /> : <Circle size={14} />}{item.title}</div>)}</div>}
-        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '11px', color: 'var(--color-text-secondary)' }}>
+        {(progress || liveOutput) && <div className="task-list-progress">{progress || liveOutput}</div>}
+        {run.task.plan.length > 0 && <div className="task-list-plan">{run.task.plan.map((item) => <div key={item.id} className={`task-list-plan-item ${item.status === 'completed' ? 'completed' : ''}`}>{item.status === 'completed' ? <CheckCircle2 size={14} /> : <Circle size={14} />}{item.title}</div>)}</div>}
+        <div className="task-list-metadata">
           <span>{t('agent.budget')}: {run.modelTurns}/{run.budget.maxModelTurns} · {run.toolCalls}/{run.budget.maxToolCalls}</span>
-          {(verification || run.task.verified) && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><ShieldCheck size={12} />{isVerified ? t('agent.verified') : t('agent.unverified')}</span>}
+          {(verification || run.task.verified) && <span className="task-list-verification"><ShieldCheck size={12} />{isVerified ? t('agent.verified') : t('agent.unverified')}</span>}
         </div>
         {tools.length > 0 && <details className="task-list-tools"><summary>{tools.length} {t('agent.toolOutputs')}</summary><div>{tools.map((event) => <div key={event.id} className="task-list-tool"><div>{event.result.ok ? '✓' : '×'} {event.toolCall.function.name}</div><pre>{event.result.content.slice(0, 600)}</pre></div>)}</div></details>}
-        {run.task.evidence.length > 0 && <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}><strong>{t('agent.evidence')}:</strong> {run.task.evidence.slice(-3).join(' · ')}</div>}
+        {run.task.evidence.length > 0 && <div className="task-list-evidence"><strong>{t('agent.evidence')}:</strong> {run.task.evidence.slice(-3).join(' · ')}</div>}
         {(run.phase === 'interrupted' || run.phase === 'awaiting_user') && onResume && <button className="btn btn-primary task-list-resume" onClick={onResume}><RotateCcw size={14} />{t('agent.resume')}</button>}
       </div>
     </div>

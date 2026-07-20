@@ -1,0 +1,4 @@
+.async-state { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px; border-radius: var(--radius-small); color: var(--color-text-secondary); text-align: center; }
+.async-loading-state { min-height: 48px; }
+.async-empty-state { color: var(--color-text-tertiary); }
+.async-error-state { border: 1px solid color-mix(in srgb, var(--color-danger) 30%, var(--color-border)); color: var(--color-danger); }

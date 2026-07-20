@@ -6,7 +6,13 @@ export function getExtension(name: string): string {
   return parts.length < 2 ? '' : parts.at(-1)!.toLowerCase();
 }
 
-export function formatSize(bytes: number): string {
+export function isPreviewableFile(name: string): boolean {
+  const extension = getExtension(name);
+  return name.startsWith('.') || TEXT_EXTENSIONS.has(extension) || IMAGE_EXTENSIONS.has(extension);
+}
+
+export function formatSize(bytes: number | null, unknownLabel = '未知'): string {
+  if (bytes === null) return unknownLabel;
   if (bytes === 0) return '—';
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;

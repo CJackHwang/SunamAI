@@ -1,31 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { SquarePen, History, Box, Plus, PanelLeftClose, PanelLeft, Settings, Pin, Trash2, Edit2, Search, Sparkles } from 'lucide-react';
-import { useWorkspaceStore } from '../../shared/store/useWorkspaceStore';
+import { SquarePen, History, Box, Plus, PanelLeftClose, PanelLeft, Settings, Search } from 'lucide-react';
+import { useWorkspaceStore } from '@/entities/workspace/store';
 import { WorkspaceResourceList } from '@/features/session/ui/WorkspaceResourceList';
 import { generateAutoTitle } from '@/features/session/titleService';
 import { AgentEventStore } from '@/features/agent-core/eventStore';
 import { projectMessages } from '@/features/agent-core/projector';
 import { readAppSettings } from '@/shared/lib/settings';
 import { useI18n } from '@/shared/i18n';
+import { SidebarResourceContextMenu } from './SidebarResourceContextMenu';
+import { findSidebarResource, sidebarResourceLabel, type SidebarContextMenuState, type SidebarEditingState, type SidebarResourceKind } from './sidebarResources';
+import './Sidebar.css';
 
 interface SidebarProps {
   onOpenSettings?: () => void;
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
 }
-
-type ContextMenuState = {
-  type: 'session' | 'container';
-  id: string;
-  x: number;
-  y: number;
-} | null;
-
-type EditingState = {
-  type: 'session' | 'container';
-  id: string;
-  text: string;
-} | null;
 
 export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, onCloseMobile }) => {
   const { t } = useI18n();
@@ -40,8 +30,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
 
   const isCollapsed = isMobile ? false : _isCollapsed;
 
-  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
-  const [editing, setEditing] = useState<EditingState>(null);
+  const [contextMenu, setContextMenu] = useState<SidebarContextMenuState | null>(null);
+  const [editing, setEditing] = useState<SidebarEditingState | null>(null);
   const [generatingTitleId, setGeneratingTitleId] = useState<string | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const eventStoreRef = useRef(new AgentEventStore());
@@ -65,8 +55,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
 
   const sortedSessions = [...sessions].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
   const sortedContainers = [...containers].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+  const contextResource = contextMenu ? findSidebarResource(contextMenu.type, contextMenu.id, sessions, containers) : undefined;
 
-  const handleContextMenu = (e: React.MouseEvent, type: 'session' | 'container', id: string) => {
+  const handleContextMenu = (e: React.MouseEvent, type: SidebarResourceKind, id: string) => {
     e.preventDefault();
     setContextMenu({ type, id, x: e.clientX, y: e.clientY });
   };
@@ -86,7 +77,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
     setEditing(null);
   };
 
-  const handleGenerateTitle = async (type: 'session' | 'container', id: string) => {
+  const handleGenerateTitle = async (type: SidebarResourceKind, id: string) => {
     closeContextMenu();
     const { apiKey, baseUrl, apiModel } = readAppSettings();
 
@@ -109,8 +100,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
         if (type === 'session') renameSession(id, title);
         else renameContainer(id, title);
       }
-    } catch (error) {
-      console.error(error);
+    } catch {
       alert(t('sidebar.renameFailed'));
     } finally {
       setGeneratingTitleId(null);
@@ -126,20 +116,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
   return (
     <>
       {isMobileOpen && (
-        <div 
-          className="mobile-overlay" 
-          style={{ position: 'fixed', inset: 0, zIndex: 999, backgroundColor: 'rgba(0,0,0,0.5)' }} 
-          onClick={onCloseMobile} 
-        />
+        <div className="mobile-overlay" onClick={onCloseMobile} />
       )}
       <div className={`sidebar ${isCollapsed ? 'collapsed' : 'expanded'} ${isMobileOpen ? 'mobile-open' : ''}`}>
         {/* Header */}
         <div className="sidebar-header">
           <div 
-            className={`sidebar-logo-toggle ${!isCollapsed ? 'expanded-mode' : ''}`}
+            className={`sidebar-logo-toggle ${!isCollapsed ? 'expanded-mode' : 'is-collapsed'}`}
             onClick={() => isCollapsed && setIsCollapsed(false)}
             title={isCollapsed ? "Expand Sidebar" : ""}
-            style={{ cursor: isCollapsed ? 'pointer' : 'default', backgroundColor: 'transparent' }}
           >
             <img src="/icon.png" alt="Sunam" className="logo-default" />
             {isCollapsed && (
@@ -150,14 +135,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
           </div>
           {!isCollapsed && (
             <>
-              <span className="sidebar-title" style={{ fontSize: '24px', fontWeight: 600, lineHeight: 1, letterSpacing: '-0.5px' }}>
+              <span className="sidebar-title sidebar-brand">
                 Sunam
               </span>
-              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <div className="sidebar-header-actions">
                 <button 
-                  className="sidebar-icon-btn"
                   title={t('sidebar.search')}
-                  style={{ padding: '4px' }}
+                  className="sidebar-icon-btn sidebar-header-search"
                 >
                   <Search size={18} />
                 </button>
@@ -193,7 +177,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
             </button>
             
             {isCollapsed && (
-              <button className="sidebar-action-btn" title={t('sidebar.search')} style={{ marginTop: '8px' }}>
+              <button className="sidebar-action-btn sidebar-collapsed-search" title={t('sidebar.search')}>
                 <Search size={18} />
               </button>
             )}
@@ -223,24 +207,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
 
         {/* Footer */}
         <div className="sidebar-footer">
-          <div className="sidebar-user" style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: isCollapsed ? 'center' : 'flex-start',
-            gap: '12px', 
-            overflow: 'hidden', 
-            flex: isCollapsed ? 'none' : 1,
-            width: isCollapsed ? '100%' : 'auto'
-          }}>
+          <div className="sidebar-user">
             <img src="/head.jpeg" alt="Avatar" className="sidebar-avatar" />
             {!isCollapsed && <span className="sidebar-username">{t('sidebar.user')}</span>}
           </div>
           {!isCollapsed && (
-            <button 
-              className="sidebar-icon-btn" 
-              onClick={onOpenSettings} 
+            <button
+              className="sidebar-icon-btn sidebar-settings"
+              onClick={onOpenSettings}
               title={t('sidebar.settings')}
-              style={{ padding: '6px', marginRight: '-4px' }}
             >
               <Settings size={18} />
             </button>
@@ -249,78 +224,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
       </div>
 
       {/* Context Menu */}
-      {contextMenu && (
-        <>
-          <div className={`context-overlay ${isMobile ? 'dimmed' : ''}`} onClick={closeContextMenu} />
-          <div 
-            className="context-menu" 
-            style={{ 
-              position: 'fixed', 
-              top: `${contextMenu.y}px`, 
-              left: `${contextMenu.x}px`,
-              zIndex: 1002 
-            }}
-          >
-            <button 
-              className="context-item" 
-              onClick={() => {
-                const isSession = contextMenu.type === 'session';
-                const item = isSession 
-                  ? sessions.find(s => s.id === contextMenu.id)
-                  : containers.find(c => c.id === contextMenu.id);
-                if (item) {
-                  setEditing({ type: contextMenu.type, id: contextMenu.id, text: isSession ? (item as any).title : (item as any).name });
-                }
-                closeContextMenu();
-              }}
-            >
-              <Edit2 size={16} className="context-item-icon" />
-              {t('sidebar.rename')}
-            </button>
-            <button 
-              className="context-item" 
-              onClick={() => handleGenerateTitle(contextMenu.type, contextMenu.id)}
-            >
-              <Sparkles size={16} className="context-item-icon" />
-              {t('sidebar.generateTitle')}
-            </button>
-            <button 
-              className="context-item" 
-              onClick={() => {
-                if (contextMenu.type === 'session') togglePinSession(contextMenu.id);
-                else togglePinContainer(contextMenu.id);
-                closeContextMenu();
-              }}
-            >
-              <Pin size={16} className="context-item-icon" />
-              {(() => {
-                const isSession = contextMenu.type === 'session';
-                const item = isSession 
-                  ? sessions.find(s => s.id === contextMenu.id)
-                  : containers.find(c => c.id === contextMenu.id);
-                return item?.pinned ? t('sidebar.unpin') : t('sidebar.pin');
-              })()}
-            </button>
-            <div className="context-divider" />
-            <button 
-              className="context-item danger" 
-              onClick={() => {
-                const isSession = contextMenu.type === 'session';
-                if (!isSession && !window.confirm(t('sidebar.confirmDeleteContainer'))) {
-                  closeContextMenu();
-                  return;
-                }
-                if (isSession) deleteSession(contextMenu.id);
-                else deleteContainer(contextMenu.id);
-                closeContextMenu();
-              }}
-            >
-              <Trash2 size={16} className="context-item-icon" />
-              {t('sidebar.delete')}
-            </button>
-          </div>
-        </>
-      )}
+      {contextMenu && <SidebarResourceContextMenu menu={contextMenu} resource={contextResource} dimmed={isMobile} labels={{ rename: t('sidebar.rename'), generateTitle: t('sidebar.generateTitle'), pin: t('sidebar.pin'), unpin: t('sidebar.unpin'), delete: t('sidebar.delete') }} onClose={closeContextMenu} onRename={() => { if (contextResource) setEditing({ type: contextMenu.type, id: contextMenu.id, text: sidebarResourceLabel(contextResource) }); closeContextMenu(); }} onGenerateTitle={() => { void handleGenerateTitle(contextMenu.type, contextMenu.id); }} onTogglePin={() => { if (contextMenu.type === 'session') togglePinSession(contextMenu.id); else togglePinContainer(contextMenu.id); closeContextMenu(); }} onDelete={() => { const session = contextMenu.type === 'session'; if (!session && !window.confirm(t('sidebar.confirmDeleteContainer'))) { closeContextMenu(); return; } if (session) deleteSession(contextMenu.id); else deleteContainer(contextMenu.id); closeContextMenu(); }} />}
     </>
   );
 };

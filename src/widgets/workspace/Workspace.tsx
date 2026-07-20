@@ -11,11 +11,13 @@ import { generateTitle } from '@/features/session/titleService';
 import type { SunamModel } from '@/shared/config/models';
 import type { SessionStatus } from '@/entities/workspace/types';
 import type { ChatAttachment } from '@/entities/message/types';
-import { useWorkspaceStore } from '@/shared/store/useWorkspaceStore';
+import { useWorkspaceStore } from '@/entities/workspace/store';
 import { WorkspaceRuntimeProvider } from '@/features/runtime/WorkspaceRuntimeProvider';
 import { useWorkspaceRuntime } from '@/features/runtime/WorkspaceRuntimeContext';
 import { readChatAttachments } from '@/features/chat/lib/chatAttachments';
 import { useI18n } from '@/shared/i18n';
+import { toErrorMessage } from '@/shared/lib/errors';
+import './Workspace.css';
 
 const DualTerminal = lazy(() => import('@/features/terminal-session/DualTerminal'));
 
@@ -34,7 +36,7 @@ interface WorkspaceProps {
 function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, updateSessionStatus }: WorkspaceProps) {
   const { t } = useI18n();
   const { runtime, webcontainer, isReady: isRuntimeReady, error: runtimeError, getContainerRoot } = useWorkspaceRuntime();
-  const { events, messages, activeRun, latestRun, streamingContent, streamingReasoning, startTask, resumeTask, stopTask } = useAgentV2(apiKey, baseUrl, apiModel, sunamModel, runtime, activeSessionId, activeContainerId, updateSessionStatus);
+  const { events, messages, activeRun, latestRun, streamingContent, streamingReasoning, persistenceError: agentPersistenceError, startTask, resumeTask, stopTask } = useAgentV2(apiKey, baseUrl, apiModel, sunamModel, runtime, activeSessionId, activeContainerId, updateSessionStatus);
   const { sessions, containers, createSession, createContainer, renameSession } = useWorkspaceStore();
   const isRunning = Boolean(activeRun);
   const [input, setInput] = useState('');
@@ -70,7 +72,7 @@ function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel
     }
     const prompt = input.trim() || t('chat.analyzeAttachments');
     if (isNewSession) {
-      void generateTitle(prompt, { apiKey, baseUrl, model: apiModel }).then((title) => { if (title) renameSession(sessionId!, title); }).catch(console.error);
+      void generateTitle(prompt, { apiKey, baseUrl, model: apiModel }).then((title) => { if (title) renameSession(sessionId!, title); }).catch((error) => setAttachmentError(toErrorMessage(error)));
     }
     const containerId = activeContainerId ?? createContainer();
     startTask(prompt, sessionId, containerId, attachments);
@@ -85,18 +87,18 @@ function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel
   };
 
   return (
-    <div className="workspace-container" data-active-tab={mobileActive}>
-      <div className="chat-section" style={{ display: layoutState === 'full' ? 'none' : 'flex' }}>
+    <div className="workspace-container" data-active-tab={mobileActive} data-layout={layoutState}>
+      <div className="chat-section">
         <ModelSelector model={sunamModel} isOpen={isModelMenuOpen} onToggle={() => setIsModelMenuOpen((open) => !open)} onSelect={(model) => { setSunamModel(model); setIsModelMenuOpen(false); }} onMobileSidebarToggle={onMobileSidebarToggle} />
-        <ChatMessageList messages={messages} isRunning={isRunning} retryCount={0} containerRef={containerRef} onScroll={onScroll} bottomInset={composerHeight + 16} streamingContent={streamingContent} streamingReasoning={streamingReasoning} />
+        <ChatMessageList messages={messages} isRunning={isRunning} containerRef={containerRef} onScroll={onScroll} bottomInset={composerHeight + 16} streamingContent={streamingContent} streamingReasoning={streamingReasoning} />
         <ChatComposer input={input} attachments={attachments} attachmentError={attachmentError} isRunning={Boolean(isRunning)} isTerminalReady={isTerminalReady} isAtBottom={isAtBottom} taskList={<RunBoard run={activeRun ?? latestRun} events={events} liveOutput={streamingContent} onResume={() => resumeTask(latestRun)} />} onFilesSelected={(files) => { void readChatAttachments(files).then((next) => { setAttachments((current) => [...current, ...next].slice(0, 8)); setAttachmentError(null); }).catch((error) => setAttachmentError(error instanceof Error ? error.message : String(error))); }} onRemoveAttachment={(index) => setAttachments((current) => current.filter((_attachment, candidateIndex) => candidateIndex !== index))} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} onHeightChange={setComposerHeight} />
       </div>
-      <div className="terminal-section" style={{ flex: layoutState === 'collapsed' ? '0 0 56px' : '1', minWidth: layoutState === 'collapsed' ? '56px' : '0', transition: 'flex-basis var(--motion-base) var(--motion-ease), min-width var(--motion-base) var(--motion-ease)', borderLeft: 'none', ...(layoutState === 'full' ? { position: 'fixed', inset: 0, zIndex: 100, paddingTop: 0 } : {}) }}>
-        <Suspense fallback={<div className="motion-fade-in" style={{ height: '100%' }} />}>
+      <div className="terminal-section">
+        <Suspense fallback={<div className="motion-fade-in workspace-lazy-state" />}>
           <DualTerminal runtime={runtime} webcontainer={webcontainer} onReady={() => setIsTerminalReady(true)} activeTab={terminalTab} onTabChange={selectTerminalTab} layoutState={layoutState} onLayoutChange={setLayoutState} activeContainerId={activeContainerId} activeContainerName={activeContainer?.name ?? null} activeSessionId={activeSessionId} rootDir={activeContainerId ? getContainerRoot(activeContainerId) : '/'} />
         </Suspense>
       </div>
-      {runtimeError && <div role="alert" style={{ position: 'absolute', right: '16px', bottom: '16px', maxWidth: '420px', padding: '10px 12px', color: '#b91c1c', background: 'var(--color-surface)', border: '1px solid #fecaca', borderRadius: 'var(--radius-small)' }}>{runtimeError}</div>}
+      {(runtimeError || agentPersistenceError) && <div role="alert" className="workspace-runtime-error">{runtimeError || agentPersistenceError}</div>}
       <MobileNavigation active={mobileActive} onChange={(tab) => tab === 'chat' ? setMobileActive('chat') : selectTerminalTab(tab)} />
     </div>
   );
