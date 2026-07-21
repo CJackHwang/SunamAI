@@ -84,6 +84,8 @@ export const zhCN = {
   'services.previewTitle': '端口 {{port}} 实时预览',
   'services.previewFrameTitle': '端口 {{port}} 页面预览',
   'services.backToServices': '返回服务列表',
+  'services.closePreview': '关闭预览',
+  'services.goBack': '返回上一页',
   'services.reloadPreview': '刷新预览',
   'services.loadingPreview': '正在加载预览…',
   'services.online': '运行中',

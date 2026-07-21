@@ -86,6 +86,8 @@ export const jaJP = {
   'services.previewTitle': 'ポート {{port}} のライブプレビュー',
   'services.previewFrameTitle': 'ポート {{port}} のページプレビュー',
   'services.backToServices': 'サービス一覧に戻る',
+  'services.closePreview': 'プレビューを閉じる',
+  'services.goBack': '前のページに戻る',
   'services.reloadPreview': 'プレビューを再読み込み',
   'services.loadingPreview': 'プレビューを読み込み中…',
   'services.online': '実行中',

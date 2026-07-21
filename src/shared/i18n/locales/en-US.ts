@@ -86,6 +86,8 @@ export const enUS = {
   'services.previewTitle': 'Live preview · Port {{port}}',
   'services.previewFrameTitle': 'Page preview for port {{port}}',
   'services.backToServices': 'Back to services',
+  'services.closePreview': 'Close preview',
+  'services.goBack': 'Go back',
   'services.reloadPreview': 'Reload preview',
   'services.loadingPreview': 'Loading preview…',
   'services.online': 'Running',
