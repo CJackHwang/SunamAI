@@ -3,8 +3,16 @@ import './AsyncState.css';
 
 interface AsyncStateProps { children: ReactNode; className?: string }
 
-export function LoadingState({ children, className = '' }: AsyncStateProps) {
-  return <div role="status" className={`async-state async-loading-state motion-fade-in ${className}`}>{children}</div>;
+export function LoadingState({ className = '' }: AsyncStateProps) {
+  // Reuse the native boot-screen styles from index.html for a seamless transition
+  return (
+    <div role="status" className={`boot-screen ${className}`}>
+      <div className="boot-screen__content">
+        <img className="boot-screen__mark" src="/sunam-booticon.png" width={72} height={72} alt="" />
+        <div className="boot-screen__bar" aria-hidden="true"></div>
+      </div>
+    </div>
+  );
 }
 
 export function EmptyState({ children, className = '' }: AsyncStateProps) {
