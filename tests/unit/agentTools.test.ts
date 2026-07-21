@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AgentToolRegistry } from '@/features/agent-core/tools';
+import { AgentToolRegistry, isVerificationCommand } from '@/features/agent-core/tools';
 import type { TaskContract } from '@/features/agent-core/types';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 
 function createContext() {
-  let task: TaskContract = { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: true, plan: [], evidence: [], changedWorkspace: false, verified: false, verificationEvidence: [] };
+  let task: TaskContract = { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: true, plan: [], evidence: [], changedWorkspace: false, workspaceRevision: 0, verified: false, verifiedRevision: -1, verificationEvidence: [] };
   const runtime: AgentWorkspaceRuntime = {
     ensureContainer: vi.fn(async () => undefined),
     listWorkspace: vi.fn(async () => [{ path: 'a.ts', isDirectory: false }]),
@@ -19,15 +19,27 @@ function createContext() {
     getProcesses: vi.fn(() => []),
     subscribe: vi.fn(() => () => undefined),
   };
-  return { runtime, context: { sessionId: 's-1', runId: 'r-1', containerId: 'c-1', runtime, getTask: () => task, updateTask: (updater: (current: TaskContract) => TaskContract) => { task = updater(task); } }, getTask: () => task };
+  return { runtime, context: { sessionId: 's-1', runId: 'r-1', containerId: 'c-1', runtime, signal: new AbortController().signal, getTask: () => task, updateTask: (updater: (current: TaskContract) => TaskContract) => { task = updater(task); } }, getTask: () => task };
 }
 
 describe('AgentToolRegistry', () => {
+  it('recognizes actual verification commands without trusting incidental substrings', () => {
+    expect(isVerificationCommand('npm run typecheck && vitest run')).toBe(true);
+    expect(isVerificationCommand('go test ./...')).toBe(true);
+    expect(isVerificationCommand('./scripts/check.sh')).toBe(true);
+    expect(isVerificationCommand('echo contest-ready')).toBe(false);
+    expect(isVerificationCommand('echo npm test')).toBe(false);
+    expect(isVerificationCommand('npm test || true')).toBe(false);
+    expect(isVerificationCommand('npm test; exit 0')).toBe(false);
+    expect(isVerificationCommand('npm install')).toBe(false);
+  });
+
   it('executes workspace, shell, process, and control tools with truthful task updates', async () => {
     const registry = new AgentToolRegistry();
     const { context, runtime, getTask } = createContext();
     expect(registry.getApiDefinitions()).toHaveLength(12);
-    expect(registry.getMetadata('workspace_tree')?.concurrencySafe).toBe(true);
+    expect(registry.getMetadata('workspace_tree')).toMatchObject({ concurrencySafe: true, dataImpact: 'none', timeoutMs: 10_000, resultType: 'tree' });
+    expect(registry.getMetadata('apply_patch')).toMatchObject({ readOnly: false, dataImpact: 'workspace', resultType: 'changes' });
     expect(registry.getMetadata('missing')).toBeNull();
     expect((await registry.execute({ id: '1', name: 'workspace_tree', arguments: '{bad' }, context)).ok).toBe(false);
     expect((await registry.execute({ id: '1', name: 'missing', arguments: '{}' }, context)).content).toContain('not available');
@@ -36,8 +48,9 @@ describe('AgentToolRegistry', () => {
     expect((await registry.execute({ id: '3', name: 'search_workspace', arguments: JSON.stringify({ query: 'needle' }) }, context)).content).toContain('needle');
     expect((await registry.execute({ id: '4', name: 'apply_patch', arguments: JSON.stringify({ changes: [{ path: 'a.ts', content: 'next' }] }) }, context)).changedWorkspace).toBe(true);
     expect(getTask().changedWorkspace).toBe(true);
-    const shell = await registry.execute({ id: '5', name: 'shell_run', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground' }) }, context);
+    const shell = await registry.execute({ id: '5', name: 'shell_run', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground', timeout_ms: 12_345 }) }, context);
     expect(shell.verification?.passed).toBe(true);
+    expect(runtime.runShell).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 12_345 }));
     expect(getTask().verificationEvidence).toHaveLength(1);
     expect((await registry.execute({ id: '6', name: 'process_observe', arguments: JSON.stringify({ process_id: 'p-1' }) }, context)).ok).toBe(false);
     expect((await registry.execute({ id: '7', name: 'process_input', arguments: JSON.stringify({ process_id: 'p-1', input: 'y' }) }, context)).ok).toBe(true);
@@ -59,6 +72,25 @@ describe('AgentToolRegistry', () => {
     const result = await registry.execute({ id: 'complete', name: 'complete_task', arguments: JSON.stringify({ summary: 'done', evidence: ['failed test'] }) }, context);
     expect(result.ok).toBe(false);
     expect(getTask().verificationEvidence[0]?.passed).toBe(false);
+  });
+
+  it('invalidates successful verification after a later workspace write', async () => {
+    const registry = new AgentToolRegistry();
+    const { context, getTask } = createContext();
+    await registry.execute({ id: 'patch-1', name: 'apply_patch', arguments: JSON.stringify({ changes: [{ path: 'a.ts', content: 'one' }] }) }, context);
+    await registry.execute({ id: 'verify-1', name: 'shell_run', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground' }) }, context);
+    expect(getTask()).toMatchObject({ workspaceRevision: 1, verifiedRevision: 1, verified: true });
+
+    await registry.execute({ id: 'patch-2', name: 'apply_patch', arguments: JSON.stringify({ changes: [{ path: 'a.ts', content: 'two' }] }) }, context);
+    await registry.execute({ id: 'plan', name: 'update_plan', arguments: JSON.stringify({ items: [{ id: 'plan', title: 'Done', status: 'completed' }] }) }, context);
+    expect(getTask()).toMatchObject({ workspaceRevision: 2, verifiedRevision: 1, verified: false });
+    const stale = await registry.execute({ id: 'complete-stale', name: 'complete_task', arguments: JSON.stringify({ summary: 'done', evidence: ['old test'] }) }, context);
+    expect(stale.ok).toBe(false);
+    expect(stale.content).toContain('current workspace revision');
+
+    await registry.execute({ id: 'verify-2', name: 'shell_run', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground' }) }, context);
+    const fresh = await registry.execute({ id: 'complete-fresh', name: 'complete_task', arguments: JSON.stringify({ summary: 'done', evidence: ['fresh test'] }) }, context);
+    expect(fresh.stopRun).toBe('completed');
   });
 
   it('returns useful failures for schema, process, timeout, and completion guard branches', async () => {

@@ -3,7 +3,7 @@ import { AgentEventEmitter } from '@/features/agent-core/events';
 import { projectLatestTask, projectMessages, projectModelMessages, projectProgress, projectRunEvents, sanitizeToolTranscript } from '@/features/agent-core/projector';
 import type { AgentEvent, AgentRun, TaskContract } from '@/features/agent-core/types';
 
-const task: TaskContract = { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: false, plan: [], evidence: [], changedWorkspace: false, verified: false, verificationEvidence: [] };
+const task: TaskContract = { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: false, plan: [], evidence: [], changedWorkspace: false, workspaceRevision: 0, verified: false, verifiedRevision: -1, verificationEvidence: [] };
 const run: AgentRun = { id: 'r-1', sessionId: 's-1', containerId: 'c-1', model: 'm', persona: 'Sunam 1.14 Homo', phase: 'acting', createdAt: 1, updatedAt: 1, task, chaos: { persona: 'Sunam 1.14 Homo', ritual: 'r', privateGoods: 'g', styleDirective: 's', invariants: [] }, budget: { maxModelTurns: 1, maxToolCalls: 1, maxDurationMs: 1 }, modelTurns: 0, toolCalls: 0, summary: '' };
 
 describe('agent event projections', () => {

@@ -29,6 +29,10 @@ React Workspace
 
 `sunam-v2` 只保存 v2 workspace、Run、append-only event、checkpoint、Agent 终端历史、容器快照和隔离项；任何旧键或旧数据库均不读、不迁移、不备份。所有刷新后的活动 Run 都被标为 `interrupted`，点击继续时基于 checkpoint 创建全新的 runId 和 AbortController。
 
+### 1.1 2026-07 核验补强
+
+对生产链路和反例测试复核后，执行内核又收紧了几项此前“有结构但约束不完整”的行为：恢复 Run 现在显式记录 `parentRunId`，继承原始 Task、Plan、历史证据和 checkpoint 摘要，而不是把“继续执行”误当成新目标；恢复后的写任务必须重新验证，不能用中断前的验证直接放行；工作区写入和验证分别记录 `workspaceRevision` / `verifiedRevision`，任何验证后的再次写入都会使旧验证失效；超额工具批次在启动任何工具前整体拒绝，终止控制调用只能位于批次末尾；运行总时限会中止在途模型请求和前台进程；模型退避和上下文压缩均可立即取消；原子文件批次在中途写入失败时安全回滚已完成写入，且不会覆盖并发产生的新内容。
+
 ## 2. 从参考分析中采用的原则
 
 | 原则 | Sunam v2 的具体规则 |
@@ -70,7 +74,7 @@ preparing → planning → acting → observing / verifying
 2. 检查上下文预算；必要时压缩为“事实摘要 + 最近消息”，并发出 `context_compacted`。
 3. 组装系统提示：不可突破的运行章程、当前 Task、Plan、证据、摘要与 ChaosContract。
 4. 请求模型；只对网络、429 与 5xx 做有限指数退避，事件化记录 `model_retry`。
-5. 将 assistant 输出写入 ledger；若有 tool calls，按工具元数据分批执行，产生 requested / started / finished 事件及真实 tool messages。
+5. 将 assistant 输出写入 ledger；若有 tool calls，按工具元数据分批执行，产生 requested / started / finished 事件及真实 tool messages。`complete_task` / `ask_user` 只能作为批次最后一个终止控制调用；违反顺序时整批拒绝且不执行副作用。
 6. 对每次工具批次刷新 Task 与 checkpoint。连续两轮没有有效进展，注入可见的 `recovery_hint`，要求重新检查工作区与任务约束。
 7. 若工具请求结束：检查 Plan、变更与验证证据，然后才进入 completed；若请求用户，进入 awaiting_user。
 8. 若模型无工具只给文本：简单只读任务可结束；任何需要 Plan 或验证的任务都回到 planning，拒绝“口头完工”。连续三次空响应失败。
@@ -87,9 +91,9 @@ preparing → planning → acting → observing / verifying
 
 每个 Run 生成不可变的目标、验收条件和约束，并维护以下可变事实：Plan、已变更工作区、验证记录、证据、摘要、预算消耗和 phase。
 
-- `apply_patch` 才能把 `changedWorkspace` 置为真；
-- `shell_run` 只有 foreground 且命令是 test/check/lint/build/typecheck/verify 类时产生 verification record；失败也必须记录；
-- `complete_task` 必须有非空证据，且若改过工作区，至少一个 verification record 为 passed；
+- `apply_patch` 才能把 `changedWorkspace` 置为真，并在每批成功写入后推进 `workspaceRevision`、撤销旧的已验证状态；
+- `shell_run` 只有 foreground 且命令可被识别为真实 test/check/lint/build/typecheck/verify 入口时产生 verification record；失败也必须记录，调用方传入的超时必须真实下传到运行时；
+- `complete_task` 必须有非空证据，且若改过工作区，当前 `workspaceRevision` 必须存在 passed verification record；旧 revision 的成功记录不能放行新改动；
 - `report_progress` 只能输出公开、安全、短文本；内部推理绝不进入事件或 UI。
 
 这使“牛逼 SaaS 的宇宙级成功播报”和真实成功脱钩：前者只是展示，后者必须由运行时证据决定。
@@ -104,7 +108,7 @@ preparing → planning → acting → observing / verifying
 - 未知版本/畸形 record 进入 quarantine，用户可检查或删除；
 - IndexedDB 不可用或读取失败时暴露错误并暂停写入，避免用临时内存状态伪装持久化成功。
 
-恢复流程为：加载 workspace → mount snapshot → 恢复终端历史与 event/run → 将活动 Run 置为 interrupted → 用户显式继续产生新 Run。此流程的重点是复原可验证的工作事实，而不是伪装一条从未中断的执行链。
+恢复流程为：加载 workspace → mount snapshot → 恢复终端历史与 event/run → 将活动 Run 置为 interrupted → 用户显式继续产生带 `parentRunId` 的新 Run。新 Run 继承原始任务契约、事实、计划、历史验证记录和 checkpoint 摘要，但创建新的取消域、不继承旧进程，并撤销旧验证的完成放行资格。此流程的重点是复原可验证的工作事实，而不是伪装一条从未中断的执行链。
 
 ## 8. 未来阶段（明确不在本次实现）
 
@@ -118,7 +122,7 @@ preparing → planning → acting → observing / verifying
 
 - 旧纯 loop Agent 完全删除，生产路径只能创建 `AgentEngine`；
 - 100% 工具调用 schema 校验，所有运行时行为事件化；
-- 已修改工作区的 Run 无成功验证不得完成；
+- 已修改工作区的 Run 当前 revision 无成功验证不得完成，验证后的再次写入必须重新验证；
 - 刷新后的活动 Run 不得显示为仍在运行，继续必须产生新 runId；
 - 只读并发上限为 4，写入/命令无竞态；
 - 核心测试覆盖率门槛：lines/statements/functions ≥85%，branches ≥80%；

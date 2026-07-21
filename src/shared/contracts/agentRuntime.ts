@@ -35,6 +35,7 @@ export interface ShellRunRequest {
   runId: string;
   mode: 'foreground' | 'background';
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface ShellRunResult {

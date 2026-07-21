@@ -69,8 +69,11 @@ export class WorkspaceFileSystem {
 
   async apply(containerId: string, changes: Array<{ path: string; content: string; expectedContent?: string }>): Promise<WorkspaceChangeSummary[]> {
     const prepared: Array<{ path: string; target: string; previous: string; content: string; kind: 'created' | 'updated' }> = [];
+    const uniquePaths = new Set<string>();
     for (const change of changes) {
       const target = resolveContainerPath(containerId, change.path);
+      if (uniquePaths.has(target)) throw new Error(`Workspace update contains duplicate path: ${change.path}.`);
+      uniquePaths.add(target);
       let previous = '';
       let kind: 'created' | 'updated' = 'updated';
       try {
@@ -85,11 +88,36 @@ export class WorkspaceFileSystem {
       prepared.push({ path: change.path, target, previous, content: change.content, kind });
     }
     const results: WorkspaceChangeSummary[] = [];
-    for (const change of prepared) {
-      const parent = change.target.slice(0, change.target.lastIndexOf('/')) || getContainerRoot(containerId);
-      await this.webcontainer.fs.mkdir(parent, { recursive: true });
-      await this.webcontainer.fs.writeFile(change.target, change.content);
-      results.push({ path: change.path, kind: change.kind, beforeBytes: new Blob([change.previous]).size, afterBytes: new Blob([change.content]).size });
+    const applied: typeof prepared = [];
+    try {
+      for (const change of prepared) {
+        const parent = change.target.slice(0, change.target.lastIndexOf('/')) || getContainerRoot(containerId);
+        await this.webcontainer.fs.mkdir(parent, { recursive: true });
+        applied.push(change);
+        await this.webcontainer.fs.writeFile(change.target, change.content);
+        results.push({ path: change.path, kind: change.kind, beforeBytes: new Blob([change.previous]).size, afterBytes: new Blob([change.content]).size });
+      }
+    } catch (error) {
+      const rollbackErrors: string[] = [];
+      for (const change of applied.reverse()) {
+        try {
+          const current = await this.webcontainer.fs.readFile(change.target, 'utf-8');
+          if (change.kind === 'updated' && current === change.previous) {
+            continue;
+          } else if (current !== change.content) {
+            rollbackErrors.push(`${change.path}: file changed concurrently; preserved newer content`);
+          } else if (change.kind === 'created') {
+            await this.webcontainer.fs.rm(change.target);
+          } else {
+            await this.webcontainer.fs.writeFile(change.target, change.previous);
+          }
+        } catch (rollbackError) {
+          if (change.kind === 'created' && isNotFoundError(rollbackError)) continue;
+          rollbackErrors.push(`${change.path}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+        }
+      }
+      if (rollbackErrors.length) throw new Error(`Workspace update failed and rollback was incomplete (${rollbackErrors.join('; ')}). Original error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
     }
     return results;
   }

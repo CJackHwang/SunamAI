@@ -11,7 +11,7 @@ const workspace: WorkspaceState = { sessions: [{ id: 's-1', title: 'One', update
 function run(id = 'r-1'): AgentRun {
   return {
     id, sessionId: 's-1', containerId: 'c-1', model: 'model', persona: 'Sunam 1.14 Homo', phase: 'planning', createdAt: 1, updatedAt: 1,
-    task: { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: true, plan: [], evidence: [], changedWorkspace: false, verified: false, verificationEvidence: [] },
+    task: { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: true, plan: [], evidence: [], changedWorkspace: false, workspaceRevision: 0, verified: false, verifiedRevision: -1, verificationEvidence: [] },
     chaos: { persona: 'Sunam 1.14 Homo', ritual: 'ritual', privateGoods: 'good', styleDirective: 'style', invariants: [] },
     budget: { maxModelTurns: 4, maxToolCalls: 4, maxDurationMs: 4 }, modelTurns: 0, toolCalls: 0, summary: '',
   };
@@ -29,6 +29,19 @@ async function putRaw(storeName: string, value: unknown): Promise<void> {
       transaction.objectStore(storeName).put(value);
       transaction.oncomplete = () => { request.result.close(); resolve(); };
       transaction.onerror = () => reject(transaction.error);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function getRaw(storeName: string, id: string): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(V2_PERSISTENCE_DATABASE, V2_PERSISTENCE_VERSION);
+    request.onsuccess = () => {
+      const transaction = request.result.transaction(storeName, 'readonly');
+      const read = transaction.objectStore(storeName).get(id);
+      read.onsuccess = () => { request.result.close(); resolve(read.result); };
+      read.onerror = () => reject(read.error);
     };
     request.onerror = () => reject(request.error);
   });
@@ -79,8 +92,11 @@ describe('V2PersistenceRepository', () => {
     const legacy = run('r-legacy');
     const payload = { ...legacy, task: { ...legacy.task } };
     delete (payload.task as Partial<AgentRun['task']>).verificationEvidence;
+    delete (payload.task as Partial<AgentRun['task']>).workspaceRevision;
+    delete (payload.task as Partial<AgentRun['task']>).verifiedRevision;
     await putRaw('runs', { id: legacy.id, formatVersion: 1, updatedAt: 1, payload });
     expect((await repository.loadRun(legacy.id)).value?.task.verificationEvidence).toEqual([]);
+    expect((await repository.loadRun(legacy.id)).value?.task).toMatchObject({ workspaceRevision: 0, verifiedRevision: -1 });
     await repository.appendEvent(event(legacy));
     await repository.saveCheckpoint({ id: 'cp-delete', runId: legacy.id, sessionId: 's-1', containerId: 'c-1', summary: 'x', messages: [], createdAt: 1 });
     await repository.saveTerminalHistory('s-1', 'history');
@@ -100,6 +116,22 @@ describe('V2PersistenceRepository', () => {
     expect((await repository.listEvents('s-1')).value).toEqual([]);
     expect((await repository.latestCheckpoint(containerRun.id)).value).toBeNull();
     expect((await repository.loadSnapshot('c-1')).value).toBeNull();
+  });
+
+  it('persists normalized fields for same-version records and quarantines malformed nested payloads', async () => {
+    await repository.loadWorkspace();
+    const legacy = run('r-v2-legacy');
+    const payload = { ...legacy, task: { ...legacy.task } };
+    delete (payload.task as Partial<AgentRun['task']>).workspaceRevision;
+    delete (payload.task as Partial<AgentRun['task']>).verifiedRevision;
+    await putRaw('runs', { id: legacy.id, formatVersion: V2_PERSISTENCE_VERSION, updatedAt: 1, payload });
+    expect((await repository.loadRun(legacy.id)).value?.task).toMatchObject({ workspaceRevision: 0, verifiedRevision: -1 });
+    expect((await getRaw('runs', legacy.id) as { payload: AgentRun }).payload.task).toMatchObject({ workspaceRevision: 0, verifiedRevision: -1 });
+
+    await putRaw('events', { id: 'bad-event', formatVersion: V2_PERSISTENCE_VERSION, updatedAt: 2, payload: { id: 'bad-event', kind: 'message', sessionId: 's-1', runId: legacy.id, sequence: 1, createdAt: 2 } });
+    const events = await repository.listEvents('s-1');
+    expect(events.value).toEqual([]);
+    expect(events.issues).toHaveLength(1);
   });
 
   it('keeps transient events out of the durable ledger', async () => {

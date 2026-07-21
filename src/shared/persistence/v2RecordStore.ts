@@ -52,9 +52,9 @@ export class V2RecordStore<T> {
     const raw = await this.database.read(this.store, (store) => store.get(id)) as unknown;
     if (raw === undefined || raw === null) return { value: null, issues: [] };
     const upgraded = upgradeRecord(this.store, raw);
-    if (!upgraded || !this.validator(upgraded.payload)) return { value: null, issues: [await this.quarantine.retain(this.store, id, raw)] };
-    if (upgraded.formatVersion !== (raw as StoredValue<unknown>).formatVersion) await this.put(upgraded.id, upgraded.payload as T, upgraded.updatedAt);
-    return { value: cloneValue(upgraded.payload as T), issues: [] };
+    if (!upgraded || !this.validator(upgraded.record.payload)) return { value: null, issues: [await this.quarantine.retain(this.store, id, raw)] };
+    if (upgraded.changed) await this.put(upgraded.record.id, upgraded.record.payload as T, upgraded.record.updatedAt);
+    return { value: cloneValue(upgraded.record.payload as T), issues: [] };
   }
 
   async list(index?: { name: string; key: IDBValidKey }): Promise<V2ListResult<T>> {
@@ -66,9 +66,9 @@ export class V2RecordStore<T> {
     const issues: V2DataIssue[] = [];
     for (const raw of records) {
       const upgraded = upgradeRecord(this.store, raw);
-      if (upgraded && this.validator(upgraded.payload)) {
-        if (upgraded.formatVersion !== raw.formatVersion) await this.put(upgraded.id, upgraded.payload as T, upgraded.updatedAt);
-        value.push(cloneValue(upgraded.payload as T));
+      if (upgraded && this.validator(upgraded.record.payload)) {
+        if (upgraded.changed) await this.put(upgraded.record.id, upgraded.record.payload as T, upgraded.record.updatedAt);
+        value.push(cloneValue(upgraded.record.payload as T));
       } else {
         issues.push(await this.quarantine.retain(this.store, recordIdOf(raw), raw));
       }

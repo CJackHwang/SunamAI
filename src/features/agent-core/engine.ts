@@ -36,9 +36,33 @@ function initialTask(objective: string): TaskContract {
     plan: [],
     evidence: [],
     changedWorkspace: false,
+    workspaceRevision: 0,
     verified: false,
+    verifiedRevision: -1,
     verificationEvidence: [],
   };
+}
+
+function cloneTask(task: TaskContract): TaskContract {
+  return {
+    ...task,
+    acceptanceCriteria: [...task.acceptanceCriteria],
+    constraints: [...task.constraints],
+    plan: task.plan.map((item) => ({ ...item, evidence: item.evidence ? [...item.evidence] : undefined })),
+    evidence: [...task.evidence],
+    verificationEvidence: task.verificationEvidence.map((evidence) => ({ ...evidence })),
+  };
+}
+
+function rebuildTaskForResume(task: TaskContract): TaskContract {
+  const rebuilt = cloneTask(task);
+  return rebuilt.changedWorkspace ? { ...rebuilt, verified: false, verifiedRevision: -1 } : rebuilt;
+}
+
+export interface AgentResumeState {
+  sourceRunId: string;
+  task: TaskContract;
+  summary: string;
 }
 
 export interface AgentEngineOptions {
@@ -56,23 +80,28 @@ export interface AgentEngineOptions {
   onEvent: (event: AgentEvent) => void;
   onRunChange: (run: AgentRun) => void;
   budget?: Partial<AgentBudget>;
+  resume?: AgentResumeState;
 }
 
 export class AgentEngine {
   private readonly options: AgentEngineOptions;
   private readonly registry = new AgentToolRegistry();
-  private readonly context = new ContextComposer();
+  private readonly context: ContextComposer;
   private readonly run: AgentRun;
   private readonly emitter: AgentEventEmitter;
   private task: TaskContract;
   private transcript: Message[];
   private readonly startedAt = Date.now();
   private readonly signatures = new Map<string, number>();
+  private readonly executionController = new AbortController();
+  private readonly deadlineTimer: ReturnType<typeof setTimeout>;
+  private readonly forwardCancellation: () => void;
 
   constructor(options: AgentEngineOptions) {
     this.options = options;
     const id = createId('r');
-    this.task = initialTask(options.input);
+    this.task = options.resume ? rebuildTaskForResume(options.resume.task) : initialTask(options.input);
+    this.context = new ContextComposer(options.resume?.summary);
     this.run = {
       id,
       sessionId: options.sessionId,
@@ -88,7 +117,12 @@ export class AgentEngine {
       modelTurns: 0,
       toolCalls: 0,
       summary: '',
+      parentRunId: options.resume?.sourceRunId,
     };
+    this.forwardCancellation = () => this.executionController.abort(new DOMException('Agent stopped by user.', 'AbortError'));
+    if (options.signal.aborted) this.forwardCancellation();
+    else options.signal.addEventListener('abort', this.forwardCancellation, { once: true });
+    this.deadlineTimer = setTimeout(() => this.executionController.abort(new Error('Agent run exceeded its time budget.')), this.run.budget.maxDurationMs);
     this.transcript = options.initialMessages.filter((message) => message.role !== 'system');
     this.emitter = new AgentEventEmitter(options.sessionId, id, async (event) => {
       await this.options.store.append(event);
@@ -142,7 +176,7 @@ export class AgentEngine {
   }
 
   private assertBudget(): void {
-    if (this.options.signal.aborted) throw new DOMException('Agent stopped by user.', 'AbortError');
+    if (this.executionController.signal.aborted) throw this.executionController.signal.reason;
     if (Date.now() - this.startedAt > this.run.budget.maxDurationMs) throw new Error('Agent run exceeded its time budget.');
     if (this.run.modelTurns >= this.run.budget.maxModelTurns) throw new Error('Agent run exceeded its model-turn budget.');
     if (this.run.toolCalls >= this.run.budget.maxToolCalls) throw new Error('Agent run exceeded its tool-call budget.');
@@ -153,7 +187,7 @@ export class AgentEngine {
       let streamedContent = '';
       let streamedReasoning = '';
       const response = await this.options.client.complete(sanitizeToolTranscript(messages), {
-        signal: this.options.signal,
+        signal: this.executionController.signal,
         tools: this.registry.getApiDefinitions(),
         onDelta: (message) => {
           streamedContent = message.content;
@@ -162,7 +196,7 @@ export class AgentEngine {
         },
       });
       return { ...response, message: { ...response.message, content: response.message.content || streamedContent, reasoning_content: response.message.reasoning_content || streamedReasoning || undefined } };
-    }, async (attempt, delayMs, error) => this.emitter.emit('model_retry', { attempt, delayMs, error }));
+    }, async (attempt, delayMs, error) => this.emitter.emit('model_retry', { attempt, delayMs, error }), this.executionController.signal);
   }
 
   private toToolCall(call: ParsedToolCall): ToolCall {
@@ -187,6 +221,7 @@ export class AgentEngine {
       runId: this.run.id,
       containerId: this.options.containerId,
       runtime: this.options.runtime,
+      signal: this.executionController.signal,
       getTask: () => this.task,
       updateTask: (updater) => this.updateTask(updater),
     };
@@ -201,7 +236,26 @@ export class AgentEngine {
     return { call, result: safeResult };
   }
 
-  private executeTools(calls: ParsedToolCall[]): Promise<Array<{ call: ParsedToolCall; result: AgentToolResult }>> {
+  private async rejectOne(call: ParsedToolCall, message: string): Promise<{ call: ParsedToolCall; result: AgentToolResult }> {
+    this.run.toolCalls += 1;
+    const toolCall = this.toToolCall(call);
+    const result = { ok: false, content: message };
+    await this.emitter.emit('tool_requested', { toolCall });
+    await this.emitter.emit('tool_started', { toolCall });
+    await this.emitter.emit('tool_finished', { toolCall, result });
+    return { call, result };
+  }
+
+  private async executeTools(calls: ParsedToolCall[]): Promise<Array<{ call: ParsedToolCall; result: AgentToolResult }>> {
+    const remaining = this.run.budget.maxToolCalls - this.run.toolCalls;
+    if (calls.length > remaining) throw new Error(`Agent run tool-call budget cannot execute this batch (${calls.length} requested, ${Math.max(0, remaining)} remaining).`);
+    const terminalIndexes = calls.flatMap((call, index) => call.name === 'complete_task' || call.name === 'ask_user' ? [index] : []);
+    if (terminalIndexes.length > 1 || terminalIndexes.some((index) => index !== calls.length - 1)) {
+      const message = 'Tool batch rejected: complete_task or ask_user must be the single terminal control call at the end of a batch. No requested side effects were executed.';
+      const rejected: Array<{ call: ParsedToolCall; result: AgentToolResult }> = [];
+      for (const call of calls) rejected.push(await this.rejectOne(call, message));
+      return rejected;
+    }
     return scheduleToolBatch({
       calls,
       isConcurrencySafe: (call) => Boolean(this.registry.getMetadata(call.name)?.concurrencySafe),
@@ -232,7 +286,7 @@ export class AgentEngine {
 
       while (true) {
         this.assertBudget();
-        const compacted = await this.context.compactIfNeeded(this.transcript, this.options.client, this.options.signal);
+        const compacted = await this.context.compactIfNeeded(this.transcript, this.options.client, this.executionController.signal);
         if (compacted.compacted) {
           this.transcript = compacted.messages;
           await this.emitter.emit('context_compacted', { summary: compacted.summary, fallback: compacted.fallback });
@@ -289,7 +343,8 @@ export class AgentEngine {
         }
       }
     } catch (error) {
-      if (isAbortError(error)) {
+      if (this.options.signal.aborted && isAbortError(error)) {
+        await this.phase('cancelling', 'Stopping Agent-owned processes.');
         this.options.runtime.stopRun({ sessionId: this.run.sessionId, runId: this.run.id, containerId: this.run.containerId });
         await this.phase('cancelled', 'Stopped by user.');
         await this.emitter.emit('run_finished', { summary: 'Agent stopped by user.' });
@@ -300,6 +355,9 @@ export class AgentEngine {
       this.options.runtime.stopRun({ sessionId: this.run.sessionId, runId: this.run.id, containerId: this.run.containerId });
       await this.phase('failed', message);
       await this.emitter.emit('run_failed', { error: message, recoverable: true });
+    } finally {
+      clearTimeout(this.deadlineTimer);
+      this.options.signal.removeEventListener('abort', this.forwardCancellation);
     }
   }
 }

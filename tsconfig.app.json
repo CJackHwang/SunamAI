@@ -11,7 +11,8 @@
     /* Bundler mode */
     "moduleResolution": "bundler",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "virtual:pwa-register": ["./src/shared/types/pwa-register.d.ts"]
     },
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,

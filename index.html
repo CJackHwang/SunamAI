@@ -7,11 +7,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#ffffff" />
   <link rel="apple-touch-icon" href="/sunam-appicon.png" sizes="1254x1254" />
+  <link rel="preload" href="/sunam-booticon.png" as="image" type="image/png" />
+  <style>
+    .boot-screen { position: fixed; inset: 0; display: grid; place-items: center; background: #fff; color: #1a1a1a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .boot-screen__content { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+    .boot-screen__mark { display: block; width: 72px; height: 72px; }
+    .boot-screen__bar { width: 128px; height: 2px; overflow: hidden; background: #e5e5e5; }
+    .boot-screen__bar::after { display: block; width: 45%; height: 100%; background: #111; content: ""; animation: boot-progress 1.1s ease-in-out infinite; }
+    @keyframes boot-progress { from { transform: translateX(-110%); } to { transform: translateX(280%); } }
+    @media (prefers-reduced-motion: reduce) { .boot-screen__bar::after { width: 100%; animation: none; } }
+  </style>
   <title>Sunam</title>
 </head>
 
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <div class="boot-screen" role="status" aria-label="Sunam 正在启动">
+      <div class="boot-screen__content">
+        <img class="boot-screen__mark" src="/sunam-booticon.png" width="72" height="72" alt="" />
+        <div class="boot-screen__bar" aria-hidden="true"></div>
+      </div>
+    </div>
+  </div>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 

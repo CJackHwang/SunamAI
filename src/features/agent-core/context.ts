@@ -18,7 +18,11 @@ function deterministicSummary(messages: Message[]): string {
 
 export class ContextComposer {
   private failures = 0;
-  private summary = '';
+  private summary: string;
+
+  constructor(initialSummary = '') {
+    this.summary = initialSummary;
+  }
 
   getSummary(): string {
     return this.summary;
@@ -29,22 +33,21 @@ export class ContextComposer {
     if (size < MAX_CONTEXT_CHARS) return { messages, compacted: false, fallback: false, summary: this.summary };
     const preserved = messages.slice(-MAX_RECENT_MESSAGES);
     const oldMessages = messages.slice(0, -MAX_RECENT_MESSAGES);
-    if (this.failures >= 3) {
-      this.summary = deterministicSummary(oldMessages);
-      return { messages: [{ role: 'system', content: `Compressed working record:\n${this.summary}` }, ...preserved], compacted: true, fallback: true, summary: this.summary };
+    while (this.failures < 3) {
+      try {
+        const response = await client.complete([
+          { role: 'system', content: 'Summarize the prior coding work into a compact factual continuation record. Preserve goals, constraints, changed files, commands, results, active processes, decisions, and unresolved risks. Do not include chain-of-thought.' },
+          { role: 'user', content: deterministicSummary(oldMessages) },
+        ], { signal, tools: [], onDelta: () => undefined });
+        this.summary = clip(response.message.content, 12_000) || deterministicSummary(oldMessages);
+        this.failures = 0;
+        return { messages: [{ role: 'system', content: `Compressed working record:\n${this.summary}` }, ...preserved], compacted: true, fallback: false, summary: this.summary };
+      } catch (error) {
+        if (signal.aborted || error instanceof DOMException && error.name === 'AbortError') throw error;
+        this.failures += 1;
+      }
     }
-    try {
-      const response = await client.complete([
-        { role: 'system', content: 'Summarize the prior coding work into a compact factual continuation record. Preserve goals, constraints, changed files, commands, results, active processes, decisions, and unresolved risks. Do not include chain-of-thought.' },
-        { role: 'user', content: deterministicSummary(oldMessages) },
-      ], { signal, tools: [], onDelta: () => undefined });
-      this.summary = clip(response.message.content, 12_000) || deterministicSummary(oldMessages);
-      this.failures = 0;
-      return { messages: [{ role: 'system', content: `Compressed working record:\n${this.summary}` }, ...preserved], compacted: true, fallback: false, summary: this.summary };
-    } catch {
-      this.failures += 1;
-      this.summary = deterministicSummary(oldMessages);
-      return { messages: [{ role: 'system', content: `Compressed working record:\n${this.summary}` }, ...preserved], compacted: true, fallback: true, summary: this.summary };
-    }
+    this.summary = deterministicSummary(oldMessages);
+    return { messages: [{ role: 'system', content: `Compressed working record:\n${this.summary}` }, ...preserved], compacted: true, fallback: true, summary: this.summary };
   }
 }

@@ -20,7 +20,8 @@ export function RunBoard({ run, events, liveOutput, onResume }: RunBoardProps) {
   const progress = projectProgress(events, run.id);
   const verification = [...runEvents].reverse().find((event) => event.kind === 'verification');
   const checkpoint = [...runEvents].reverse().find((event) => event.kind === 'checkpoint');
-  const isVerified = verification?.passed ?? run.task.verified;
+  const isVerified = run.task.verified && run.task.verifiedRevision === run.task.workspaceRevision;
+  const hasVerificationState = run.task.changedWorkspace || Boolean(verification) || run.task.verified;
   const tools = runEvents.filter((event) => event.kind === 'tool_finished').slice(-6);
   const completedCount = run.task.plan.filter((item) => item.status === 'completed').length;
   const icon = run.phase === 'failed' ? <XCircle size={16} /> : run.phase === 'completed' ? <CheckCircle2 size={16} /> : run.phase === 'interrupted' ? <Circle size={16} /> : <Activity size={16} />;
@@ -41,7 +42,7 @@ export function RunBoard({ run, events, liveOutput, onResume }: RunBoardProps) {
         {run.task.plan.length > 0 && <div className="task-list-plan">{run.task.plan.map((item) => <div key={item.id} className={`task-list-plan-item ${item.status === 'completed' ? 'completed' : ''}`}>{item.status === 'completed' ? <CheckCircle2 size={14} /> : <Circle size={14} />}{item.title}</div>)}</div>}
         <div className="task-list-metadata">
           <span>{t('agent.budget')}: {run.modelTurns}/{run.budget.maxModelTurns} · {run.toolCalls}/{run.budget.maxToolCalls}</span>
-          {(verification || run.task.verified) && <span className="task-list-verification"><ShieldCheck size={12} />{isVerified ? t('agent.verified') : t('agent.unverified')}</span>}
+          {hasVerificationState && <span className="task-list-verification"><ShieldCheck size={12} />{isVerified ? t('agent.verified') : t('agent.unverified')}</span>}
         </div>
         {tools.length > 0 && <details className="task-list-tools"><summary>{tools.length} {t('agent.toolOutputs')}</summary><div>{tools.map((event) => <div key={event.id} className="task-list-tool"><div>{event.result.ok ? '✓' : '×'} {event.toolCall.function.name}</div><pre>{event.result.content.slice(0, 600)}</pre></div>)}</div></details>}
         {run.task.evidence.length > 0 && <div className="task-list-evidence"><strong>{t('agent.evidence')}:</strong> {run.task.evidence.slice(-3).join(' · ')}</div>}

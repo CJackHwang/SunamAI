@@ -9,6 +9,8 @@ export const jaJP = {
   'common.save': '保存して続行',
   'common.loading': '読み込み中...',
   'common.retry': '再試行',
+  'update.available': '新しいバージョンの準備ができました。現在のタスクは中断されません。',
+  'update.reload': '今すぐ更新',
   'persistence.unavailable': 'データ保護のため、ワークスペースストレージが復旧するまで編集を停止しています',
   'common.error': 'エラー',
   'settings.title': '設定',

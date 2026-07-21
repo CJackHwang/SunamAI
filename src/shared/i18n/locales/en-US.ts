@@ -9,6 +9,8 @@ export const enUS = {
   'common.save': 'Save and continue',
   'common.loading': 'Loading...',
   'common.retry': 'Retry',
+  'update.available': 'A new version is ready. Your current task will not be interrupted.',
+  'update.reload': 'Update now',
   'persistence.unavailable': 'Workspace storage is unavailable. Editing is paused to protect your data',
   'common.error': 'Error',
   'settings.title': 'Settings',

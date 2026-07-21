@@ -7,7 +7,7 @@ import { clearV2Database } from '../helpers/v2Database';
 function run(id: string, sessionId: string): AgentRun {
   return {
     id, sessionId, containerId: 'c-1', model: 'm', persona: 'Sunam 1.14 Homo', phase: 'acting', createdAt: 1, updatedAt: 1,
-    task: { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: false, plan: [], evidence: [], changedWorkspace: false, verified: false, verificationEvidence: [] },
+    task: { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: false, plan: [], evidence: [], changedWorkspace: false, workspaceRevision: 0, verified: false, verifiedRevision: -1, verificationEvidence: [] },
     chaos: { persona: 'Sunam 1.14 Homo', ritual: 'ritual', privateGoods: 'good', styleDirective: 'style', invariants: [] },
     budget: { maxModelTurns: 1, maxToolCalls: 1, maxDurationMs: 1 }, modelTurns: 0, toolCalls: 0, summary: '',
   };

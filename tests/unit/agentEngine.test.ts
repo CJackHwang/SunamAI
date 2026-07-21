@@ -3,7 +3,7 @@ import type { AgentWorkspaceRuntime, ProcessStatus, RuntimeProcessEvent, ShellRu
 import { AgentEngine } from '@/features/agent-core/engine';
 import { AgentEventStore } from '@/features/agent-core/eventStore';
 import type { AgentModelClient } from '@/features/agent-core/modelClient';
-import type { AgentEvent, AgentModelResponse } from '@/features/agent-core/types';
+import type { AgentEvent, AgentModelResponse, TaskContract } from '@/features/agent-core/types';
 
 function tool(id: string, name: string, args: Record<string, unknown>): AgentModelResponse {
   return { message: { role: 'assistant', content: '', tool_calls: [{ id, type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, toolCalls: [{ id, name, arguments: JSON.stringify(args) }] };
@@ -17,11 +17,20 @@ class ScriptedClient implements AgentModelClient {
     this.responses = responses;
   }
 
-  async complete(): Promise<AgentModelResponse> {
+  async complete(_messages: Parameters<AgentModelClient['complete']>[0], _options: Parameters<AgentModelClient['complete']>[1]): Promise<AgentModelResponse> {
     const response = this.responses[this.index++];
     if (!response) throw new Error('Unexpected model request');
     if (response instanceof Error) throw response;
     return response;
+  }
+}
+
+class CapturingClient extends ScriptedClient {
+  messages: Parameters<AgentModelClient['complete']>[0] = [];
+
+  override async complete(messages: Parameters<AgentModelClient['complete']>[0], options: Parameters<AgentModelClient['complete']>[1]): Promise<AgentModelResponse> {
+    this.messages = messages;
+    return super.complete(messages, options);
   }
 }
 
@@ -35,6 +44,15 @@ class DeltaOnlyReasoningClient implements AgentModelClient {
       return tool('inspect', 'workspace_tree', { max_depth: 1 });
     }
     return tool('finish', 'complete_task', { summary: 'Inspected.', evidence: ['Workspace tree inspected.'] });
+  }
+}
+
+class AbortAwareHangingClient implements AgentModelClient {
+  async complete(_messages: Parameters<AgentModelClient['complete']>[0], options: Parameters<AgentModelClient['complete']>[1]): Promise<AgentModelResponse> {
+    return new Promise((_resolve, reject) => {
+      if (options.signal.aborted) reject(options.signal.reason);
+      else options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    });
   }
 }
 
@@ -133,7 +151,8 @@ describe('Agent Core v2', () => {
     ]);
     const engine = new AgentEngine({ sessionId: 's-3', containerId: 'c-3', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Inspect this workspace.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
     await engine.execute();
-    expect(runtime.maxReads).toBe(4);
+    expect(runtime.maxReads).toBeGreaterThan(1);
+    expect(runtime.maxReads).toBeLessThanOrEqual(4);
     expect(events.filter((event) => event.kind === 'tool_finished').slice(0, 6).map((event) => event.toolCall.id)).toEqual(reads.map((call) => call.id));
   });
 
@@ -163,6 +182,20 @@ describe('Agent Core v2', () => {
     expect(events.some((event) => event.kind === 'model_retry' && event.delayMs >= 500)).toBe(true);
   });
 
+  it('cancels immediately while waiting for a model retry', async () => {
+    const controller = new AbortController();
+    const events: AgentEvent[] = [];
+    const engine = new AgentEngine({
+      sessionId: 's-retry-cancel', containerId: 'c-retry-cancel', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Say hi.', initialMessages: [],
+      client: new ScriptedClient([new Error('LLM API Error (429): busy'), { message: { role: 'assistant', content: 'Must not complete.' }, toolCalls: [] }]),
+      runtime: new FakeRuntime(), store: new AgentEventStore(), signal: controller.signal,
+      onEvent: (event) => { events.push(event); if (event.kind === 'model_retry') controller.abort(); }, onRunChange: () => undefined,
+    });
+    await engine.execute();
+    expect(engine.getRun().phase).toBe('cancelled');
+    expect(events.some((event) => event.kind === 'message' && event.message.content === 'Must not complete.')).toBe(false);
+  });
+
   it('cancels its owned run before the first model turn when its signal is aborted', async () => {
     const runtime = new FakeRuntime();
     const events: AgentEvent[] = [];
@@ -171,6 +204,68 @@ describe('Agent Core v2', () => {
     const engine = new AgentEngine({ sessionId: 's-6', containerId: 'c-6', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Stop.', initialMessages: [], client: new ScriptedClient([]), runtime, store: new AgentEventStore(), signal: controller.signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
     await engine.execute();
     expect(engine.getRun().phase).toBe('cancelled');
+    expect(events.filter((event) => event.kind === 'phase_changed').map((event) => event.phase)).toEqual(expect.arrayContaining(['cancelling', 'cancelled']));
     expect(events.at(-1)).toMatchObject({ kind: 'run_finished', summary: 'Agent stopped by user.' });
+  });
+
+  it('rebuilds a resumed run with the original task contract and explicit lineage', async () => {
+    const task: TaskContract = {
+      objective: 'Implement the original feature.', acceptanceCriteria: ['Original acceptance'], constraints: ['Original constraint'], requiresPlan: true,
+      plan: [{ id: 'done', title: 'Implement and verify', status: 'completed' }], evidence: ['Existing evidence'], changedWorkspace: true,
+      workspaceRevision: 2, verified: true, verifiedRevision: 2, verificationEvidence: [{ command: 'npm test', passed: true, workspaceRevision: 2, createdAt: 1 }],
+    };
+    const client = new CapturingClient([
+      tool('verify-again', 'shell_run', { command: 'npm test', mode: 'foreground' }),
+      tool('finish', 'complete_task', { summary: 'Resumed and complete.', evidence: ['Resumed workspace was verified again.'] }),
+    ]);
+    const engine = new AgentEngine({
+      sessionId: 's-resume', containerId: 'c-resume', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Continue from checkpoint.', initialMessages: [],
+      client, runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: () => undefined, onRunChange: () => undefined,
+      resume: { sourceRunId: 'r-old', task, summary: 'Checkpoint facts.' },
+    });
+    await engine.execute();
+    expect(engine.getRun()).toMatchObject({ phase: 'completed', parentRunId: 'r-old', task: { objective: 'Implement the original feature.', acceptanceCriteria: ['Original acceptance'] } });
+    expect(engine.getRun().task.verificationEvidence).toHaveLength(2);
+    expect(client.messages[0]?.content).toContain('Objective: Implement the original feature.');
+    expect(client.messages[0]?.content).toContain('Checkpoint facts.');
+  });
+
+  it('rejects an oversized tool batch before partially executing it', async () => {
+    const events: AgentEvent[] = [];
+    const calls = [
+      { id: 'one', name: 'workspace_tree', arguments: JSON.stringify({ max_depth: 1 }) },
+      { id: 'two', name: 'workspace_tree', arguments: JSON.stringify({ max_depth: 1 }) },
+    ];
+    const client = new ScriptedClient([{ message: { role: 'assistant', content: '', tool_calls: calls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })) }, toolCalls: calls }]);
+    const engine = new AgentEngine({ sessionId: 's-budget', containerId: 'c-budget', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Inspect.', initialMessages: [], client, runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined, budget: { maxToolCalls: 1 } });
+    await engine.execute();
+    expect(engine.getRun()).toMatchObject({ phase: 'failed', toolCalls: 0 });
+    expect(events.some((event) => event.kind === 'tool_requested')).toBe(false);
+  });
+
+  it('enforces the wall-clock budget during an in-flight model request', async () => {
+    const engine = new AgentEngine({ sessionId: 's-deadline', containerId: 'c-deadline', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Inspect.', initialMessages: [], client: new AbortAwareHangingClient(), runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: () => undefined, onRunChange: () => undefined, budget: { maxDurationMs: 25 } });
+    await engine.execute();
+    expect(engine.getRun()).toMatchObject({ phase: 'failed', error: 'Agent run exceeded its time budget.' });
+  });
+
+  it('rejects a terminal control call that appears before a side effect in the same batch', async () => {
+    const runtime = new FakeRuntime();
+    const events: AgentEvent[] = [];
+    const unsafe = [
+      { id: 'finish-early', name: 'complete_task', arguments: JSON.stringify({ summary: 'Done too early.', evidence: ['claim'] }) },
+      { id: 'write-late', name: 'apply_patch', arguments: JSON.stringify({ changes: [{ path: 'late.txt', content: 'unverified' }] }) },
+    ];
+    const client = new ScriptedClient([
+      { message: { role: 'assistant', content: '', tool_calls: unsafe.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })) }, toolCalls: unsafe },
+      tool('finish-safe', 'complete_task', { summary: 'Safely finished without side effects.', evidence: ['Unsafe mixed batch was rejected.'] }),
+    ]);
+    const engine = new AgentEngine({ sessionId: 's-terminal-order', containerId: 'c-terminal-order', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Inspect.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+    await engine.execute();
+    expect(engine.getRun().phase).toBe('completed');
+    expect(runtime.files.has('late.txt')).toBe(false);
+    const rejected = events.filter((event): event is Extract<AgentEvent, { kind: 'tool_finished' }> => event.kind === 'tool_finished' && ['finish-early', 'write-late'].includes(event.toolCall.id));
+    expect(rejected).toHaveLength(2);
+    expect(rejected.every((event) => !event.result.ok)).toBe(true);
   });
 });

@@ -1,0 +1,23 @@
+.app-update-notice {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1400;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(440px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-surface);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 14%);
+  color: var(--color-text);
+  font-size: 14px;
+}
+
+.app-update-notice .btn { flex: 0 0 auto; }
+
+@media (max-width: 640px) {
+  .app-update-notice { right: 16px; bottom: 16px; left: 16px; justify-content: space-between; }
+}

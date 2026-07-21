@@ -70,6 +70,7 @@ function createFilesystemRuntime() {
       readdir,
       readFile,
       writeFile: vi.fn(async (path: string, content: string | Uint8Array) => { files.set(path, typeof content === 'string' ? new TextEncoder().encode(content) : content); }),
+      rm: vi.fn(async (path: string) => { files.delete(path); }),
     },
     mount: vi.fn(async () => undefined),
     export: vi.fn(async () => ({ 'snapshot.txt': { file: { contents: 'saved' } } })),
@@ -123,6 +124,15 @@ describe('WebContainerAgentRuntime process ownership', () => {
     expect(kill).toHaveBeenCalledOnce();
   });
 
+  it('stops an owned foreground process when its run signal is aborted', async () => {
+    const { runtime, kill } = createRuntime();
+    const controller = new AbortController();
+    const running = runtime.runShell({ command: 'hang', mode: 'foreground', sessionId: 's-1', runId: 'r-1', containerId: 'c-1', signal: controller.signal });
+    controller.abort(new DOMException('stopped', 'AbortError'));
+    await expect(running).rejects.toMatchObject({ name: 'AbortError' });
+    expect(kill).toHaveBeenCalledOnce();
+  });
+
   it('restores the v2 snapshot into the shared container root before work starts', async () => {
     const tree = { 'restored.txt': { file: { contents: 'v2' } } };
     const { runtime, webcontainer } = createRuntime(tree);
@@ -158,5 +168,29 @@ describe('WebContainerAgentRuntime process ownership', () => {
     runtime.dispose();
     expect(watchers[0]?.close).toHaveBeenCalledOnce();
     expect(inputs).toEqual([]);
+  });
+
+  it('rolls back earlier writes when an atomic workspace batch fails', async () => {
+    const { runtime, files, webcontainer } = createFilesystemRuntime();
+    const writeFile = vi.mocked(webcontainer.fs.writeFile);
+    writeFile.mockImplementation(async (path: string, content: string | Uint8Array) => {
+      if (path.endsWith('/src/main.txt')) throw new Error('disk write failed');
+      files.set(path, typeof content === 'string' ? new TextEncoder().encode(content) : content);
+    });
+    await expect(runtime.applyWorkspaceChanges('c-1', [
+      { path: 'temporary.txt', content: 'must roll back' },
+      { path: 'src/main.txt', content: 'must fail', expectedContent: 'line one\nneedle line\nline three' },
+    ])).rejects.toThrow('disk write failed');
+    expect(files.has('.sunam/workspaces/c-1/temporary.txt')).toBe(false);
+    expect(new TextDecoder().decode(files.get('.sunam/workspaces/c-1/src/main.txt'))).toBe('line one\nneedle line\nline three');
+  });
+
+  it('rejects duplicate paths before writing an atomic workspace batch', async () => {
+    const { runtime, webcontainer } = createFilesystemRuntime();
+    await expect(runtime.applyWorkspaceChanges('c-1', [
+      { path: 'same.txt', content: 'one' },
+      { path: 'same.txt', content: 'two' },
+    ])).rejects.toThrow('duplicate path');
+    expect(webcontainer.fs.writeFile).not.toHaveBeenCalled();
   });
 });

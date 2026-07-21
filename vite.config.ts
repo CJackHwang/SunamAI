@@ -38,8 +38,16 @@ export default defineConfig({
     react(),
     coepPlugin(),
     VitePWA({
-      registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'icons.svg', 'sunam-appicon.png', 'sunam-webicon.png'],
+      // Keep the old worker active until the user accepts the update. Activating
+      // a new precache while an old page is running can break lazy chunk loads.
+      registerType: 'prompt',
+      includeAssets: [
+        'favicon.svg',
+        'icons.svg',
+        'sunam-appicon.png',
+        'sunam-booticon.png',
+        'sunam-webicon.png',
+      ],
       manifest: {
         name: 'Sunam',
         short_name: 'Sunam',

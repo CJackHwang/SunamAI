@@ -3,7 +3,7 @@ import type { ChatAttachment, Message } from '@/entities/message/types';
 import type { SessionStatus } from '@/entities/workspace/types';
 import type { SunamModel } from '@/shared/config/models';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
-import { AgentEngine } from './engine';
+import { AgentEngine, type AgentResumeState } from './engine';
 import { AgentEventStore } from './eventStore';
 import { OpenAIChatModelClient } from './modelClient';
 import { projectMessages, projectModelMessages } from './projector';
@@ -113,7 +113,7 @@ export function useAgentV2(
     }
   }, [updateSessionStatus]);
 
-  const launchTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, inheritedMessages?: Message[], attachments?: ChatAttachment[]) => {
+  const launchTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, inheritedMessages?: Message[], attachments?: ChatAttachment[], resume?: AgentResumeState) => {
     const sessionId = overrideSessionId ?? activeSessionId;
     const containerId = overrideContainerId ?? activeContainerId;
     if (!sessionId || !containerId || !runtime || !userPrompt.trim()) return;
@@ -137,6 +137,7 @@ export function useAgentV2(
       signal: controller.signal,
       onEvent: appendEvent,
       onRunChange: updateRun,
+      resume,
     });
     updateRun(engine.getRun());
     void engine.execute()
@@ -157,7 +158,7 @@ export function useAgentV2(
       const inherited = checkpoint?.messages ?? (target.sessionId === sessionRef.current ? projectModelMessages(events) : []);
       const checkpointSummary = checkpoint?.summary ?? target.summary ?? 'reassess the interrupted task';
       const prompt = `Continue from checkpoint: ${checkpointSummary}. Inspect the current workspace, preserve truthful evidence, and finish only after verification.`;
-      launchTask(prompt, target.sessionId, target.containerId, inherited);
+      launchTask(prompt, target.sessionId, target.containerId, inherited, undefined, { sourceRunId: target.id, task: target.task, summary: checkpointSummary });
     }).catch((error) => setPersistenceError(toErrorMessage(error)));
   }, [events, launchTask, runs]);
 

@@ -5,10 +5,11 @@ export type AgentPhase = 'preparing' | 'planning' | 'acting' | 'observing' | 've
 export type PlanItemStatus = 'pending' | 'in_progress' | 'completed' | 'blocked';
 
 export interface AgentPlanItem { id: string; title: string; status: PlanItemStatus; evidence?: string[]; }
-export interface TaskContract { objective: string; acceptanceCriteria: string[]; constraints: string[]; requiresPlan: boolean; plan: AgentPlanItem[]; evidence: string[]; changedWorkspace: boolean; verified: boolean; verificationEvidence: Array<{ command: string; passed: boolean; createdAt: number }>; }
+export interface VerificationEvidence { command: string; passed: boolean; workspaceRevision: number; createdAt: number; }
+export interface TaskContract { objective: string; acceptanceCriteria: string[]; constraints: string[]; requiresPlan: boolean; plan: AgentPlanItem[]; evidence: string[]; changedWorkspace: boolean; workspaceRevision: number; verified: boolean; verifiedRevision: number; verificationEvidence: VerificationEvidence[]; }
 export interface ChaosContract { persona: SunamModel; ritual: string; privateGoods: string; styleDirective: string; invariants: string[]; }
 export interface AgentBudget { maxModelTurns: number; maxToolCalls: number; maxDurationMs: number; }
-export interface AgentRun { id: string; sessionId: string; containerId: string; model: string; persona: SunamModel; phase: AgentPhase; createdAt: number; updatedAt: number; task: TaskContract; chaos: ChaosContract; budget: AgentBudget; modelTurns: number; toolCalls: number; summary: string; error?: string; finalSummary?: string; }
+export interface AgentRun { id: string; sessionId: string; containerId: string; model: string; persona: SunamModel; phase: AgentPhase; createdAt: number; updatedAt: number; task: TaskContract; chaos: ChaosContract; budget: AgentBudget; modelTurns: number; toolCalls: number; summary: string; parentRunId?: string; error?: string; finalSummary?: string; }
 export interface AgentCheckpoint { id: string; runId: string; sessionId: string; containerId: string; summary: string; messages: Message[]; createdAt: number; }
 
 export type AgentEventKind = 'run_started' | 'phase_changed' | 'message' | 'assistant_delta' | 'plan_updated' | 'progress_reported' | 'tool_requested' | 'tool_started' | 'tool_finished' | 'verification' | 'model_retry' | 'recovery_hint' | 'context_compacted' | 'checkpoint' | 'run_finished' | 'run_failed';

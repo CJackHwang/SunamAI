@@ -74,6 +74,7 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
   }
 
   async runShell(request: ShellRunRequest): Promise<ShellRunResult> {
+    if (request.signal?.aborted) throw request.signal.reason;
     await this.ensureContainer(request.containerId);
     const id = createId('proc');
     const process = await this.webcontainer.spawn('jsh', ['-c', request.command], { env: {}, cwd: getContainerRoot(request.containerId) });
@@ -88,6 +89,10 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
       cursor: 0,
     };
     this.processes.add(status, process);
+    if (request.signal?.aborted) {
+      this.processes.stop(id, request);
+      throw request.signal.reason;
+    }
     let finalStatus: ProcessStatus | null = null;
     const outputDone = process.output.pipeTo(new WritableStream<string>({
       write: (chunk) => this.processes.appendOutput(id, chunk, MAX_PROCESS_OUTPUT),
@@ -105,6 +110,10 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
     let snapshot = this.processes.observe(id, request);
     while (snapshot?.isRunning && Date.now() < deadline) {
       await sleep(40);
+      if (request.signal?.aborted) {
+        this.processes.stop(id, request);
+        throw request.signal.reason;
+      }
       snapshot = this.processes.observe(id, request);
     }
     if (!snapshot) return { process: finalStatus ?? { ...status, isRunning: false }, timedOut: false };

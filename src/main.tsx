@@ -8,6 +8,9 @@ import './shared/styles/motion.css'
 import './shared/styles/controls.css'
 import './shared/styles/formControls.css'
 import './shared/styles/effects.css'
+import { initializeAppUpdates } from './shared/lib/appUpdates.ts'
+
+initializeAppUpdates()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

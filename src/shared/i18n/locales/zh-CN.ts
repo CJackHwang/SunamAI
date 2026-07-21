@@ -7,6 +7,8 @@ export const zhCN = {
   'common.save': '保存并继续',
   'common.loading': '加载中...',
   'common.retry': '重试',
+  'update.available': '新版本已准备好，不会打断当前任务。',
+  'update.reload': '立即更新',
   'persistence.unavailable': '工作区存储不可用，为防止覆盖数据已停止编辑',
   'common.error': '错误',
   'settings.title': '配置',
