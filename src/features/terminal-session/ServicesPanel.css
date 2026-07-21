@@ -20,9 +20,12 @@
 .services-port-list { margin-top: 10px; }
 .services-process-list { flex: 1; margin-top: 10px; }
 .service-row { padding: var(--list-row-padding); border: 1px solid var(--color-border); border-radius: var(--radius-small); background: var(--color-surface); }
+.service-port-row { padding: 4px 6px 4px 12px; gap: 4px; }
+.service-preview-trigger { display: flex; min-width: 0; min-height: 40px; flex: 1; align-items: center; gap: 10px; overflow: hidden; border-radius: var(--radius-small); color: var(--color-primary); text-align: left; }
+.service-preview-trigger:hover { background: var(--color-gray-100); }
+.service-preview-trigger svg { flex: 0 0 auto; margin-right: 6px; color: var(--color-text-secondary); }
 .service-port-number { flex: 0 0 auto; color: var(--color-text); font-size: 13px; font-weight: 600; white-space: nowrap; }
-.service-port-row a { display: flex; min-width: 0; flex: 1; align-items: center; gap: 4px; overflow: hidden; color: var(--color-primary); font-size: 13px; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
-.service-port-row a svg { flex: 0 0 auto; }
+.service-port-url { min-width: 0; flex: 1; overflow: hidden; color: var(--color-primary); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .service-process-details { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; overflow: hidden; }
 .service-process-id { color: var(--color-text-secondary); font-family: var(--font-mono); font-size: 12px; }
 .service-process-command { overflow: hidden; color: var(--color-text); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }

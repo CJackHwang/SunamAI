@@ -85,6 +85,18 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(processList).toHaveCSS('overflow-y', 'auto');
   await expect(page.locator('.service-process-command').first()).not.toContainText('.sunam/workspaces');
 
+  await services.getByRole('button', { name: '预览端口 3457' }).click();
+  const preview = page.getByRole('dialog', { name: '端口 3457 实时预览' });
+  await expect(preview).toBeVisible();
+  await expect(preview.locator('iframe')).toBeVisible();
+  await expect.poll(() => preview.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height), viewportWidth: innerWidth, viewportHeight: innerHeight };
+  })).toEqual({ x: 0, y: 0, width: 1440, height: 900, viewportWidth: 1440, viewportHeight: 900 });
+  await preview.getByRole('button', { name: '返回服务列表' }).click();
+  await expect(preview).toHaveCount(0);
+  await expect(services).toBeVisible();
+
   const desktopLayout = await page.evaluate(() => {
     const list = document.querySelector('.services-process-list')!;
     const panel = document.querySelector('.terminal-content')!;
@@ -110,6 +122,14 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(page.locator('.mobile-overlay')).toHaveCount(0);
   await mobileNavigation.getByRole('button', { name: '服务' }).click();
   await expect(page.locator('.workspace-container')).toHaveAttribute('data-active-tab', 'services');
+  await services.getByRole('button', { name: '预览端口 3457' }).click();
+  const mobilePreview = page.getByRole('dialog', { name: '端口 3457 实时预览' });
+  await expect(mobilePreview).toBeVisible();
+  await expect.poll(() => mobilePreview.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return { width: Math.round(box.width), height: Math.round(box.height) };
+  })).toEqual({ width: 390, height: 844 });
+  await mobilePreview.getByRole('button', { name: '返回服务列表' }).click();
   const mobileLayout = await page.evaluate(() => {
     const list = document.querySelector('.services-process-list')!;
     const panel = document.querySelector('.terminal-content')!;

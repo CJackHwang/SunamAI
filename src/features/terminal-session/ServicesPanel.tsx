@@ -1,4 +1,4 @@
-import { Check, Copy, ExternalLink, StopCircle } from 'lucide-react';
+import { Check, Copy, MonitorPlay, StopCircle } from 'lucide-react';
 import { useState } from 'react';
 import { useI18n } from '@/shared/i18n';
 import type { ProcessStatus } from '@/shared/contracts/agentRuntime';
@@ -11,10 +11,11 @@ interface ServicePanelProps {
   ports: Array<{ port: number; url: string }>;
   processes: ProcessStatus[];
   containerName: string;
+  onPreview: (port: number, url: string) => void;
   onKillProcess: (process: ProcessStatus) => void;
 }
 
-export function ServicesPanel({ ports, processes, containerName, onKillProcess }: ServicePanelProps) {
+export function ServicesPanel({ ports, processes, containerName, onPreview, onKillProcess }: ServicePanelProps) {
   const { t, format } = useI18n();
   const [copiedPort, setCopiedPort] = useState<number | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
@@ -39,8 +40,11 @@ export function ServicesPanel({ ports, processes, containerName, onKillProcess }
       {ports.length === 0
         ? <EmptyState className="panel-empty-state">{t('services.noPorts')}</EmptyState>
         : <div className="services-port-list">{ports.map((port) => <div className="service-row list-row service-port-row" key={port.port}>
-          <span className="service-port-number">{format('services.port', { port: port.port })}</span>
-          <a href={port.url} target="_blank" rel="noopener noreferrer" title={port.url}>{port.url}<ExternalLink size={14} /></a>
+          <button type="button" className="service-preview-trigger" onClick={() => onPreview(port.port, port.url)} title={port.url} aria-label={format('services.previewPort', { port: port.port })}>
+            <span className="service-port-number">{format('services.port', { port: port.port })}</span>
+            <span className="service-port-url">{port.url}</span>
+            <MonitorPlay size={16} />
+          </button>
           <button className="icon-button" onClick={() => { void copyAddress(port.port, port.url); }} title={t('services.copy')} aria-label={format('services.copyPort', { port: port.port })}>
             {copiedPort === port.port ? <Check size={16} /> : <Copy size={16} />}
           </button>

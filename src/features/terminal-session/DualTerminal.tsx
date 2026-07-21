@@ -9,6 +9,7 @@ import { appendAgentTerminalBuffer, flushAgentTerminalBuffers, subscribeAgentTer
 import { WebContainerAgentRuntime } from './WebContainerAgentRuntime';
 import { CollapsedTerminalNav, TerminalTabs } from './TerminalTabs';
 import { ServicesPanel } from './ServicesPanel';
+import { ServicePreviewOverlay } from './ServicePreviewOverlay';
 import type { TerminalLayout, TerminalTab } from './types';
 import { toDisplayWorkspacePath } from './displayPaths';
 import './DualTerminal.css';
@@ -39,6 +40,7 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
   const [isBooted, setIsBooted] = useState(false);
   const [, setProcessVersion] = useState(0);
   const [activePorts, setActivePorts] = useState<Array<{ port: number; url: string }>>([]);
+  const [activePreview, setActivePreview] = useState<{ port: number; lastUrl: string } | null>(null);
   const userShellWriterRef = useRef<WritableStreamDefaultWriter<string> | null>(null);
   const sessionIdRef = useRef(activeSessionId);
   sessionIdRef.current = activeSessionId;
@@ -124,8 +126,9 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
   }, [activeTab]);
 
   const processes = activeContainerId ? runtime?.getProcesses({ containerId: activeContainerId }) ?? [] : [];
+  const previewService = activePreview ? activePorts.find((entry) => entry.port === activePreview.port) : undefined;
 
-  return <div className="dual-terminal" data-layout={layoutState}>
+  return <><div className="dual-terminal" data-layout={layoutState}>
     {layoutState === 'collapsed' ? <CollapsedTerminalNav activeTab={activeTab} onTabChange={onTabChange} onExpand={() => onLayoutChange?.('half')} /> : <TerminalTabs activeTab={activeTab} onTabChange={onTabChange} layoutState={layoutState} onLayoutChange={onLayoutChange} />}
     {layoutState !== 'collapsed' && <div className="terminal-environment-bar" title={activeContainerId ?? undefined}>{containerIdentity}<span className="terminal-environment-path">/containers/{containerLabel}</span></div>}
     <div className="terminal-content" data-tab={activeTab}>
@@ -133,9 +136,9 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
       <div className="terminal-panel" data-active={activeTab === 'ai'}><AgentTerminalPanel sessionId={activeSessionId ?? null} terminalRef={aiTermRef} /></div>
       <div className="terminal-panel" data-active={activeTab === 'user'}><TerminalView readOnly={false} onTerminalReady={(terminal) => { userTermRef.current = terminal; setIsUserTermReady(true); }} /></div>
       <div className="terminal-panel terminal-file-panel" data-active={activeTab === 'files'}>{isBooted && <Suspense fallback={null}><FileManager wc={webcontainer} rootDir={rootDir} rootLabel={containerLabel} /></Suspense>}</div>
-      {activeTab === 'services' && <div className="terminal-panel terminal-services-panel" data-active="true"><ServicesPanel ports={activePorts} processes={processes} containerName={containerLabel} onKillProcess={(process) => { runtime?.stopProcess(process.id, { sessionId: process.sessionId, runId: process.runId, containerId: process.containerId }); }} /></div>}
+      {activeTab === 'services' && <div className="terminal-panel terminal-services-panel" data-active="true"><ServicesPanel ports={activePorts} processes={processes} containerName={containerLabel} onPreview={(port, url) => setActivePreview({ port, lastUrl: url })} onKillProcess={(process) => { runtime?.stopProcess(process.id, { sessionId: process.sessionId, runId: process.runId, containerId: process.containerId }); }} /></div>}
     </div>
-  </div>;
+  </div>{activePreview && <ServicePreviewOverlay port={activePreview.port} url={previewService?.url ?? activePreview.lastUrl} isOnline={Boolean(previewService)} onDismiss={() => setActivePreview(null)} />}</>;
 };
 
 export default DualTerminal;
