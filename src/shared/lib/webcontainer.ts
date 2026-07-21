@@ -19,6 +19,16 @@ export const getWebContainer = async (): Promise<WebContainer> => {
         workdirName: 'sunam',
         coep: 'credentialless',
       });
+
+      // Patch WebContainer pnpm EACCES and symlink issues
+      try {
+        await instance.fs.mkdir('/home/webcontainer', { recursive: true });
+        // Force pnpm to use hoisted node-linker to prevent symlink permission drops (WebContainer optimal solution)
+        await instance.fs.writeFile('/home/webcontainer/.npmrc', 'node-linker=hoisted\n');
+      } catch {
+        // ignore initialization errors
+      }
+
       webcontainerInstance = instance;
       return instance;
     } catch (error) {
