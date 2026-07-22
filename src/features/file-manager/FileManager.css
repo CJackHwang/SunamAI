@@ -33,7 +33,7 @@
 }
 
 .fm-toolbar-btn:hover {
-  background-color: var(--color-gray-100);
+  background-color: var(--color-gray-200);
 }
 
 .fm-toolbar-btn:disabled {
@@ -82,7 +82,7 @@
 
 .fm-breadcrumb-segment:hover {
   color: var(--color-text);
-  background-color: var(--color-gray-100);
+  background-color: var(--color-gray-200);
 }
 
 .fm-breadcrumb-segment.active {
@@ -136,7 +136,7 @@
 }
 
 .fm-item:hover {
-  background-color: var(--color-gray-100);
+  background-color: var(--color-gray-200);
 }
 
 .fm-item:active {

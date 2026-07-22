@@ -3,7 +3,7 @@
 .terminal-icon-btn,
 .fm-toolbar-btn { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; border-radius: var(--radius-small); color: var(--color-text-secondary); }
 .icon-button { width: 32px; height: 32px; padding: 0; }
-.icon-button:hover, .sidebar-icon-btn:hover, .terminal-icon-btn:hover, .fm-toolbar-btn:hover { background: var(--color-gray-100); color: var(--color-text); }
+.icon-button:hover, .sidebar-icon-btn:hover, .terminal-icon-btn:hover, .fm-toolbar-btn:hover { background: var(--color-gray-200); color: var(--color-text); }
 .icon-button-danger { color: var(--color-danger); }
 .icon-button-danger:hover { background: color-mix(in srgb, var(--color-danger) 10%, transparent); color: var(--color-danger); }
 .list-row { display: flex; min-width: 0; align-items: center; gap: var(--list-row-gap); }
