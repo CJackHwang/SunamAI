@@ -62,6 +62,10 @@ class FakeRuntime implements AgentWorkspaceRuntime {
 
   async ensureContainer(): Promise<void> {}
   async listWorkspace(): Promise<WorkspaceTreeEntry[]> { return []; }
+  getUserTerminalBuffer(): string { return ''; }
+  appendUserTerminalBuffer(_data: string): void {}
+  async sendUserTerminalInput(_data: string): Promise<boolean> { return true; }
+  onUserTerminalInput(_listener: (data: string) => void): void {}
   async readWorkspaceFile(_containerId: string, path: string): Promise<string> { return this.files.get(path) ?? ''; }
   async searchWorkspace(): Promise<Array<{ path: string; line: number; content: string }>> { return []; }
   async applyWorkspaceChanges(_containerId: string, changes: Array<{ path: string; content: string }>) { changes.forEach((change) => this.files.set(change.path, change.content)); return changes.map((change) => ({ path: change.path, kind: 'updated' as const, beforeBytes: 0, afterBytes: change.content.length })); }

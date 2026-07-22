@@ -18,6 +18,10 @@ function createContext() {
     stopRun: vi.fn(),
     getProcesses: vi.fn(() => []),
     subscribe: vi.fn(() => () => undefined),
+    getUserTerminalBuffer: vi.fn(() => ''),
+    appendUserTerminalBuffer: vi.fn(),
+    sendUserTerminalInput: vi.fn(async () => true),
+    onUserTerminalInput: vi.fn(),
   };
   return { runtime, context: { sessionId: 's-1', runId: 'r-1', containerId: 'c-1', runtime, signal: new AbortController().signal, getTask: () => task, updateTask: (updater: (current: TaskContract) => TaskContract) => { task = updater(task); } }, getTask: () => task };
 }

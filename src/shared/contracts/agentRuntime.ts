@@ -63,4 +63,8 @@ export interface AgentWorkspaceRuntime {
   stopRun(ownership: ProcessOwnership): void;
   getProcesses(ownership?: Partial<ProcessOwnership>): ProcessStatus[];
   subscribe(listener: (event: RuntimeProcessEvent) => void): () => void;
+  getUserTerminalBuffer(): string;
+  appendUserTerminalBuffer(data: string): void;
+  sendUserTerminalInput(data: string): Promise<boolean>;
+  onUserTerminalInput(listener: (data: string) => void): void;
 }

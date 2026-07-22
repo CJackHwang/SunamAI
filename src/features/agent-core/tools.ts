@@ -154,7 +154,7 @@ const toolDefinitions: RegisteredTool[] = [
   }),
   defineTool({
     name: 'process_input',
-    description: 'Send input to an Agent-owned interactive process.',
+    description: 'Send input to an Agent-owned interactive process. IMPORTANT: To execute a command (press Enter), you MUST append "\\r" to your input. To send Ctrl+C, send "\\x03".',
     schema: z.object({ process_id: z.string().min(1), input: z.string() }),
     readOnly: false,
     concurrencySafe: false,
@@ -178,6 +178,35 @@ const toolDefinitions: RegisteredTool[] = [
     async execute(input, context) {
       const stopped = context.runtime.stopProcess(input.process_id, { sessionId: context.sessionId, runId: context.runId, containerId: context.containerId });
       return { ok: stopped, content: stopped ? 'Process stopped.' : 'Process is not running.' };
+    },
+  }),
+  defineTool({
+    name: 'read_user_terminal',
+    description: 'Read the recent output of the user\'s active terminal. Use this when the user asks you to fix an error they encountered, or to check the status of a command the user ran manually.',
+    schema: z.object({}),
+    readOnly: true,
+    concurrencySafe: true,
+    dataImpact: 'none',
+    timeoutMs: 5_000,
+    resultType: 'text',
+    async execute(_input, context) {
+      const buffer = context.runtime.getUserTerminalBuffer();
+      if (!buffer) return { ok: true, content: '(User terminal is currently empty or has not received any output yet)' };
+      return { ok: true, content: `--- USER TERMINAL RECENT OUTPUT ---\n${buffer}\n--- END USER TERMINAL ---` };
+    },
+  }),
+  defineTool({
+    name: 'write_user_terminal',
+    description: 'Send text input directly to the user\'s active terminal. Use this to execute commands in the user\'s foreground terminal, fix their running process, or take over their shell. IMPORTANT: To execute a command (press Enter), you MUST append "\\r" to your input. To send Ctrl+C, send "\\x03".',
+    schema: z.object({ input: z.string().min(1) }),
+    readOnly: false,
+    concurrencySafe: false,
+    dataImpact: 'process',
+    timeoutMs: 5_000,
+    resultType: 'control',
+    async execute(input, context) {
+      const sent = await context.runtime.sendUserTerminalInput(input.input);
+      return { ok: sent, content: sent ? 'Input sent to user terminal.' : 'User terminal is not active.' };
     },
   }),
 ];

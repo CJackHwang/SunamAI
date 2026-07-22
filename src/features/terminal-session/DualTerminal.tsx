@@ -93,6 +93,7 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
       void process.output.pipeTo(new WritableStream<string>({
         write(data) {
           userTermRef.current?.write(toDisplayWorkspacePath(data, containerLabel));
+          runtime?.appendUserTerminalBuffer(data);
           if (!receivedOutput) { receivedOutput = true; setIsBooted(true); }
         },
       })).catch((error) => {
@@ -101,6 +102,7 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
       });
       const writer = process.input.getWriter();
       userShellWriterRef.current = writer;
+      runtime?.onUserTerminalInput((data) => { void writer.write(data).catch(() => {}); });
       onDataDisposable = userTermRef.current?.onData((data) => { void writer.write(data).catch((error) => userTermRef.current?.write(`\r\n[Terminal input error: ${toErrorMessage(error)}]\r\n`)); });
     })().catch((error) => { userTermRef.current?.write(`\r\n[Terminal startup error: ${toErrorMessage(error)}]\r\n`); setIsBooted(true); });
     return () => {

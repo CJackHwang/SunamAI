@@ -31,11 +31,36 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
   private readonly files: WorkspaceFileSystem;
   private readonly processes = new ProcessRegistry();
   private readonly snapshots: WorkspaceSnapshotCoordinator;
+  private userTerminalBuffer = '';
+  private userTerminalInputListener?: (data: string) => void;
 
   constructor(webcontainer: WebContainer, repository: V2PersistenceRepository = v2Persistence) {
     this.webcontainer = webcontainer;
     this.files = new WorkspaceFileSystem(webcontainer);
     this.snapshots = new WorkspaceSnapshotCoordinator(webcontainer, repository);
+  }
+
+  onUserTerminalInput(listener: (data: string) => void): void {
+    this.userTerminalInputListener = listener;
+  }
+
+  async sendUserTerminalInput(data: string): Promise<boolean> {
+    if (this.userTerminalInputListener) {
+      this.userTerminalInputListener(data);
+      return true;
+    }
+    return false;
+  }
+
+  getUserTerminalBuffer(): string {
+    return this.userTerminalBuffer;
+  }
+
+  appendUserTerminalBuffer(data: string): void {
+    this.userTerminalBuffer += data;
+    if (this.userTerminalBuffer.length > MAX_PROCESS_OUTPUT) {
+      this.userTerminalBuffer = this.userTerminalBuffer.slice(-MAX_PROCESS_OUTPUT);
+    }
   }
 
   subscribe(listener: (event: RuntimeProcessEvent) => void): () => void {
