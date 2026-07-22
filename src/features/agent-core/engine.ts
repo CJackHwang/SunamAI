@@ -13,7 +13,7 @@ import { createId } from '@/shared/lib/ids';
 import { isAbortError, retryModelRequest } from './modelRetry';
 import { scheduleToolBatch } from './toolBatchScheduler';
 
-const DEFAULT_BUDGET: AgentBudget = { maxModelTurns: 40, maxToolCalls: 100, maxDurationMs: 15 * 60_000 };
+const DEFAULT_BUDGET: AgentBudget = { maxModelTurns: 60, maxToolCalls: 150, maxDurationMs: 15 * 60_000 };
 const MAX_READ_ONLY_CONCURRENCY = 4;
 
 function redact(value: string): string {

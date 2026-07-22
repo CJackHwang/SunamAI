@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
 :root {
-  --color-bg: #f3f3f3;
+  --color-bg: #f0f0f0;
   --color-surface: #ffffff;
   --color-text: #1a1a1a;
   --color-text-secondary: #666666;
@@ -37,13 +37,74 @@
   --elevation-5: none;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { height: 100vh; overflow: hidden; background: var(--color-bg); color: var(--color-text); font: 15px/1.5 var(--font-family); -webkit-font-smoothing: antialiased; }
-#root { height: 100%; }
-button { border: 0; background: none; cursor: pointer; font-family: inherit; touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: transform var(--motion-fast) var(--motion-snappy), opacity var(--motion-fast) ease, filter var(--motion-fast) ease, background-color var(--motion-fast) ease, color var(--motion-fast) ease; }
-button:active:not(:disabled) { transform: scale(0.96); transition-duration: 80ms; }
-@media (hover: hover) { button:hover:not(:disabled) { filter: brightness(0.95); } }
-*:focus-visible { outline: 2px solid var(--color-black); outline-offset: 2px; border-radius: 2px; }
-body, input, textarea:not(.xterm-helper-textarea), button { font-family: var(--font-family); font-size: 16px; }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
-.persistence-error { display: flex; position: absolute; top: 12px; right: 12px; left: 12px; z-index: 1200; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--color-danger) 35%, var(--color-border)); border-radius: var(--radius-small); background: var(--color-surface); color: var(--color-danger); font-size: 13px; }
+body {
+  height: 100vh;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: 15px/1.5 var(--font-family);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100%;
+}
+
+button {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--motion-fast) var(--motion-snappy), opacity var(--motion-fast) ease, filter var(--motion-fast) ease, background-color var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.96);
+  transition-duration: 80ms;
+}
+
+@media (hover: hover) {
+  button:hover:not(:disabled) {
+    filter: brightness(0.95);
+  }
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-black);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+body,
+input,
+textarea:not(.xterm-helper-textarea),
+button {
+  font-family: var(--font-family);
+  font-size: 16px;
+}
+
+.persistence-error {
+  display: flex;
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  left: 12px;
+  z-index: 1200;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-danger) 35%, var(--color-border));
+  border-radius: var(--radius-small);
+  background: var(--color-surface);
+  color: var(--color-danger);
+  font-size: 13px;
+}

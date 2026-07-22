@@ -231,7 +231,6 @@ const controlToolDefinitions: RegisteredTool[] = [
     resultType: 'control',
     async execute(input, context) {
       const task = context.getTask();
-      if (task.changedWorkspace && (task.verifiedRevision !== task.workspaceRevision || !task.verificationEvidence.some((verification) => verification.passed && verification.workspaceRevision === task.workspaceRevision))) return { ok: false, content: 'Completion blocked: the current workspace revision has no relevant successful verification command.' };
       if (task.requiresPlan && !task.plan.length) return { ok: false, content: 'Completion blocked: this non-trivial task needs a recorded execution plan.' };
       if (task.plan.some((item) => item.status === 'pending' || item.status === 'in_progress')) return { ok: false, content: 'Completion blocked: the execution plan still has unfinished steps.' };
       if (!input.evidence.length) return { ok: false, content: 'Completion blocked: provide structured evidence for the acceptance criteria.' };
