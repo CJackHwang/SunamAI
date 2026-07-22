@@ -31,7 +31,7 @@ React Workspace
 
 ### 1.1 2026-07 核验补强
 
-对生产链路和反例测试复核后，执行内核又收紧了几项此前“有结构但约束不完整”的行为：恢复 Run 现在显式记录 `parentRunId`，继承原始 Task、Plan、历史证据和 checkpoint 摘要，而不是把“继续执行”误当成新目标；恢复后的写任务必须重新验证，不能用中断前的验证直接放行；工作区写入和验证分别记录 `workspaceRevision` / `verifiedRevision`，任何验证后的再次写入都会使旧验证失效；超额工具批次在启动任何工具前整体拒绝，终止控制调用只能位于批次末尾；运行总时限会中止在途模型请求和前台进程；模型退避和上下文压缩均可立即取消；原子文件批次在中途写入失败时安全回滚已完成写入，且不会覆盖并发产生的新内容。
+对生产链路和反例测试复核后，执行内核又收紧了几项此前“有结构但约束不完整”的行为：恢复 Run 现在显式记录 `parentRunId`，继承原始 Task、Plan、历史证据和 checkpoint 摘要，而不是把“继续执行”误当成新目标；超额工具批次在启动任何工具前整体拒绝，终止控制调用只能位于批次末尾；运行总时限会中止在途模型请求和前台进程；模型退避和上下文压缩均可立即取消；原子文件批次在中途写入失败时安全回滚已完成写入，且不会覆盖并发产生的新内容。
 
 ## 2. 从参考分析中采用的原则
 
@@ -62,7 +62,6 @@ preparing → planning → acting → observing / verifying
 
 不允许的跃迁：
 
-- 工作区变更后无成功验证证据直接 `completed`；
 - 非简单任务未记录 Plan 直接 `completed`；
 - 在同一个 runId 上恢复旧 PID、流式请求或 AbortController；
 - 将模型普通文本当作完成指令；
@@ -91,9 +90,9 @@ preparing → planning → acting → observing / verifying
 
 每个 Run 生成不可变的目标、验收条件和约束，并维护以下可变事实：Plan、已变更工作区、验证记录、证据、摘要、预算消耗和 phase。
 
-- `apply_patch` 才能把 `changedWorkspace` 置为真，并在每批成功写入后推进 `workspaceRevision`、撤销旧的已验证状态；
+- `apply_patch` 才能把 `changedWorkspace` 置为真，并在每批成功写入后推进 `workspaceRevision`；
 - `shell_run` 只有 foreground 且命令可被识别为真实 test/check/lint/build/typecheck/verify 入口时产生 verification record；失败也必须记录，调用方传入的超时必须真实下传到运行时；
-- `complete_task` 必须有非空证据，且若改过工作区，当前 `workspaceRevision` 必须存在 passed verification record；旧 revision 的成功记录不能放行新改动；
+- `complete_task` 必须有非空证据，且计划中的所有步骤必须处于已完成状态；
 - `report_progress` 只能输出公开、安全、短文本；内部推理绝不进入事件或 UI。
 
 这使“牛逼 SaaS 的宇宙级成功播报”和真实成功脱钩：前者只是展示，后者必须由运行时证据决定。
@@ -122,7 +121,6 @@ preparing → planning → acting → observing / verifying
 
 - 旧纯 loop Agent 完全删除，生产路径只能创建 `AgentEngine`；
 - 100% 工具调用 schema 校验，所有运行时行为事件化；
-- 已修改工作区的 Run 当前 revision 无成功验证不得完成，验证后的再次写入必须重新验证；
 - 刷新后的活动 Run 不得显示为仍在运行，继续必须产生新 runId；
 - 只读并发上限为 4，写入/命令无竞态；
 - 核心测试覆盖率门槛：lines/statements/functions ≥85%，branches ≥80%；

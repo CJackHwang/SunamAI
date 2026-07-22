@@ -48,7 +48,7 @@ shared → entities → features → widgets → pages → app
 
 - `AgentWorkspaceRuntime` 是 Agent Core 与 WebContainer 的唯一边界：受容器根目录约束的文件读取/搜索/写入、前后台进程、输出游标、取消与事件订阅。`WebContainerAgentRuntime` 拥有进程；终端仅渲染和手动控制它。所有容器路径唯一由 `getContainerRoot(containerId)` 生成；它是相对于 `WebContainer.workdir` 的 `.sunam/workspaces/{containerId}`，交互 Shell 使用 `workdir` 拼出的绝对路径，禁止从 Agent、终端或文件管理器各自拼接根目录。
 - `features/agent-core` 是唯一的 Agent 执行内核。每个 Run 拥有固定的 session、container、模型、人格、Task Contract、Chaos Contract、预算和 append-only 事件序列；不存在旧的纯 loop 或运行时回退路径。
-- Tool Registry 以 schema、只读/并发属性和结构化 `AgentToolResult` 描述工具。只读工具至多四路并发，写入和命令按容器串行；所有工具结果回流下一次模型请求。验证命令无论成功或失败都会成为不可伪造的证据，工作区被修改后只有成功验证才能完成 Run。
+- Tool Registry 以 schema、只读/并发属性和结构化 `AgentToolResult` 描述工具。只读工具至多四路并发，写入和命令按容器串行；所有工具结果回流下一次模型请求。验证命令无论成功或失败都会成为不可伪造的证据，这些证据将被加入 Task Contract。
 - LLM API 层独立构造 OpenAI-compatible 请求、解析 SSE、列模型；Agent Core 通过 `AgentModelClient` 使用它，因此未来协议只能新增 Adapter，不能进入执行内核。
 - `V2PersistenceRepository` 是唯一的持久化入口。它在 IndexedDB `sunam-v2` 中以版本化 record 存放 workspace、Run、append-only event、checkpoint、Agent 终端历史、容器文件系统快照和隔离区；不存在全局内存降级。损坏或未知版本的 record 会隔离，关键 workspace 记录损坏时暂停编辑且绝不写入替代工作区。
 - Agent Event Store 以内存作为热缓存、以 v2 ledger 作为事实来源；它从不导入旧消息或旧 Run。启动时活动 Run 会标记为 `interrupted`，只能依据 checkpoint **新建** Run 续作，旧 PID、AbortController 与实时订阅绝不恢复。

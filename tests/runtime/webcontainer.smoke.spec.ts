@@ -93,7 +93,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
     const box = element.getBoundingClientRect();
     return { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height), viewportWidth: innerWidth, viewportHeight: innerHeight };
   })).toEqual({ x: 0, y: 0, width: 1440, height: 900, viewportWidth: 1440, viewportHeight: 900 });
-  await preview.getByRole('button', { name: '返回服务列表' }).click();
+  await preview.getByRole('button', { name: '关闭预览' }).click();
   await expect(preview).toHaveCount(0);
   await expect(services).toBeVisible();
 
@@ -129,7 +129,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
     const box = element.getBoundingClientRect();
     return { width: Math.round(box.width), height: Math.round(box.height) };
   })).toEqual({ width: 390, height: 844 });
-  await mobilePreview.getByRole('button', { name: '返回服务列表' }).click();
+  await mobilePreview.getByRole('button', { name: '关闭预览' }).click();
   const mobileLayout = await page.evaluate(() => {
     const list = document.querySelector('.services-process-list')!;
     const panel = document.querySelector('.terminal-content')!;

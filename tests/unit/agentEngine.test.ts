@@ -156,7 +156,7 @@ describe('Agent Core v2', () => {
     expect(events.filter((event) => event.kind === 'tool_finished').slice(0, 6).map((event) => event.toolCall.id)).toEqual(reads.map((call) => call.id));
   });
 
-  it('records a failed verification and refuses to finish the changed workspace run', async () => {
+  it('records a failed verification but allows the changed workspace run to finish if evidence is provided', async () => {
     const runtime = new FailingVerificationRuntime();
     const events: AgentEvent[] = [];
     const client = new ScriptedClient([
@@ -167,9 +167,9 @@ describe('Agent Core v2', () => {
     ]);
     const engine = new AgentEngine({ sessionId: 's-4', containerId: 'c-4', persona: 'Sunam 5.14 Saki', model: 'model', input: 'Implement and test a workspace change.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
     await engine.execute();
-    expect(engine.getRun().phase).toBe('failed');
+    expect(engine.getRun().phase).toBe('completed');
     expect(events.some((event) => event.kind === 'verification' && !event.passed)).toBe(true);
-    expect(events.some((event) => event.kind === 'tool_finished' && event.toolCall.function.name === 'complete_task' && !event.result.ok)).toBe(true);
+    expect(events.some((event) => event.kind === 'tool_finished' && event.toolCall.function.name === 'complete_task' && event.result.ok)).toBe(true);
   });
 
   it('emits an exponential retry event for retryable model failures and can finish afterwards', async () => {

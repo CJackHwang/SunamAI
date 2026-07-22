@@ -33,7 +33,7 @@ describe('ServicePreviewOverlay', () => {
     const trigger = screen.getByRole('button', { name: 'Open preview' });
     trigger.focus();
     fireEvent.click(trigger);
-    const close = screen.getByRole('button', { name: '返回服务列表' });
+    const close = screen.getByRole('button', { name: '关闭预览' });
     const copy = screen.getByRole('button', { name: '复制端口 5173 地址' });
     expect(close).toHaveFocus();
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });

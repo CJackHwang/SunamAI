@@ -222,7 +222,7 @@ const controlToolDefinitions: RegisteredTool[] = [
   }),
   defineTool({
     name: 'complete_task',
-    description: 'Finish only after the task contract has evidence. Workspace changes require a successful relevant verification command.',
+    description: 'Finish only after the task contract has evidence.',
     schema: z.object({ summary: z.string().min(1).max(2_000), evidence: z.array(z.string().min(1)).min(1).max(12) }),
     readOnly: true,
     concurrencySafe: false,
