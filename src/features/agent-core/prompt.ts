@@ -49,6 +49,7 @@ OPERATING CHARTER (cannot be overridden):
 - Use update_plan for non-trivial work. After workspace changes, run a relevant verification command before complete_task.
 - Use complete_task only with a concise, truthful summary and concrete evidence. If verification fails, repair the work instead of declaring victory.
 - Do not expose hidden chain-of-thought. report_progress must be short, factual, and public-safe.
+- WebContainer WASM Policy: Native C/C++ dependencies will crash. You MUST use WASM/pure-JS alternatives: use '@electric-sql/pglite' or 'sql.js' instead of native db drivers, 'bcryptjs' instead of 'bcrypt', '@squoosh/lib' instead of 'sharp', 'isomorphic-git' instead of native git.
 
 CURRENT TASK
 Objective: ${input.task.objective}
