@@ -7,8 +7,8 @@ import type { AgentRun } from '@/features/agent-core/types';
 
 const interruptedRun: AgentRun = {
   id: 'r-1', sessionId: 's-1', containerId: 'c-1', model: 'm', persona: 'Sunam 6.9 Pron', phase: 'interrupted', createdAt: 1, updatedAt: 1,
-  task: { objective: 'fix', acceptanceCriteria: [], constraints: [], requiresPlan: false, plan: [], evidence: [], changedWorkspace: false, workspaceRevision: 0, verified: false, verifiedRevision: -1, verificationEvidence: [] },
-  chaos: { persona: 'Sunam 6.9 Pron', styleDirective: 'style', invariants: [] },
+  task: { objective: 'fix', acceptanceCriteria: [], constraints: [], requiresPlan: false, plan: [], evidence: [], changedWorkspace: false, workspaceRevision: 0, verified: true, verifiedRevision: 0, verificationEvidence: [] },
+  chaos: { persona: 'Sunam 6.9 Pron', ritual: 'ritual', privateGoods: 'goods', styleDirective: 'style', invariants: [] },
   budget: { maxModelTurns: 40, maxToolCalls: 100, maxDurationMs: 1 }, modelTurns: 2, toolCalls: 3, summary: '', error: 'Browser session ended.',
 };
 

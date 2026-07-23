@@ -12,7 +12,7 @@ function run(id = 'r-1'): AgentRun {
   return {
     id, sessionId: 's-1', containerId: 'c-1', model: 'model', persona: 'Sunam 6.9 Pron', phase: 'planning', createdAt: 1, updatedAt: 1,
     task: { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: true, plan: [], evidence: [], changedWorkspace: false, workspaceRevision: 0, verified: false, verifiedRevision: -1, verificationEvidence: [] },
-    chaos: { persona: 'Sunam 6.9 Pron', styleDirective: 'style', invariants: [] },
+    chaos: { persona: 'Sunam 6.9 Pron', ritual: 'ritual', privateGoods: 'goods', styleDirective: 'style', invariants: [] },
     budget: { maxModelTurns: 4, maxToolCalls: 4, maxDurationMs: 4 }, modelTurns: 0, toolCalls: 0, summary: '',
   };
 }

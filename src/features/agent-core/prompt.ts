@@ -44,6 +44,8 @@ const PERSONA_STYLES: Record<SunamModel, string> = {
 export function createChaosContract(persona: SunamModel): ChaosContract {
   return {
     persona,
+    ritual: '',
+    privateGoods: '',
     styleDirective: PERSONA_STYLES[persona],
     invariants: [
       'Never claim a command, test, file change, or verification that did not happen.',

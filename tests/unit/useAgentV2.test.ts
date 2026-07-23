@@ -20,7 +20,7 @@ describe('useAgentV2 session isolation', () => {
     const run = (id: string, phase: AgentRun['phase'], updatedAt: number): AgentRun => ({
       id, phase, updatedAt, sessionId: 's-1', containerId: 'c-1', model: 'm', persona: 'Sunam 6.9 Pron', createdAt: 1,
       task: { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: false, plan: [], evidence: [], changedWorkspace: false, workspaceRevision: 0, verified: false, verifiedRevision: -1, verificationEvidence: [] },
-      chaos: { persona: 'Sunam 6.9 Pron', styleDirective: '', invariants: [] },
+      chaos: { persona: 'Sunam 6.9 Pron', ritual: '', privateGoods: '', styleDirective: '', invariants: [] },
       budget: { maxModelTurns: 1, maxToolCalls: 1, maxDurationMs: 1 }, modelTurns: 0, toolCalls: 0, summary: '',
     });
 

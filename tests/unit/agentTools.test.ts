@@ -41,7 +41,7 @@ describe('AgentToolRegistry', () => {
   it('executes workspace, shell, process, and control tools with truthful task updates', async () => {
     const registry = new AgentToolRegistry();
     const { context, runtime, getTask } = createContext();
-    expect(registry.getApiDefinitions()).toHaveLength(12);
+    expect(registry.getApiDefinitions()).toHaveLength(14);
     expect(registry.getMetadata('workspace_tree')).toMatchObject({ concurrencySafe: true, dataImpact: 'none', timeoutMs: 10_000, resultType: 'tree' });
     expect(registry.getMetadata('apply_patch')).toMatchObject({ readOnly: false, dataImpact: 'workspace', resultType: 'changes' });
     expect(registry.getMetadata('missing')).toBeNull();
