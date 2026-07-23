@@ -57,7 +57,7 @@ export function isVerificationCommand(command: string): boolean {
 const toolDefinitions: RegisteredTool[] = [
   defineTool({
     name: 'workspace_tree',
-    description: 'Inspect the active workspace tree before editing. node_modules and .git are excluded.',
+    description: 'Inspect the active workspace tree. Use this FIRST to orient yourself in the codebase. node_modules and .git are excluded.',
     schema: z.object({ max_depth: z.number().int().min(1).max(8) }),
     readOnly: true,
     concurrencySafe: true,
@@ -99,7 +99,7 @@ const toolDefinitions: RegisteredTool[] = [
   }),
   defineTool({
     name: 'apply_patch',
-    description: 'Apply one or more full-file changes atomically within the active workspace. expected_content prevents overwriting a file that changed after it was read.',
+    description: 'Apply one or more full-file changes atomically within the active workspace. Use this for ALL file edits. Group multiple file changes into a single array payload to save time.',
     schema: z.object({ changes: z.array(z.object({ path: z.string().min(1), content: z.string(), expected_content: z.string().optional() })).min(1).max(12) }),
     readOnly: false,
     concurrencySafe: false,
@@ -114,7 +114,7 @@ const toolDefinitions: RegisteredTool[] = [
   }),
   defineTool({
     name: 'shell_run',
-    description: 'Run a command inside the active WebContainer. Use foreground for inspection, tests, builds, and short commands; use background only for servers or long tasks.',
+    description: 'Run a command inside the active WebContainer. Run your verification scripts here (e.g. `npm test`) to prove your code works before completing the task. Use foreground for inspection/tests; use background only for servers.',
     schema: z.object({ command: z.string().min(1), mode: z.enum(['foreground', 'background']), timeout_ms: z.number().int().min(1_000).max(300_000).optional() }),
     readOnly: false,
     concurrencySafe: false,

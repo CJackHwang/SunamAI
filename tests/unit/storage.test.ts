@@ -9,8 +9,8 @@ describe('v2 settings storage', () => {
   it('uses the fresh v2 keys and defaults', () => {
     expect(readAppSettings()).toEqual({ apiKey: '', ...DEFAULT_SETTINGS });
     saveConnectionSettings({ apiKey: 'key', baseUrl: 'https://example.test/v1', apiModel: 'model-a' });
-    saveSunamModel('Sunam 5.14 Saki');
-    expect(readAppSettings()).toEqual({ apiKey: 'key', baseUrl: 'https://example.test/v1', apiModel: 'model-a', sunamModel: 'Sunam 5.14 Saki' });
+    saveSunamModel('Sunam 6.9 Pron');
+    expect(readAppSettings()).toEqual({ apiKey: 'key', baseUrl: 'https://example.test/v1', apiModel: 'model-a', sunamModel: 'Sunam 6.9 Pron' });
     expect(localStorage.getItem(STORAGE_KEYS.apiKey)).toBe('key');
   });
 

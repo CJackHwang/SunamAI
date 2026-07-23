@@ -1,9 +1,6 @@
 export const SUNAM_MODELS = [
-  'Sunam 1.14 Homo',
-  'Sunam 1.14 Saki',
-  'Sunam 5.14 Homo',
-  'Sunam 5.14 Saki',
-  'Sunam NEGA 69B',
+  'Sunam 6.9 Pron',
+  'Sunam 11.4 Homo',
 ] as const;
 
 export type SunamModel = (typeof SUNAM_MODELS)[number];
@@ -11,7 +8,7 @@ export type SunamModel = (typeof SUNAM_MODELS)[number];
 export const DEFAULT_SETTINGS = {
   baseUrl: 'https://api.deepseek.com/v1',
   apiModel: 'deepseek-v4-flash',
-  sunamModel: 'Sunam 1.14 Homo' as SunamModel,
+  sunamModel: 'Sunam 6.9 Pron' as SunamModel,
 };
 
 export function isSunamModel(value: string): value is SunamModel {

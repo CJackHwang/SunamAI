@@ -44,9 +44,9 @@ export default defineConfig({
       includeAssets: [
         'favicon.svg',
         'icons.svg',
+        'icon-bg-svg.svg',
+        'icon-nobg-svg.svg',
         'sunam-appicon.png',
-        'sunam-booticon.png',
-        'sunam-webicon.png',
       ],
       manifest: {
         name: 'Sunam',
@@ -58,7 +58,7 @@ export default defineConfig({
         icons: [
           {
             src: 'sunam-appicon.png',
-            sizes: '1254x1254',
+            sizes: '512x512',
             type: 'image/png'
           }
         ]

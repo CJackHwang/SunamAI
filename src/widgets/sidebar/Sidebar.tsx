@@ -128,7 +128,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
             onClick={() => isCollapsed && setIsCollapsed(false)}
             title={isCollapsed ? "Expand Sidebar" : ""}
           >
-            <img src="/icon.png" alt="Sunam" className="logo-default" />
+            <img src="/icon-nobg-svg.svg" alt="Sunam" className="logo-default" />
             {isCollapsed && (
               <div className="logo-hover">
                 <PanelLeft size={20} />

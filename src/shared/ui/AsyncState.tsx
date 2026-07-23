@@ -8,7 +8,7 @@ export function LoadingState({ className = '' }: AsyncStateProps) {
   return (
     <div role="status" className={`boot-screen ${className}`}>
       <div className="boot-screen__content">
-        <img className="boot-screen__mark" src="/sunam-booticon.png" width={72} height={72} alt="" />
+        <img className="boot-screen__mark" src="/icon-bg-svg.svg" width={72} height={72} alt="" />
         <div className="boot-screen__bar" aria-hidden="true"></div>
       </div>
     </div>

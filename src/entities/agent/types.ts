@@ -7,7 +7,7 @@ export type PlanItemStatus = 'pending' | 'in_progress' | 'completed' | 'blocked'
 export interface AgentPlanItem { id: string; title: string; status: PlanItemStatus; evidence?: string[]; }
 export interface VerificationEvidence { command: string; passed: boolean; workspaceRevision: number; createdAt: number; }
 export interface TaskContract { objective: string; acceptanceCriteria: string[]; constraints: string[]; requiresPlan: boolean; plan: AgentPlanItem[]; evidence: string[]; changedWorkspace: boolean; workspaceRevision: number; verified: boolean; verifiedRevision: number; verificationEvidence: VerificationEvidence[]; }
-export interface ChaosContract { persona: SunamModel; ritual: string; privateGoods: string; styleDirective: string; invariants: string[]; }
+export interface ChaosContract { persona: SunamModel; styleDirective: string; invariants: string[]; }
 export interface AgentBudget { maxModelTurns: number; maxToolCalls: number; maxDurationMs: number; }
 export interface AgentRun { id: string; sessionId: string; containerId: string; model: string; persona: SunamModel; phase: AgentPhase; createdAt: number; updatedAt: number; task: TaskContract; chaos: ChaosContract; budget: AgentBudget; modelTurns: number; toolCalls: number; summary: string; parentRunId?: string; error?: string; finalSummary?: string; }
 export interface AgentCheckpoint { id: string; runId: string; sessionId: string; containerId: string; summary: string; messages: Message[]; createdAt: number; }

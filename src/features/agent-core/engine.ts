@@ -112,7 +112,7 @@ export class AgentEngine {
       createdAt: this.startedAt,
       updatedAt: this.startedAt,
       task: this.task,
-      chaos: createChaosContract(options.persona, id),
+      chaos: createChaosContract(options.persona),
       budget: { ...DEFAULT_BUDGET, ...options.budget },
       modelTurns: 0,
       toolCalls: 0,

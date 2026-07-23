@@ -101,7 +101,7 @@ class FailingVerificationRuntime extends FakeRuntime {
 describe('Agent Core v2', () => {
   it('persists reasoning that a provider returns only through streaming deltas', async () => {
     const events: AgentEvent[] = [];
-    const engine = new AgentEngine({ sessionId: 's-reasoning', containerId: 'c-reasoning', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Inspect this.', initialMessages: [], client: new DeltaOnlyReasoningClient(), runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+    const engine = new AgentEngine({ sessionId: 's-reasoning', containerId: 'c-reasoning', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Inspect this.', initialMessages: [], client: new DeltaOnlyReasoningClient(), runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
     await engine.execute();
     const assistant = events.find((event) => event.kind === 'message' && event.message.role === 'assistant' && event.message.tool_calls?.[0]?.id === 'inspect');
     expect(assistant).toMatchObject({ kind: 'message', message: { reasoning_content: 'This streamed reasoning must survive.' } });
@@ -119,7 +119,7 @@ describe('Agent Core v2', () => {
       tool('finish', 'complete_task', { summary: 'Done with evidence.', evidence: ['npm test passed'] }),
     ]);
     const engine = new AgentEngine({
-      sessionId: 's-1', containerId: 'c-1', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Implement the requested workspace change and test it.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined,
+      sessionId: 's-1', containerId: 'c-1', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Implement the requested workspace change and test it.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined,
     });
     await engine.execute();
     expect(engine.getRun().phase).toBe('completed');
@@ -138,7 +138,7 @@ describe('Agent Core v2', () => {
       tool('finish', 'complete_task', { summary: 'No changes needed.', evidence: ['Observed malformed tool request safely.'] }),
     ]);
     const engine = new AgentEngine({
-      sessionId: 's-2', containerId: 'c-2', persona: 'Sunam 1.14 Saki', model: 'model', input: 'Inspect this.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined,
+      sessionId: 's-2', containerId: 'c-2', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Inspect this.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined,
     });
     await engine.execute();
     expect(engine.getRun().phase).toBe('completed');
@@ -153,7 +153,7 @@ describe('Agent Core v2', () => {
       { message: { role: 'assistant', content: '', tool_calls: reads.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })) }, toolCalls: reads },
       tool('finish', 'complete_task', { summary: 'Inspected.', evidence: ['Workspace tree inspected.'] }),
     ]);
-    const engine = new AgentEngine({ sessionId: 's-3', containerId: 'c-3', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Inspect this workspace.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+    const engine = new AgentEngine({ sessionId: 's-3', containerId: 'c-3', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Inspect this workspace.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
     await engine.execute();
     expect(runtime.maxReads).toBeGreaterThan(1);
     expect(runtime.maxReads).toBeLessThanOrEqual(4);
@@ -169,7 +169,7 @@ describe('Agent Core v2', () => {
       tool('verify', 'shell_run', { command: 'npm test', mode: 'foreground' }),
       tool('finish', 'complete_task', { summary: 'not actually done', evidence: ['npm test failed'] }),
     ]);
-    const engine = new AgentEngine({ sessionId: 's-4', containerId: 'c-4', persona: 'Sunam 5.14 Saki', model: 'model', input: 'Implement and test a workspace change.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+    const engine = new AgentEngine({ sessionId: 's-4', containerId: 'c-4', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Implement and test a workspace change.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
     await engine.execute();
     expect(engine.getRun().phase).toBe('completed');
     expect(events.some((event) => event.kind === 'verification' && !event.passed)).toBe(true);
@@ -180,7 +180,7 @@ describe('Agent Core v2', () => {
     const runtime = new FakeRuntime();
     const events: AgentEvent[] = [];
     const client = new ScriptedClient([new Error('LLM API Error (429): busy'), { message: { role: 'assistant', content: 'Recovered.' }, toolCalls: [] }]);
-    const engine = new AgentEngine({ sessionId: 's-5', containerId: 'c-5', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Say hi.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+    const engine = new AgentEngine({ sessionId: 's-5', containerId: 'c-5', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Say hi.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
     await engine.execute();
     expect(engine.getRun().phase).toBe('completed');
     expect(events.some((event) => event.kind === 'model_retry' && event.delayMs >= 500)).toBe(true);
@@ -190,7 +190,7 @@ describe('Agent Core v2', () => {
     const controller = new AbortController();
     const events: AgentEvent[] = [];
     const engine = new AgentEngine({
-      sessionId: 's-retry-cancel', containerId: 'c-retry-cancel', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Say hi.', initialMessages: [],
+      sessionId: 's-retry-cancel', containerId: 'c-retry-cancel', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Say hi.', initialMessages: [],
       client: new ScriptedClient([new Error('LLM API Error (429): busy'), { message: { role: 'assistant', content: 'Must not complete.' }, toolCalls: [] }]),
       runtime: new FakeRuntime(), store: new AgentEventStore(), signal: controller.signal,
       onEvent: (event) => { events.push(event); if (event.kind === 'model_retry') controller.abort(); }, onRunChange: () => undefined,
@@ -205,7 +205,7 @@ describe('Agent Core v2', () => {
     const events: AgentEvent[] = [];
     const controller = new AbortController();
     controller.abort();
-    const engine = new AgentEngine({ sessionId: 's-6', containerId: 'c-6', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Stop.', initialMessages: [], client: new ScriptedClient([]), runtime, store: new AgentEventStore(), signal: controller.signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+    const engine = new AgentEngine({ sessionId: 's-6', containerId: 'c-6', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Stop.', initialMessages: [], client: new ScriptedClient([]), runtime, store: new AgentEventStore(), signal: controller.signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
     await engine.execute();
     expect(engine.getRun().phase).toBe('cancelled');
     expect(events.filter((event) => event.kind === 'phase_changed').map((event) => event.phase)).toEqual(expect.arrayContaining(['cancelling', 'cancelled']));
@@ -223,7 +223,7 @@ describe('Agent Core v2', () => {
       tool('finish', 'complete_task', { summary: 'Resumed and complete.', evidence: ['Resumed workspace was verified again.'] }),
     ]);
     const engine = new AgentEngine({
-      sessionId: 's-resume', containerId: 'c-resume', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Continue from checkpoint.', initialMessages: [],
+      sessionId: 's-resume', containerId: 'c-resume', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Continue from checkpoint.', initialMessages: [],
       client, runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: () => undefined, onRunChange: () => undefined,
       resume: { sourceRunId: 'r-old', task, summary: 'Checkpoint facts.' },
     });
@@ -241,14 +241,14 @@ describe('Agent Core v2', () => {
       { id: 'two', name: 'workspace_tree', arguments: JSON.stringify({ max_depth: 1 }) },
     ];
     const client = new ScriptedClient([{ message: { role: 'assistant', content: '', tool_calls: calls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })) }, toolCalls: calls }]);
-    const engine = new AgentEngine({ sessionId: 's-budget', containerId: 'c-budget', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Inspect.', initialMessages: [], client, runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined, budget: { maxToolCalls: 1 } });
+    const engine = new AgentEngine({ sessionId: 's-budget', containerId: 'c-budget', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Inspect.', initialMessages: [], client, runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined, budget: { maxToolCalls: 1 } });
     await engine.execute();
     expect(engine.getRun()).toMatchObject({ phase: 'failed', toolCalls: 0 });
     expect(events.some((event) => event.kind === 'tool_requested')).toBe(false);
   });
 
   it('enforces the wall-clock budget during an in-flight model request', async () => {
-    const engine = new AgentEngine({ sessionId: 's-deadline', containerId: 'c-deadline', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Inspect.', initialMessages: [], client: new AbortAwareHangingClient(), runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: () => undefined, onRunChange: () => undefined, budget: { maxDurationMs: 25 } });
+    const engine = new AgentEngine({ sessionId: 's-deadline', containerId: 'c-deadline', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Inspect.', initialMessages: [], client: new AbortAwareHangingClient(), runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: () => undefined, onRunChange: () => undefined, budget: { maxDurationMs: 25 } });
     await engine.execute();
     expect(engine.getRun()).toMatchObject({ phase: 'failed', error: 'Agent run exceeded its time budget.' });
   });
@@ -264,7 +264,7 @@ describe('Agent Core v2', () => {
       { message: { role: 'assistant', content: '', tool_calls: unsafe.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })) }, toolCalls: unsafe },
       tool('finish-safe', 'complete_task', { summary: 'Safely finished without side effects.', evidence: ['Unsafe mixed batch was rejected.'] }),
     ]);
-    const engine = new AgentEngine({ sessionId: 's-terminal-order', containerId: 'c-terminal-order', persona: 'Sunam 1.14 Homo', model: 'model', input: 'Inspect.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+    const engine = new AgentEngine({ sessionId: 's-terminal-order', containerId: 'c-terminal-order', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Inspect.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
     await engine.execute();
     expect(engine.getRun().phase).toBe('completed');
     expect(runtime.files.has('late.txt')).toBe(false);

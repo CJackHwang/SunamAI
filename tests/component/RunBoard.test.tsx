@@ -6,9 +6,9 @@ import { RunBoard } from '@/features/agent-core/RunBoard';
 import type { AgentRun } from '@/features/agent-core/types';
 
 const interruptedRun: AgentRun = {
-  id: 'r-1', sessionId: 's-1', containerId: 'c-1', model: 'm', persona: 'Sunam 1.14 Homo', phase: 'interrupted', createdAt: 1, updatedAt: 1,
-  task: { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: true, plan: [{ id: 'one', title: 'Inspect the dumpster fire', status: 'completed' }], evidence: [], changedWorkspace: true, workspaceRevision: 1, verified: true, verifiedRevision: 1, verificationEvidence: [] },
-  chaos: { persona: 'Sunam 1.14 Homo', ritual: '命名严肃到荒谬的验收仪式', privateGoods: '彩蛋', styleDirective: 'style', invariants: [] },
+  id: 'r-1', sessionId: 's-1', containerId: 'c-1', model: 'm', persona: 'Sunam 6.9 Pron', phase: 'interrupted', createdAt: 1, updatedAt: 1,
+  task: { objective: 'fix', acceptanceCriteria: [], constraints: [], requiresPlan: false, plan: [], evidence: [], changedWorkspace: false, workspaceRevision: 0, verified: false, verifiedRevision: -1, verificationEvidence: [] },
+  chaos: { persona: 'Sunam 6.9 Pron', styleDirective: 'style', invariants: [] },
   budget: { maxModelTurns: 40, maxToolCalls: 100, maxDurationMs: 1 }, modelTurns: 2, toolCalls: 3, summary: '', error: 'Browser session ended.',
 };
 
