@@ -44,7 +44,7 @@
 }
 
 body {
-  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: var(--color-bg);
   color: var(--color-text);

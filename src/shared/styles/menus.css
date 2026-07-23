@@ -34,7 +34,7 @@
 
 .context-menu-positioned {
   left: min(var(--context-menu-x), calc(100vw - 200px));
-  top: min(var(--context-menu-y), calc(100vh - 250px));
+  top: min(var(--context-menu-y), calc(100dvh - 250px));
 }
 
 .context-menu.is-exiting {
