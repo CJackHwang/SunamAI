@@ -16,6 +16,11 @@ function publishUpdate() {
   listeners.forEach((listener) => listener());
 }
 
+if (import.meta.env.DEV) {
+  // @ts-expect-error for testing
+  window.__triggerAppUpdate = publishUpdate;
+}
+
 export function initializeAppUpdates() {
   if (initialized || !import.meta.env.PROD || !('serviceWorker' in navigator)) return;
   initialized = true;

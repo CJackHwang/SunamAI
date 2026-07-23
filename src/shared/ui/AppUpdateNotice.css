@@ -1,23 +1,43 @@
-.app-update-notice {
+.app-update-overlay {
   position: fixed;
-  right: 20px;
-  bottom: 20px;
+  inset: 0;
   z-index: 1400;
   display: flex;
   align-items: center;
-  gap: 14px;
-  max-width: min(440px, calc(100vw - 32px));
-  padding: 12px 14px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-medium);
-  background: var(--color-surface);
-  box-shadow: 0 12px 36px rgb(0 0 0 / 14%);
-  color: var(--color-text);
-  font-size: 14px;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
 }
 
-.app-update-notice .btn { flex: 0 0 auto; }
+.app-update-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 90%;
+  max-width: 400px;
+  padding: 24px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-large);
+  background: var(--color-surface);
+  box-shadow: 0 20px 40px rgb(0 0 0 / 20%);
+  color: var(--color-text);
+}
 
-@media (max-width: 640px) {
-  .app-update-notice { right: 16px; bottom: 16px; left: 16px; justify-content: space-between; }
+.app-update-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.app-update-text {
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.app-update-notice .btn {
+  width: 100%;
+  justify-content: center;
+  padding: 10px;
+  font-size: 15px;
 }
