@@ -46,7 +46,8 @@ export default defineConfig({
         'icons.svg',
         'icon-bg-svg.svg',
         'icon-nobg-svg.svg',
-        'sunam-appicon.png',
+        'sunam-appicon-192.png',
+        'sunam-appicon-512.png',
       ],
       manifest: {
         name: 'Sunam',
@@ -57,9 +58,15 @@ export default defineConfig({
         display: 'standalone',
         icons: [
           {
-            src: 'sunam-appicon.png',
-            sizes: '1254x1254',
+            src: 'sunam-appicon-192.png',
+            sizes: '192x192',
             type: 'image/png'
+          },
+          {
+            src: 'sunam-appicon-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any maskable'
           }
         ]
       }
