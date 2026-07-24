@@ -1,5 +1,8 @@
 .mobile-overlay { position: fixed; inset: 0; z-index: 999; background: rgb(0 0 0 / 50%); }
 .mobile-overlay.is-exiting { pointer-events: none; animation: sidebar-overlay-out var(--motion-base) ease-in both; }
+@media (min-width: 901px) {
+  .mobile-overlay { display: none; }
+}
 .sidebar-logo-toggle { background: transparent; }
 .sidebar-logo-toggle.is-collapsed { cursor: pointer; }
 .sidebar-brand { font-size: 24px; line-height: 1; }

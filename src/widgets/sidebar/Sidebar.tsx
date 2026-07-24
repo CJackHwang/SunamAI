@@ -27,6 +27,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  useEffect(() => {
+    if (!isMobile && isMobileOpen && onCloseMobile) {
+      onCloseMobile();
+      setIsCollapsed(true);
+    }
+  }, [isMobile, isMobileOpen, onCloseMobile]);
+
   const isCollapsed = isMobile ? false : _isCollapsed;
   const { presentValue: isMobileOverlayPresent, isExiting: isMobileOverlayExiting } = usePresence(isMobileOpen ? true : null, 240);
 
