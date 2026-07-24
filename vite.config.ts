@@ -58,7 +58,7 @@ export default defineConfig({
         icons: [
           {
             src: 'sunam-appicon.png',
-            sizes: '512x512',
+            sizes: '1254x1254',
             type: 'image/png'
           }
         ]
