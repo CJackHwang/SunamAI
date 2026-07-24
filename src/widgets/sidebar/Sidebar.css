@@ -35,7 +35,7 @@
 .sidebar-header { display: flex; height: 60px; flex-shrink: 0; align-items: center; justify-content: flex-start; gap: 8px; padding: 0 16px; }
 .sidebar.collapsed .sidebar-header { width: 100%; justify-content: center; padding: 0; }
 .sidebar-logo-toggle { position: relative; display: flex; width: 36px; height: 36px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: var(--radius-small); cursor: default; }
-.sidebar-logo-toggle .logo-default { position: absolute; width: 32px; height: 32px; border-radius: 4px; object-fit: contain; transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--motion-spring); }
+.sidebar-logo-toggle .logo-default { position: absolute; width: 32px; height: 32px; border-radius: 6px; object-fit: contain; transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--motion-spring); }
 .sidebar-logo-toggle .logo-hover { position: absolute; display: flex; align-items: center; justify-content: center; color: var(--color-text-secondary); opacity: 0; transform: scale(.88); transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--motion-spring); }
 .sidebar-logo-toggle:not(.expanded-mode):hover { background: var(--color-bg); }
 .sidebar-logo-toggle:not(.expanded-mode):hover .logo-default { opacity: 0; }

@@ -1,7 +1,7 @@
 import type { ChatAttachment } from '@/entities/message/types';
 
 export const MAX_CHAT_ATTACHMENT_BYTES = 512_000;
-export const MAX_CHAT_ATTACHMENTS = 8;
+const MAX_CHAT_ATTACHMENTS = 8;
 
 const TEXT_EXTENSIONS = new Set(['txt', 'md', 'json', 'jsonl', 'csv', 'tsv', 'js', 'jsx', 'ts', 'tsx', 'css', 'scss', 'html', 'xml', 'yaml', 'yml', 'toml', 'ini', 'py', 'java', 'c', 'h', 'cpp', 'hpp', 'go', 'rs', 'rb', 'php', 'sh', 'sql', 'graphql', 'vue', 'svelte', 'log']);
 

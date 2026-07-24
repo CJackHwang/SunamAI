@@ -1,15 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { SquarePen, History, Box, Plus, PanelLeftClose, PanelLeft, Settings, Search } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { SquarePen, History, Box, Plus, Search } from 'lucide-react';
 import { useWorkspaceStore } from '@/entities/workspace/store';
 import { WorkspaceResourceList } from '@/features/session/ui/WorkspaceResourceList';
-import { generateAutoTitle } from '@/features/session/titleService';
-import { AgentEventStore } from '@/features/agent-core/eventStore';
-import { projectMessages } from '@/features/agent-core/projector';
-import { readAppSettings } from '@/shared/lib/settings';
 import { useI18n } from '@/shared/i18n';
 import { usePresence } from '@/shared/ui/usePresence';
 import { SidebarResourceContextMenu } from './SidebarResourceContextMenu';
-import { findSidebarResource, sidebarResourceLabel, type SidebarContextMenuState, type SidebarEditingState, type SidebarResourceKind } from './sidebarResources';
+import { useSidebarActions } from './useSidebarActions';
+import { SidebarHeader } from './SidebarHeader';
+import { SidebarFooter } from './SidebarFooter';
 import './Sidebar.css';
 
 interface SidebarProps {
@@ -32,12 +30,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
   const isCollapsed = isMobile ? false : _isCollapsed;
   const { presentValue: isMobileOverlayPresent, isExiting: isMobileOverlayExiting } = usePresence(isMobileOpen ? true : null, 240);
 
-  const [contextMenu, setContextMenu] = useState<SidebarContextMenuState | null>(null);
-  const [editing, setEditing] = useState<SidebarEditingState | null>(null);
-  const [generatingTitleId, setGeneratingTitleId] = useState<string | null>(null);
-  const editInputRef = useRef<HTMLInputElement>(null);
-  const eventStoreRef = useRef(new AgentEventStore());
-
   const {
     sessions,
     containers,
@@ -57,63 +49,32 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
 
   const sortedSessions = [...sessions].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
   const sortedContainers = [...containers].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
-  const contextResource = contextMenu ? findSidebarResource(contextMenu.type, contextMenu.id, sessions, containers) : undefined;
 
-  const handleContextMenu = (e: React.MouseEvent, type: SidebarResourceKind, id: string) => {
-    e.preventDefault();
-    setContextMenu({ type, id, x: e.clientX, y: e.clientY });
-  };
-
-  const closeContextMenu = () => setContextMenu(null);
-
-  const handleRenameSubmit = () => {
-    if (!editing || !editing.text.trim()) {
-      setEditing(null);
-      return;
-    }
-    if (editing.type === 'session') {
-      renameSession(editing.id, editing.text.trim());
-    } else {
-      renameContainer(editing.id, editing.text.trim());
-    }
-    setEditing(null);
-  };
-
-  const handleGenerateTitle = async (type: SidebarResourceKind, id: string) => {
-    closeContextMenu();
-    const { apiKey, baseUrl, apiModel } = readAppSettings();
-
-    if (!apiKey) {
-      alert(t('sidebar.apiKeyRequired'));
-      return;
-    }
-    setGeneratingTitleId(id);
-
-    try {
-      let input: string;
-      if (type === 'session') {
-        const events = await eventStoreRef.current.loadSessionEvents(id);
-        input = projectMessages(events).find((message) => message.role === 'user')?.content || '无有效对话记录，请随意发挥。';
-      } else {
-        input = '这是一个容器的自动重命名，请随意起名。';
-      }
-      const title = await generateAutoTitle(input, { apiKey, baseUrl, model: apiModel });
-      if (title) {
-        if (type === 'session') renameSession(id, title);
-        else renameContainer(id, title);
-      }
-    } catch {
-      alert(t('sidebar.renameFailed'));
-    } finally {
-      setGeneratingTitleId(null);
-    }
-  };
-
-  useEffect(() => {
-    if (editing && editInputRef.current) {
-      editInputRef.current.focus();
-    }
-  }, [editing]);
+  const {
+    contextMenu,
+    contextResource,
+    editing,
+    setEditing,
+    generatingTitleId,
+    editInputRef,
+    handleContextMenu,
+    closeContextMenu,
+    handleRenameSubmit,
+    onRename,
+    onGenerateTitle,
+    onTogglePin,
+    onDelete,
+  } = useSidebarActions(
+    sessions,
+    containers,
+    renameSession,
+    renameContainer,
+    deleteSession,
+    deleteContainer,
+    togglePinSession,
+    togglePinContainer,
+    t
+  );
 
   return (
     <>
@@ -121,51 +82,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
         <div className={`mobile-overlay motion-overlay-in ${isMobileOverlayExiting ? 'is-exiting' : ''}`} onClick={onCloseMobile} />
       )}
       <div className={`sidebar ${isCollapsed ? 'collapsed' : 'expanded'} ${isMobileOpen ? 'mobile-open' : ''}`}>
-        {/* Header */}
-        <div className="sidebar-header">
-          <div 
-            className={`sidebar-logo-toggle ${!isCollapsed ? 'expanded-mode' : 'is-collapsed'}`}
-            onClick={() => isCollapsed && setIsCollapsed(false)}
-            title={isCollapsed ? "Expand Sidebar" : ""}
-          >
-            <img src="/icon-nobg-svg.svg" alt="Sunam" className="logo-default" />
-            {isCollapsed && (
-              <div className="logo-hover">
-                <PanelLeft size={20} />
-              </div>
-            )}
-          </div>
-          {!isCollapsed && (
-            <>
-              <span className="sidebar-title sidebar-brand">
-                Sunam
-              </span>
-              <div className="sidebar-header-actions">
-                <button 
-                  title={t('sidebar.search')}
-                  className="sidebar-icon-btn sidebar-header-search"
-                >
-                  <Search size={18} />
-                </button>
-                <button 
-                  className="sidebar-toggle-btn desktop-only-btn"
-                  onClick={() => setIsCollapsed(true)}
-                  title={t('sidebar.collapse')}
-                >
-                  <PanelLeftClose size={20} />
-                </button>
-                <button
-                  className="sidebar-toggle-btn mobile-sidebar-close"
-                  onClick={onCloseMobile}
-                  title={t('sidebar.close')}
-                  aria-label={t('sidebar.close')}
-                >
-                  <PanelLeftClose size={20} />
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+        
+        <SidebarHeader 
+          isCollapsed={isCollapsed} 
+          setIsCollapsed={setIsCollapsed} 
+          onCloseMobile={onCloseMobile} 
+        />
 
         <div className="sidebar-content">
           {/* Actions */}
@@ -185,7 +107,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
             )}
           </div>
 
-          {/* Containers Section (Moved Up) */}
+          {/* Containers Section */}
           {!isCollapsed && (
             <div className="sidebar-section">
               <div className="sidebar-section-title">
@@ -198,7 +120,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
             </div>
           )}
 
-          {/* History Section (Renamed to 历史对话, hidden when collapsed) */}
+          {/* History Section */}
           {!isCollapsed && (
             <div className="sidebar-section">
               <div className="sidebar-section-title">{t('sidebar.history')}</div>
@@ -207,26 +129,24 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
           )}
         </div>
 
-        {/* Footer */}
-        <div className="sidebar-footer">
-          <div className="sidebar-user">
-            <img src="/head.jpeg" alt="Avatar" className="sidebar-avatar" />
-            {!isCollapsed && <span className="sidebar-username">{t('sidebar.user')}</span>}
-          </div>
-          {!isCollapsed && (
-            <button
-              className="sidebar-icon-btn sidebar-settings"
-              onClick={onOpenSettings}
-              title={t('sidebar.settings')}
-            >
-              <Settings size={18} />
-            </button>
-          )}
-        </div>
+        <SidebarFooter 
+          isCollapsed={isCollapsed} 
+          onOpenSettings={onOpenSettings} 
+        />
+
       </div>
 
-      {/* Context Menu */}
-      <SidebarResourceContextMenu menu={contextMenu} resource={contextResource} dimmed={isMobile} labels={{ rename: t('sidebar.rename'), generateTitle: t('sidebar.generateTitle'), pin: t('sidebar.pin'), unpin: t('sidebar.unpin'), delete: t('sidebar.delete') }} onClose={closeContextMenu} onRename={() => { if (contextMenu && contextResource) setEditing({ type: contextMenu.type, id: contextMenu.id, text: sidebarResourceLabel(contextResource) }); closeContextMenu(); }} onGenerateTitle={() => { if (contextMenu) void handleGenerateTitle(contextMenu.type, contextMenu.id); }} onTogglePin={() => { if (!contextMenu) return; if (contextMenu.type === 'session') togglePinSession(contextMenu.id); else togglePinContainer(contextMenu.id); closeContextMenu(); }} onDelete={() => { if (!contextMenu) return; const session = contextMenu.type === 'session'; if (!session && !window.confirm(t('sidebar.confirmDeleteContainer'))) { closeContextMenu(); return; } if (session) deleteSession(contextMenu.id); else deleteContainer(contextMenu.id); closeContextMenu(); }} />
+      <SidebarResourceContextMenu 
+        menu={contextMenu} 
+        resource={contextResource} 
+        dimmed={isMobile} 
+        labels={{ rename: t('sidebar.rename'), generateTitle: t('sidebar.generateTitle'), pin: t('sidebar.pin'), unpin: t('sidebar.unpin'), delete: t('sidebar.delete') }} 
+        onClose={closeContextMenu} 
+        onRename={onRename} 
+        onGenerateTitle={onGenerateTitle} 
+        onTogglePin={onTogglePin} 
+        onDelete={onDelete} 
+      />
     </>
   );
 };

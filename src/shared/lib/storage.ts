@@ -12,7 +12,7 @@ export interface StorageLike {
   removeItem(key: string): void;
 }
 
-export function getBrowserStorage(): StorageLike | null {
+function getBrowserStorage(): StorageLike | null {
   if (typeof window === 'undefined') return null;
   try {
     return window.localStorage;

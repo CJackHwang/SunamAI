@@ -1,9 +1,10 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { createInitialWorkspaceState } from '@/entities/workspace/repository';
-import type { Container, Session, SessionStatus, WorkspaceState } from '@/entities/workspace/types';
+import type { SessionStatus, WorkspaceState } from '@/entities/workspace/types';
 import { v2Persistence, type V2PersistenceRepository } from '@/shared/persistence/v2Repository';
-import { createId } from '@/shared/lib/ids';
 import { toErrorMessage } from '@/shared/lib/errors';
+import { createSessionActions } from './sessionStore';
+import { createContainerActions } from './containerStore';
 
 export type { Container, Session, WorkspaceState } from '@/entities/workspace/types';
 
@@ -31,35 +32,11 @@ interface WorkspaceStore {
   selectContainer: (id: string) => void;
 }
 
-const EMPTY_SESSION_TITLES = new Set(['新对话', '新建对话']);
 const DAMAGED_WORKSPACE_MESSAGE = 'The saved workspace is damaged and was isolated. Retry after reviewing the storage error; no replacement workspace was written.';
 
 function ensureWorkspaceRecordIsSafe(result: Awaited<ReturnType<V2PersistenceRepository['loadWorkspace']>>) {
   if (!result.value && result.issues.length) throw new Error(DAMAGED_WORKSPACE_MESSAGE);
   return result.value;
-}
-
-function isReusableEmptySession(session: Session) {
-  // Every launched run sets a status synchronously. An idle status may therefore
-  // belong to an interrupted run and must not be mistaken for an empty context.
-  return EMPTY_SESSION_TITLES.has(session.title.trim()) && session.status === undefined;
-}
-
-function normalizeContainerName(name: string) {
-  return name.trim().normalize('NFKC').toLocaleLowerCase();
-}
-
-export function nextUniqueContainerName(containers: Container[], requestedName = '新容器', excludedId?: string) {
-  const baseName = requestedName.trim() || '新容器';
-  const occupied = new Set(containers
-    .filter((container) => container.id !== excludedId)
-    .map((container) => normalizeContainerName(container.name)));
-  if (!occupied.has(normalizeContainerName(baseName))) return baseName;
-  const numberedName = /^(.*?)(\d+)$/u.exec(baseName);
-  const stem = numberedName?.[1] || baseName;
-  let suffix = numberedName ? Number(numberedName[2]) + 1 : 1;
-  while (occupied.has(normalizeContainerName(`${stem}${suffix}`))) suffix += 1;
-  return `${stem}${suffix}`;
 }
 
 export function createWorkspaceStore(
@@ -71,16 +48,19 @@ export function createWorkspaceStore(
   let hydration: Promise<void> | null = null;
   let writeChain = Promise.resolve();
   const listeners = new Set<() => void>();
+  
   const subscribe = (listener: () => void) => {
     listeners.add(listener);
     return () => listeners.delete(listener);
   };
+  
   const persist = (next: WorkspaceState) => {
     writeChain = writeChain.then(() => repository.saveWorkspace(next)).catch((error) => {
       state = { ...state, persistenceError: toErrorMessage(error) };
       listeners.forEach((listener) => listener());
     });
   };
+  
   const setState = (updater: (previous: WorkspaceState) => WorkspaceState) => {
     if (!state.hydrated || state.persistenceError) return;
     const nextState = updater(state);
@@ -89,10 +69,18 @@ export function createWorkspaceStore(
     persist(state);
     listeners.forEach((listener) => listener());
   };
+  
+  const getState = () => state;
+  const isHydratedAndSafe = () => state.hydrated && !state.persistenceError;
+  
   const reportPersistenceError = (error: unknown) => {
     state = { ...state, persistenceError: toErrorMessage(error) };
     listeners.forEach((listener) => listener());
   };
+
+  const sessionActions = createSessionActions(setState, getState, isHydratedAndSafe, now, repository, reportPersistenceError);
+  const containerActions = createContainerActions(setState, getState, now, repository, reportPersistenceError);
+
   return {
     subscribe,
     getSnapshot: () => state,
@@ -130,70 +118,8 @@ export function createWorkspaceStore(
       await repository.saveWorkspace(next);
       listeners.forEach((listener) => listener());
     },
-    createSession: () => {
-      const emptySessions = state.sessions.filter(isReusableEmptySession);
-      const reusable = emptySessions.find((session) => session.id === state.activeSessionId) ?? emptySessions[0];
-      if (reusable) {
-        if (!state.hydrated || state.persistenceError) return reusable.id;
-        const redundantIds = new Set(emptySessions.filter((session) => session.id !== reusable.id).map((session) => session.id));
-        setState((previous) => previous.activeSessionId === reusable.id && redundantIds.size === 0
-          ? previous
-          : { ...previous, sessions: previous.sessions.filter((session) => !redundantIds.has(session.id)), activeSessionId: reusable.id });
-        redundantIds.forEach((id) => { void repository.deleteSession(id).catch(reportPersistenceError); });
-        return reusable.id;
-      }
-      const timestamp = now();
-      const session: Session = { id: createId('s'), title: '新对话', updatedAt: timestamp };
-      setState((previous) => ({ ...previous, sessions: [session, ...previous.sessions], activeSessionId: session.id }));
-      return session.id;
-    },
-    renameSession: (id, title) => setState((previous) => ({
-      ...previous,
-      sessions: previous.sessions.map((session) => session.id === id ? { ...session, title, updatedAt: now() } : session),
-    })),
-    deleteSession: (id) => setState((previous) => {
-      const sessions = previous.sessions.filter((session) => session.id !== id);
-      void repository.deleteSession(id).catch(reportPersistenceError);
-      return { ...previous, sessions, activeSessionId: previous.activeSessionId === id ? sessions[0]?.id ?? null : previous.activeSessionId };
-    }),
-    togglePinSession: (id) => setState((previous) => ({
-      ...previous,
-      sessions: previous.sessions.map((session) => session.id === id ? { ...session, pinned: !session.pinned, updatedAt: now() } : session),
-    })),
-    updateSessionStatus: (id, status) => setState((previous) => ({
-      ...previous,
-      sessions: previous.sessions.map((session) => session.id === id ? { ...session, status } : session),
-    })),
-    selectSession: (id) => setState((previous) => ({
-      ...previous,
-      activeSessionId: id,
-      sessions: previous.sessions.map((session) => session.id === id && (session.status === 'completed_unread' || session.status === 'failed_unread')
-        ? { ...session, status: 'idle' }
-        : session),
-    })),
-    createContainer: () => {
-      const timestamp = now();
-      const container: Container = { id: createId('c'), name: nextUniqueContainerName(state.containers), updatedAt: timestamp };
-      setState((previous) => ({ ...previous, containers: [container, ...previous.containers], activeContainerId: container.id }));
-      return container.id;
-    },
-    renameContainer: (id, name) => setState((previous) => {
-      const uniqueName = nextUniqueContainerName(previous.containers, name, id);
-      return {
-        ...previous,
-        containers: previous.containers.map((container) => container.id === id ? { ...container, name: uniqueName, updatedAt: now() } : container),
-      };
-    }),
-    deleteContainer: (id) => setState((previous) => {
-      const containers = previous.containers.filter((container) => container.id !== id);
-      void repository.deleteContainer(id).catch(reportPersistenceError);
-      return { ...previous, containers, activeContainerId: previous.activeContainerId === id ? containers[0]?.id ?? null : previous.activeContainerId };
-    }),
-    togglePinContainer: (id) => setState((previous) => ({
-      ...previous,
-      containers: previous.containers.map((container) => container.id === id ? { ...container, pinned: !container.pinned, updatedAt: now() } : container),
-    })),
-    selectContainer: (id) => setState((previous) => ({ ...previous, activeContainerId: id })),
+    ...sessionActions,
+    ...containerActions,
   };
 }
 
@@ -205,7 +131,7 @@ const workspaceStore = createWorkspaceStore({
 });
 
 export function useWorkspaceStore() {
-  const state = useSyncExternalStore(workspaceStore.subscribe, workspaceStore.getSnapshot);
+  const state = useSyncExternalStore(workspaceStore.subscribe, workspaceStore.getSnapshot, workspaceStore.getSnapshot);
   useEffect(() => { void workspaceStore.hydrate(); }, []);
   return {
     ...state,

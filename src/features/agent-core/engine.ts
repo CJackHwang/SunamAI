@@ -12,6 +12,7 @@ import type { AgentBudget, AgentEvent, AgentPhase, AgentRun, AgentToolResult, Ta
 import { createId } from '@/shared/lib/ids';
 import { isAbortError, retryModelRequest } from './modelRetry';
 import { scheduleToolBatch } from './toolBatchScheduler';
+import { initialTask, isNonTrivial, rebuildTaskForResume } from './task';
 
 const DEFAULT_BUDGET: AgentBudget = { maxModelTurns: 60, maxToolCalls: 150, maxDurationMs: 15 * 60_000 };
 const MAX_READ_ONLY_CONCURRENCY = 4;
@@ -21,42 +22,6 @@ function redact(value: string): string {
     .replace(/\b(sk-[a-zA-Z0-9_-]{12,})\b/g, '[REDACTED_API_KEY]')
     .replace(/(Bearer\s+)[^\s]+/gi, '$1[REDACTED]')
     .replace(/(api[_-]?key\s*[=:]\s*)[^\s"']+/gi, '$1[REDACTED]');
-}
-
-function isNonTrivial(prompt: string): boolean {
-  return prompt.length > 80 || /(?:build|implement|fix|add|change|create|修改|实现|修复|新增|开发)/i.test(prompt);
-}
-
-function initialTask(objective: string): TaskContract {
-  return {
-    objective,
-    acceptanceCriteria: ['Address the user request.', 'Do not fabricate results or verification.', ...(isNonTrivial(objective) ? ['Verify relevant workspace changes before completing.'] : [])],
-    constraints: ['Work only inside the active WebContainer.', 'Keep extra chaos reversible and non-destructive.'],
-    requiresPlan: isNonTrivial(objective),
-    plan: [],
-    evidence: [],
-    changedWorkspace: false,
-    workspaceRevision: 0,
-    verified: false,
-    verifiedRevision: -1,
-    verificationEvidence: [],
-  };
-}
-
-function cloneTask(task: TaskContract): TaskContract {
-  return {
-    ...task,
-    acceptanceCriteria: [...task.acceptanceCriteria],
-    constraints: [...task.constraints],
-    plan: task.plan.map((item) => ({ ...item, evidence: item.evidence ? [...item.evidence] : undefined })),
-    evidence: [...task.evidence],
-    verificationEvidence: task.verificationEvidence.map((evidence) => ({ ...evidence })),
-  };
-}
-
-function rebuildTaskForResume(task: TaskContract): TaskContract {
-  const rebuilt = cloneTask(task);
-  return rebuilt.changedWorkspace ? { ...rebuilt, verified: false, verifiedRevision: -1 } : rebuilt;
 }
 
 export interface AgentResumeState {

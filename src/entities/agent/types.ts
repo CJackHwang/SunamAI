@@ -2,10 +2,10 @@ import type { Message, ToolCall } from '@/entities/message/types';
 import type { SunamModel } from '@/shared/config/models';
 
 export type AgentPhase = 'preparing' | 'planning' | 'acting' | 'observing' | 'verifying' | 'awaiting_user' | 'cancelling' | 'cancelled' | 'completed' | 'failed' | 'interrupted';
-export type PlanItemStatus = 'pending' | 'in_progress' | 'completed' | 'blocked';
+type PlanItemStatus = 'pending' | 'in_progress' | 'completed' | 'blocked';
 
 export interface AgentPlanItem { id: string; title: string; status: PlanItemStatus; evidence?: string[]; }
-export interface VerificationEvidence { command: string; passed: boolean; workspaceRevision: number; createdAt: number; }
+interface VerificationEvidence { command: string; passed: boolean; workspaceRevision: number; createdAt: number; }
 export interface TaskContract { objective: string; acceptanceCriteria: string[]; constraints: string[]; requiresPlan: boolean; plan: AgentPlanItem[]; evidence: string[]; changedWorkspace: boolean; workspaceRevision: number; verified: boolean; verifiedRevision: number; verificationEvidence: VerificationEvidence[]; }
 export interface ChaosContract { persona: SunamModel; ritual: string; privateGoods: string; styleDirective: string; invariants: string[]; }
 export interface AgentBudget { maxModelTurns: number; maxToolCalls: number; maxDurationMs: number; }
