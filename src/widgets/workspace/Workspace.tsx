@@ -47,13 +47,22 @@ function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [terminalTab, setTerminalTab] = useState<TerminalTab>('ai');
   const [mobileActive, setMobileActive] = useState<'chat' | TerminalTab>('chat');
-  const [layoutState, setLayoutState] = useState<TerminalLayout>('half');
+  const [layoutState, setLayoutState] = useState<TerminalLayout>('collapsed');
   const { containerRef, isAtBottom, onScroll, scrollToBottom } = useChatAutoScroll([messages, isRunning, streamingContent, streamingReasoning, composerHeight]);
   const activeContainer = containers.find((container) => container.id === activeContainerId) ?? null;
 
   useEffect(() => {
-    const onResize = () => { if (window.innerWidth <= 900) setLayoutState('half'); };
-    onResize();
+    let wasMobile = window.innerWidth <= 900;
+    const onResize = () => { 
+      const isMobile = window.innerWidth <= 900;
+      if (isMobile && !wasMobile) {
+        setLayoutState('half');
+      } else if (!isMobile && wasMobile) {
+        setLayoutState('collapsed');
+      }
+      wasMobile = isMobile;
+    };
+    if (window.innerWidth <= 900) setLayoutState('half');
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
