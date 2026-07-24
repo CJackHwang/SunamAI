@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useI18n } from '@/shared/i18n';
 import { getAppUpdateSnapshot, reloadToApplyUpdate, subscribeToAppUpdate } from '@/shared/lib/appUpdates';
 import './AppUpdateNotice.css';
@@ -7,7 +7,8 @@ export function AppUpdateNotice() {
   const { t } = useI18n();
   const storeUpdate = useSyncExternalStore(subscribeToAppUpdate, getAppUpdateSnapshot, () => false);
   const isTest = import.meta.env.DEV && new URLSearchParams(window.location.search).has('test-update');
-  const updateAvailable = storeUpdate || isTest;
+  const [dismissed, setDismissed] = useState(false);
+  const updateAvailable = (storeUpdate || isTest) && !dismissed;
 
   if (!updateAvailable) return null;
 
@@ -17,9 +18,14 @@ export function AppUpdateNotice() {
         <div className="app-update-content">
           <span className="app-update-text">{t('update.available')}</span>
         </div>
-        <button className="btn btn-primary" type="button" onClick={() => { void reloadToApplyUpdate(); }}>
-          {t('update.reload')}
-        </button>
+        <div className="app-update-actions">
+          <button className="btn btn-primary" type="button" onClick={() => { void reloadToApplyUpdate(); }}>
+            {t('update.reload')}
+          </button>
+          <button className="btn btn-secondary" type="button" onClick={() => setDismissed(true)}>
+            {t('update.later')}
+          </button>
+        </div>
       </div>
     </div>
   );

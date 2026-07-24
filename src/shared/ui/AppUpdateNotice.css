@@ -35,6 +35,13 @@
   line-height: 1.5;
 }
 
+.app-update-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
 .app-update-notice .btn {
   width: 100%;
   justify-content: center;
