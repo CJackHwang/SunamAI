@@ -36,3 +36,26 @@ Installed Trellis 0.6.9, replaced bootstrap placeholders with source-backed Suna
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: 修复聊天推理、滚动与全局动效
+
+**Date**: 2026-07-26
+**Task**: 修复聊天推理、滚动与全局动效
+**Branch**: `main`
+
+### Summary
+
+恢复 reasoning 数据链，稳定聊天滚动，加入工具折叠和全局非线性动效，统一消息与工具区域间距、主题层级并移除外层气泡描边。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1b675cc` | (see git log) |
+| `c4d650c` | (see git log) |
+| `8ecc8f6` | (see git log) |
+
+### Status
+
+[OK] **Completed**
