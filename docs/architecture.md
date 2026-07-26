@@ -89,6 +89,14 @@ Workspace store → load sunam-v3 workspace
 
 旧 v2 repository/schema/database 等生产模块已完全删除；隔离测试只用原始 IndexedDB API 建立旧库。生产代码不打开、读取、迁移或删除 `sunam-v2`，设置仍从 `sunam_v2_*` Local Storage 键读取。
 
+Workspace store 在 hydrate 前接收当前 locale 的非持久化创建默认值。首次工作区、reset、后续新会话和新容器使用创建当下的语言；持久化结构仍只保存最终字符串。历史中、英、日默认空会话由统一 helper 识别，自定义名称和已有记录不会因切换语言被改写。
+
+### 服务与端口生命周期
+
+`WebContainerAgentRuntime` 与 WebContainer 共享单例生命周期，并通过 runtime service registry 统一拥有 Agent shell、用户终端、端口事件和停止动作。每次受控启动记录 launch ID、来源、容器、进程句柄、状态和时间；Node 子进程通过 `.sunam/runtime` 下的 preload 在 `net.Server.listen` 成功后写入实际 PID/port/launch ID。该目录位于容器项目根之外，不进入工作区快照。
+
+端口依次处于 identifying、managed、stopping 或 orphaned。managed 端口使用保留句柄或监听器报告的 PID 精确停止；UI 不根据端口猜 PID。orphaned 仅代表历史遗留或运行时状态损坏，服务面板会明确提示“强制重启关闭”。该动作必须由用户确认，先 flush 全部快照，再重启全局 WebContainer；快照失败时不 teardown，所有错误保持可见。
+
 ## 关键契约
 
 ### `AgentWorkspaceRuntime`
@@ -101,6 +109,7 @@ Agent Core 与 WebContainer 的唯一边界：
 - Agent-owned foreground/background `shell_run`、进程观察/输入/停止；
 - `(sessionId, runId, containerId)` 所有权；
 - runtime 进程事件和只供 Agent 读取的有限用户终端缓冲；Agent 不能向用户交互 shell 注入输入。
+- runtime-owned launch/port registry、用户终端启动、managed port stop 和 snapshot-first global restart。
 
 所有根路径由 `getContainerRoot(containerId)` 生成，任何调用方都不能自行拼接或绕过路径解析。
 
@@ -128,6 +137,8 @@ Agent Core 与 WebContainer 的唯一边界：
 ### Workspace store
 
 store 提供 selector 和无变化短路。相同 session status 不触发 IndexedDB 写入；组件只订阅实际使用切片。普通 workspace save、session/container 删除和 reset 共用同一串行队列，reload 先等待队列排空；repository 层也串行相同操作，避免旧保存覆盖新删除元数据。
+
+Agent 工具批次后的 snapshot/Run/event/checkpoint 同步有独立 watchdog。同步开始时先投影 observing 状态；超时或失败时先将 Run 投影为 recoverable failed，再进行有界的尽力持久化，因此损坏的 snapshot/IndexedDB await 不能让 UI 无限停留在运行中。已成功保存的上一 checkpoint 不被失败路径覆盖。
 
 ## 运行与渲染性能
 

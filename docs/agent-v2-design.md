@@ -49,7 +49,7 @@ preparing → planning → acting → observing / verifying
 4. 调用模型；网络、429 与 5xx 仅做有限退避。主请求 PTL 最多尝试三次，每次删除最旧 20% 的完整消息组；连续失败后写入确定性摘要并打开熔断。
 5. assistant tool call 与匹配 tool result 作为完整组进入 transcript。终止控制调用只能位于批次末尾，否则整批拒绝。
 6. 最多四路执行并发安全只读工具；`apply_patch`、`materialize_resource` 和 `shell_run` 使用容器级 mutation lease。所有前台 shell 都按真实 exit status 和命令结束后的 revision 记录验证，不解析命令名、脚本、参数、端口或 shell 组合；后台 shell 只记录进程进度并撤销旧 pass。shell 进程结束形成显式 revision 边界。
-7. 工具批次后 flush 工作区、更新任务、保存单一 checkpoint 和事件尾序号。
+7. 工具批次后进入独立 watchdog 约束的同步阶段，flush 工作区、更新任务、保存单一 checkpoint 和事件尾序号。超时/失败先把 Run 投影为可恢复 failed，再做有界的尽力持久化，不能因 snapshot/IndexedDB 悬挂而长期显示运行中；最后成功 checkpoint 保持不变。
 8. 同一工具与参数连续第三次出现时只给一次 recovery guidance；第四次仍重复则立即失败，不把预算耗尽在无效兜底循环中。
 9. 计划和当前 workspace revision 验证满足后才能完成；验证相关性和真实性由系统 prompt 约束，要求选择适合任务的检查、保留失败退出码、禁止用无关成功命令伪造证据，并在后续写入后重新验证。
 
@@ -120,6 +120,8 @@ RunBoard 以树形摘要展示子任务；展开子任务时按 run 索引读取
 - 进程所有权是 `(sessionId, runId, containerId)`；不匹配的观察、输入和停止失败。
 - root 的 `process_list` 可以列出同一 session/container 内由较早 Run 启动的进程；后续观察、输入和停止使用列表记录的原始完整所有权。其他 session/container 不可见，子 Agent 不获得跨 Run 进程工具。
 - 关闭已登记服务必须使用 Agent process ID，不通过端口猜 PID。显式停止异步等待一次 post-stop revision flush，并同步当前任务 revision，避免服务已经关闭但完成门继续循环。
+- Agent shell 与用户终端都由 runtime service registry 登记 launch ID、来源、容器和句柄。Node `listen` 由内部 preload 记录真实 PID/port；服务面板只对 managed 端口提供精确停止，不从端口反推 PID。
+- 无法关联当前生命周期启动记录的端口标记为 orphaned。用户可确认“强制重启关闭”，但 runtime 必须先成功 flush 全部快照；失败时不重启。成功重启会停止全局 WebContainer 中的全部端口、终端和 Agent 后台进程。
 - verify shell 只要求 foreground；不使用通用命令解析器猜测项目验证语义，也不允许启动后台服务。
 - 后台 `shell_run` 用于服务等持续进程，不单独制造 workspace mutation；如果它实际写文件或退出，权威 revision 漂移仍会使完成门要求重新验证。
 - 验证后仍可继续读取或运行前台检查；前台命令会在新的 shell revision 上刷新真实 exit evidence，后续 workspace 写入仍要求再次检查。
@@ -142,6 +144,7 @@ v3 stores：workspace、runs、events、checkpoints、terminalHistory、snapshot
 - Run、checkpoint、terminal 和 snapshot 各自串行写入；显式 snapshot flush 会取消未触发的 debounce。一次活动快照失败不会吞掉已经排队的后续保存，后续保存会自动继续，最后完整快照始终保留。
 - 快照在导出前排除 `node_modules`、`.git`、dist、coverage、Playwright 输出和常见缓存；上限 10,000 文件/100 MiB。超限保留最后一个完整快照，不写半份。
 - 文件 watch 在空闲窗口合并保存，并在 checkpoint、进程结束、`pagehide` 和 runtime dispose 时 flush。
+- session/container 创建默认值由当前 locale 在 hydrate 前注入，数据库仍只保存最终名称字符串；历史中/英/日空会话可复用，自定义名称不随语言切换。
 
 ## 9. 仍属后续路线
 

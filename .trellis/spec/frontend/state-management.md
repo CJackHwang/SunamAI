@@ -20,6 +20,67 @@ Use runtime-owned state for WebContainer files, processes, ports, terminal buffe
 
 References: `src/entities/workspace/store.ts`, `useWorkspaceStore.ts`, `deletionCoordinator.ts`, and `tests/unit/workspaceStore.test.ts`.
 
+## Scenario: localized workspace creation defaults
+
+### 1. Scope / Trigger
+
+Use this contract when adding or changing locale-dependent default session/container names. Persisted workspace records remain plain strings; this scenario must not add a schema version or rename existing user resources.
+
+### 2. Signatures
+
+```ts
+interface WorkspaceCreationDefaults {
+  sessionTitle: string;
+  containerName: string;
+}
+
+interface WorkspaceStore {
+  configureCreationDefaults(defaults: WorkspaceCreationDefaults): void;
+}
+
+function isDefaultSessionTitle(title: string): boolean;
+```
+
+### 3. Contracts
+
+- The page configures translated defaults synchronously before selector hydration effects run.
+- Hydrate-with-no-record, reload-with-no-record, reset, `createSession`, and `createContainer` read the latest non-persisted defaults.
+- Locale changes affect future creation only. Existing persisted or custom names are never rewritten.
+- Empty-session reuse recognizes all supported historical zh-CN/en-US/ja-JP default titles through one entity-owned helper. Widgets do not compare translated literals.
+- `sunam-v3` continues to persist only final `title` and `name` strings.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+| --- | --- |
+| Translated default is blank | Fall back to the canonical built-in default; never create a blank resource. |
+| No workspace record during hydrate/reload | Create initial resources with the defaults current at that operation. |
+| Locale changes after hydration | Preserve every existing name; use new defaults only on later create/reset. |
+| Historical localized empty title | Eligible for the existing empty-session reuse/deduplication rule. |
+| User-defined title | Never treat as reusable merely because the locale changed. |
+
+### 5. Good / Base / Bad Cases
+
+- Good: Japanese is configured before first hydrate, producing `新しい会話` and `新規コンテナ`; after custom renames, switching to English creates new English resources without touching custom values.
+- Base: Chinese defaults create the same plain workspace record shape as before.
+- Bad: `Workspace.tsx` checks `title === '新对话'`, or a locale switch maps over persisted resources and renames them.
+
+### 6. Tests Required
+
+- Unit: initial hydrate, later create, reset, unique container suffixes, blank fallback, all legacy titles, and custom-name preservation.
+- Component/E2E: a fresh workspace in each supported locale renders the corresponding names; language switching affects only resources created afterwards.
+- Schema regression: v3 workspace guards accept the unchanged record shape.
+
+### 7. Wrong vs Correct
+
+```ts
+// Wrong: UI literal owns domain behavior.
+const isNew = session.title === '新对话';
+
+// Correct: entity helper owns historical default recognition.
+const isNew = isDefaultSessionTitle(session.title);
+```
+
 ## Derived and paged state
 
 Derive UI data from current events with memoized pure projectors. The main session timeline initially loads 250 events and pages older data; the DOM remains a current 250-message window. Child transcripts load by run only when expanded.

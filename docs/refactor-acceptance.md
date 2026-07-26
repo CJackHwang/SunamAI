@@ -52,6 +52,7 @@
 - [x] active parent/child Run 和 task 刷新后标记 interrupted；resume 创建新 Run。
 - [x] event tail 和 workspace revision drift 都使用持久化真实值检测。
 - [x] Run/checkpoint/terminal/snapshot 写入队列互不重叠，错误进入可恢复状态。
+- [x] 工具结果后的 snapshot/Run/event/checkpoint 同步有独立 watchdog；失败先投影 UI 终态，再做有界持久化，上一成功 checkpoint 不被覆盖。
 
 ## 4. 快照
 
@@ -60,6 +61,7 @@
 - [x] 超限或写入失败保留上一份完整快照，不写半份。
 - [x] 活动快照失败时，已经排队的 follow-up 会自动继续，不因前一次 rejection 永久滞留。
 - [x] Agent checkpoint、进程结束、`pagehide` 和 runtime dispose 会 flush；显式 flush 取消未触发 debounce，不重复保存。
+- [x] 来源失联端口的全局重启先 flush 全部快照；快照失败时不 teardown，错误可见。
 - [x] 真实 WebContainer 测试按 active containerId 读取 IndexedDB snapshot，并检查 revision/fileCount/byteSize。
 
 ## 5. 资源与多模态
@@ -95,6 +97,8 @@
 - [x] `process_observe`、`process_input`、`process_stop` 使用登记进程的原始完整所有权，不通过端口猜 PID。
 - [x] 显式停止只推进并 flush 一次退出 revision，任务同步到 post-stop revision 后可直接给出一次最终回复。
 - [x] Agent 对用户终端只有有界只读缓冲；所有命令使用 Agent-owned `shell_run`，不存在绕过 lease 的终端注入工具。
+- [x] Agent shell 与用户终端统一登记 launch/source/container/handle；Node listener 记录实际 PID 和端口，服务面板可手动停止 managed 端口。
+- [x] 端口识别状态区分 identifying/managed/stopping/orphaned；orphaned 显示全局影响说明和“强制重启关闭”，不伪装为普通服务。
 - [x] 父取消等待所有 child terminal、task 持久化和 owned process 停止。
 
 ## 7. 性能
@@ -109,6 +113,7 @@
 - [x] 历史 Markdown 使用 `content-visibility`。
 - [x] 文件列表不读取全文求大小。
 - [x] workspace selector 和相同 status 写入短路有效。
+- [x] 首次、reset 和后续创建按当前 zh-CN/en-US/ja-JP locale 命名；历史默认空会话跨语言识别，自定义名称不被改写。
 
 ## 8. Playwright 场景
 
@@ -116,7 +121,7 @@ E2E：配置门禁、设置与 session/container CRUD、图片视觉 fallback、
 
 Visual：配置页与资源卡/子任务树，桌面 1440×900、移动 390×844，差异 0.2%。新增截图必须先用匹配版本 Chromium 更新基线，再运行一次不带 update 的验证。
 
-Runtime：真实 WebContainer 进程/端口/服务面板、资源 materialize、快照导出排除、父取消级联到 verify child 和 PID 清理。
+Runtime：真实 WebContainer launch/PID/端口登记、服务面板手动停止、资源 materialize、快照导出排除、父取消级联到 verify child 和 PID 清理。
 
 ## 9. 依赖与资产
 

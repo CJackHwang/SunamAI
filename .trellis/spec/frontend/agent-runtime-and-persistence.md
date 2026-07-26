@@ -7,7 +7,7 @@ This is the executable code-spec for changes that touch Agent execution, context
 - `AgentEngine` owns task progression, transcript groups, budgets, tool scheduling, completion gates, and the Run cancellation domain.
 - `ContextComposer` owns effective token budgets, complete-round compaction, fallback summaries, and rehydration.
 - `AgentModelClient` owns provider capabilities, token estimation/usage, multimodal wire mapping, and provider-specific fallback detection.
-- `AgentWorkspaceRuntime` owns WebContainer files, processes, resources, snapshots, mutation serialization, and the authoritative container revision.
+- `AgentWorkspaceRuntime` owns WebContainer files, processes, runtime service/port registration, resources, snapshots, mutation serialization, and the authoritative container revision.
 - `AgentEventStore` and `V3PersistenceRepository` own durable Runs, events, checkpoints, delegated tasks, resources, terminal history, snapshots, and quarantine.
 - React projects durable/runtime state. A component is never the source of execution, recovery, or verification truth.
 
@@ -105,6 +105,34 @@ interface ShellRunRequest {
 }
 ```
 
+The concrete WebContainer runtime also owns the terminal/service projection boundary. These handles remain runtime-only and are not added to `AgentWorkspaceRuntime` merely for React convenience:
+
+```ts
+type WebContainerProcess = Awaited<ReturnType<WebContainer['spawn']>>;
+type RuntimePortState = 'identifying' | 'managed' | 'orphaned' | 'stopping';
+type RuntimeServiceSource = 'agent' | 'terminal';
+
+interface RuntimePortStatus {
+  port: number;
+  url: string;
+  state: RuntimePortState;
+  source?: RuntimeServiceSource;
+  containerId?: string;
+  launchId?: string;
+  processId?: string;
+  pid?: number;
+}
+
+interface WebContainerAgentRuntime {
+  spawnUserShell(containerId: string): Promise<{ launchId: string; process: WebContainerProcess }>;
+  stopUserShell(launchId: string): boolean;
+  getPorts(): RuntimePortStatus[];
+  subscribePorts(listener: () => void): () => void;
+  stopPort(port: number): Promise<boolean>;
+  flushSnapshots(): Promise<void>;
+}
+```
+
 ```ts
 type MessageContentPart =
   | { type: 'text'; text: string }
@@ -186,6 +214,19 @@ interface SubagentNotification {
 - Delegated roles do not receive cross-run process management tools. Cancellation continues to call `stopRun` with the cancelling Run's exact ownership and does not stop an earlier completed Run's service.
 - Successful explicit `stopProcess` kills/removes the registry entry, advances and flushes the process-exit revision exactly once, and resolves only after the boundary is durable. The later natural-exit callback detects the missing registry entry and must not advance it a second time.
 - `process_stop` compares the task revision with the runtime revision before stopping and expects exactly one explicit-stop revision. Pre-existing drift or any additional revision during shutdown becomes changed/unverified; otherwise it synchronizes the process-only task to the post-stop revision so a truthful final response does not loop on a synthetic workspace change.
+- Agent shell launches and interactive terminal launches share one runtime service registry. Every launch records a runtime-only launch ID, source, container, command, handle, status, and start time; Agent launches also retain session/run/process IDs.
+- Managed launch environments preload `.sunam/runtime/service-hook.cjs` with `SUNAM_LAUNCH_ID`, `SUNAM_CONTAINER_ID`, and `SUNAM_SERVICE_EVENT_FILE`. The hook records validated JSONL `listening`/`closed` events from `net.Server.listen` with the actual Node PID and port. Runtime files live outside `.sunam/workspaces/c-*` and never enter project snapshots.
+- WebContainer `port`/`server-ready` events are authoritative for open/close visibility. Listener JSONL supplies ownership only; UI/runtime never parse commands or infer a PID from a port number.
+- Port transitions are `open -> identifying -> managed|orphaned`, and `managed -> stopping -> removed|orphaned`. A live launch handle or validated current-lifecycle listener PID is required for normal stop.
+- `orphaned` is an exceptional recovery state for legacy/corrupt/uninstrumented listeners. Its only guaranteed close path is a user-confirmed global runtime restart: flush every snapshot first, dispose runtime, teardown WebContainer, clear both singleton layers, then boot a new pair. Snapshot failure is fail-closed and must not call teardown.
+- Provider remounts subscribe/unsubscribe from the runtime singleton; they do not create a new process registry around a retained WebContainer and do not dispose the singleton on ordinary React cleanup.
+
+#### Between-turn checkpoint synchronization
+
+- The complete post-tool snapshot/Run/event/checkpoint stage has an independent abort-aware watchdog. It covers the persistence calls as well as `flushWorkspace`; the outer Run deadline alone is not sufficient because IndexedDB and snapshot promises may ignore AbortSignal.
+- Before waiting, project the Run as `observing`. On timeout/error, set `run.error` and `phase = failed`, call `onRunChange` immediately, then stop only the failing Run's owned processes.
+- Failure Run/event persistence is bounded best-effort after the UI projection. A hanging repository must not keep React showing an active Run. The timed-out operation receives an internal abort signal and checks it after every uninterruptible await so it cannot later append stale observing/checkpoint events.
+- Never overwrite the previous successful checkpoint from the failure path. Cancellation still waits for child/task terminal persistence according to the existing parent-cancellation contract; only status persistence is best-effort bounded.
 
 #### Subagents and cancellation
 
@@ -226,6 +267,12 @@ interface SubagentNotification {
 | Requested process belongs to another session/container | Omit it from `process_list`; observe/input/stop report scoped not-found and perform no side effect. |
 | Explicit stop succeeds | Kill/remove the registered process, advance/flush one exit revision, synchronize the task, and allow process-only completion. |
 | Process exits between list and observe/input/stop | Return a refreshable race message naming `process_list`; never claim that an inaccessible process was stopped. |
+| Port opens before its listener record is consumed | Show `identifying`; reconcile by launch ID/PID when either event arrives, independent of ordering. |
+| Port has no valid current-lifecycle launch after reconciliation | Mark `orphaned`; show the global restart warning, not a normal stop button. |
+| Managed stop does not produce an authoritative port close | Mark `orphaned` after the bounded stop window. |
+| Forced restart snapshot flush fails | Keep the current runtime/WebContainer alive; do not dispose or teardown; surface the error. |
+| Forced restart tears down but the next boot fails | Clear the discarded runtime from React/singleton readiness and surface the boot error. |
+| Post-tool snapshot or Run persistence never settles | Watchdog projects recoverable `failed`, stops Run-owned processes, bounds failure persistence, and preserves the last successful checkpoint. |
 | Verification revision differs from current runtime revision | Mark unverified and require new verification. |
 | Foreground command uses a custom script, arbitrary arguments/port, redirects, or compound shell syntax | Do not parse or reject it; record its real exit status on the post-command revision. |
 | Foreground command exits non-zero or times out | Record failed verification and invalidate the previous pass. |
@@ -242,11 +289,17 @@ interface SubagentNotification {
 - Good: A root delegates three read-only explorations, waits for structured notifications, serially applies one scoped implementation, runs foreground verification, rereads the container revision, and completes with revision-bound evidence.
 - Good runtime edge: A root starts an owned background server, completes any required plan, returns one plain final response, and finishes without stopping the process or demanding unrelated workspace verification.
 - Good lifecycle edge: A later root Run calls `process_list`, selects the registered service from the same session/container, stops it with its original ownership, observes the port/process disappear, and returns one final response.
+- Good service edge: A Node server started from the user terminal inherits a terminal launch ID, reports its exact listener PID, appears as managed, and the port-row stop button terminates that PID without killing unrelated ports.
+- Good recovery edge: An old unowned port becomes orphaned; the user confirms the global impact; snapshots flush successfully before teardown and the replacement runtime boots with an empty port registry.
+- Good watchdog edge: A tool result is durable but snapshot flush hangs; the Run becomes visibly recoverable-failed within the checkpoint deadline and no stale checkpoint replaces the previous one.
 - Good development edge: A root runs a custom validator on the project's actual port, performs a foreground inspection, and completes from the latest successful exit evidence without a parser-specific wrapper script.
 - Base: A short text-only Run stays below budget, uses no resources/subagents, writes one Run/event stream/checkpoint, and completes without invoking compaction.
 - Good provider edge: A reasoning delta with `content: null` reaches `assistant_delta`, and the final durable assistant message retains the same accumulated `reasoning_content`.
 - Bad: A component stores an uploaded `File` in a message event, a provider branch is added inside `AgentEngine`, two writers mutate the same container outside the lease, or resume trusts `TaskContract.workspaceRevision` without reading runtime state.
 - Bad lifecycle edge: A follow-up Run guesses an OS PID, kills by port, or receives processes from another session/container instead of resolving a registered Agent process ID.
+- Bad service edge: `DualTerminal` creates its own WebContainer port listeners or directly spawns `jsh`, producing a service list with no launch ownership.
+- Bad recovery edge: A force-restart button tears down first and attempts snapshot persistence afterwards, or hides snapshot failure and reports success.
+- Bad watchdog edge: A Run-wide timer only aborts model requests while `reflectTask()` awaits an unbounded snapshot/IndexedDB promise.
 - Bad provider edge: A strict string-only object schema silently drops an entire valid reasoning delta because an optional sibling field is null.
 
 ### 6. Tests Required
@@ -256,11 +309,11 @@ interface SubagentNotification {
 | Context/profile/token logic | Complete tool grouping; media stripping; micro-compaction safety; PTL three-attempt bound; abort; deterministic circuit; one oversized round ends inside effective window; task/resource/file/subagent rehydration. |
 | Model adapter | Exact outbound content parts; nullable content/reasoning delta normalization; final plain-message reasoning preservation; resource session ownership; usage mapping/estimation; successful vision caching; clear unsupported-vision retry; unrelated 400/422 does not retry. |
 | Resources | Count/size limits including existing IDs; atomic batch failure; same-session SHA dedupe; cross-session rejection; MIME spoof; invalid UTF-8; image 2048/1.5 MiB limits; Blob absent from ledger. |
-| Runtime/revision | Every mutation path advances authoritative revision; verification binds after shell exit; process ownership isolation; same-session/container cross-Run list/observe/input/stop; explicit-stop single revision boundary; materialize; snapshot pre-export exclusions; `pagehide`/dispose/checkpoint flush. |
-| Completion | Explicit and plain responses share plan/revision/verification gates; actionable no-whitelist recovery guidance; arbitrary foreground checks/ports; failed-exit invalidation; rejected drafts are not projected; background server completion keeps the process alive. |
+| Runtime/revision | Every mutation path advances authoritative revision; verification binds after shell exit; process ownership isolation; same-session/container cross-Run list/observe/input/stop; explicit-stop single revision boundary; launch/listener order reconciliation; exact listener PID provenance; managed/orphan/stopping transitions; snapshot-first restart fail-closed; singleton remount; materialize; snapshot pre-export exclusions; `pagehide`/dispose/checkpoint flush. |
+| Completion | Explicit and plain responses share plan/revision/verification gates; actionable no-whitelist recovery guidance; arbitrary foreground checks/ports; failed-exit invalidation; rejected drafts are not projected; background server completion keeps the process alive; hanging post-tool synchronization becomes visibly failed and cancellation remains terminal. |
 | Persistence | One checkpoint/Run; stable 250-event session and Run pagination; deep quarantine; sanitizer; session/container transaction scope; shared-resource survival; snapshot cap keeps previous value; failed active snapshot still permits queued follow-up. |
 | Subagents | Depth/count/concurrency limits; global same-container mutation serialization; role/tool/write-scope rules; repeated task labels; family budgets; child failure/verification propagation; parent cancellation waits and stops owned processes. |
-| UI/E2E | No manual compact control; non-disruptive compact note; resource cards use IDs; child tree/transcript lazy load; resume drift; cancel; multimodal fallback; desktop/mobile visuals. |
+| UI/E2E | No manual compact control; non-disruptive compact note; resource cards use IDs; child tree/transcript lazy load; resume drift; cancel; multimodal fallback; managed-port stop button; orphan warning/confirmation/error; localized creation defaults; desktop/mobile visuals. |
 
 Release-significant changes require `npm run check:all`. An optimization-freeze claim requires two consecutive full passes and actual inspection of new visual baselines.
 
@@ -302,6 +355,24 @@ if (task.verifiedRevision === task.workspaceRevision) finish();
 await runtime.flushWorkspace(containerId);
 const currentRevision = await runtime.getWorkspaceRevision(containerId);
 if (task.verifiedRevision !== currentRevision) requireVerification();
+```
+
+#### Wrong: let checkpoint persistence own the visible terminal state
+
+```ts
+await runtime.flushWorkspace(containerId); // may never settle
+await store.saveRun({ ...run, phase: 'failed' });
+onRunChange(run);
+```
+
+#### Correct: project failure first and bound best-effort persistence
+
+```ts
+run.phase = 'failed';
+run.error = checkpointError.message;
+onRunChange(cloneRun(run));
+runtime.stopRun(exactOwnership);
+await bestEffortWithin(deadline, () => store.saveRun(run));
 ```
 
 #### Wrong: hardcode project command semantics
