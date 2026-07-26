@@ -23,6 +23,7 @@ These guides help you **ask the right questions before coding**.
 |-------|---------|-------------|
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
+| [Sunam Agent Cross-Layer Checklist](./sunam-agent-cross-layer-checklist.md) | Protect revision, resource, cancellation, and v3 durability contracts | Agent/runtime/persistence/resource/subagent changes |
 
 ---
 
@@ -38,6 +39,9 @@ These guides help you **ask the right questions before coding**.
 - [ ] UI / command code starts casting raw payload fields directly
 
 → Read [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md)
+
+For Sunam Agent, resource, WebContainer, subagent, or persistence work, also run the project checklist:
+[Sunam Agent Cross-Layer Checklist](./sunam-agent-cross-layer-checklist.md).
 
 ### When to Think About Code Reuse
 
