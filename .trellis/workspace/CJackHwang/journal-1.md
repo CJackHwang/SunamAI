@@ -59,3 +59,26 @@ Installed Trellis 0.6.9, replaced bootstrap placeholders with source-backed Suna
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: Refine Agent completion and process lifecycle
+
+**Date**: 2026-07-27
+**Task**: Refine Agent completion and process lifecycle
+**Branch**: `main`
+
+### Summary
+
+Improved guarded Agent completion, mobile composer input, prompt-governed verification, and same-session/container cross-Run process discovery and shutdown with revision-safe completion.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f152e48` | (see git log) |
+| `9d21bed` | (see git log) |
+| `868ea64` | (see git log) |
+
+### Status
+
+[OK] **Completed**
