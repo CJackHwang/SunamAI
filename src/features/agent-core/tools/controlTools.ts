@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { defineTool, type RegisteredTool } from './base';
 import type { AgentPlanItem } from '../types';
+import { evaluateCompletionGate } from '../completion';
 
 export const controlTools: RegisteredTool[] = [
   defineTool({
@@ -51,16 +52,9 @@ export const controlTools: RegisteredTool[] = [
     resultType: 'control',
     async execute(input, context) {
       const task = context.getTask();
-      if (task.requiresPlan && !task.plan.length) return { ok: false, content: 'Completion blocked: this non-trivial task needs a recorded execution plan.' };
-      if (task.plan.some((item) => item.status !== 'completed')) return { ok: false, content: 'Completion blocked: the execution plan still has unfinished or blocked steps.' };
-      if (context.agentRole === 'verify') {
-        const currentRevision = await context.runtime.getWorkspaceRevision(context.containerId);
-        if (!task.verified || task.verifiedRevision !== currentRevision) return { ok: false, content: 'Completion blocked: verify agents must pass a recognized foreground verification command on the current workspace revision.' };
-      }
-      if (context.agentRole === 'root' && task.changedWorkspace) {
-        const currentRevision = await context.runtime.getWorkspaceRevision(context.containerId);
-        if (!task.verified || task.workspaceRevision !== currentRevision || task.verifiedRevision !== currentRevision) return { ok: false, content: 'Completion blocked: the current workspace revision has not passed verification.' };
-      }
+      const gate = await evaluateCompletionGate({ task, agentRole: context.agentRole, runtime: context.runtime, containerId: context.containerId });
+      context.updateTask(() => gate.task);
+      if (!gate.ok) return { ok: false, content: gate.message };
       if (!input.evidence.length) return { ok: false, content: 'Completion blocked: provide structured evidence for the acceptance criteria.' };
       context.updateTask((current) => ({ ...current, evidence: [...current.evidence, ...input.evidence] }));
       return { ok: true, content: input.summary, finalSummary: input.summary, stopRun: 'completed' };

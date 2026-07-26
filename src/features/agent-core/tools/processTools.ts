@@ -26,8 +26,8 @@ export const processTools: RegisteredTool[] = [
         evidence: [...task.evidence, `${verification.passed ? 'Verified' : 'Failed verification'}: ${input.command}`],
         verificationEvidence: [...task.verificationEvidence, { ...verification, workspaceRevision, createdAt: Date.now() }],
       }));
-      else context.updateTask((task) => ({ ...task, changedWorkspace: true, workspaceRevision, verified: false, verifiedRevision: -1 }));
-      return { ok: !result.timedOut && (process.exitCode ?? 0) === 0, content, data: process, ...(verification ? { verification } : { changedWorkspace: true }) };
+      else context.updateTask((task) => ({ ...task, changedWorkspace: task.changedWorkspace || input.mode === 'foreground', workspaceRevision, verified: false, verifiedRevision: -1 }));
+      return { ok: !result.timedOut && (process.exitCode ?? 0) === 0, content, data: process, ...(verification ? { verification } : input.mode === 'foreground' ? { changedWorkspace: true } : {}) };
     },
   }),
   defineTool({

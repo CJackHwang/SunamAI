@@ -91,8 +91,24 @@ describe('AgentToolRegistry', () => {
     await registry.execute({ id: 'plan', name: 'update_plan', arguments: JSON.stringify({ items: [{ id: 'plan', title: 'Done', status: 'completed' }] }) }, context);
     const result = await registry.execute({ id: 'complete', name: 'complete_task', arguments: JSON.stringify({ summary: 'done', evidence: ['failed test'] }) }, context);
     expect(result.ok).toBe(false);
-    expect(result.content).toContain('current workspace revision');
+    expect(result.content).toContain('shell_run');
+    expect(result.content).toContain('mode "foreground"');
+    expect(result.content).toContain('exits 0');
+    expect(result.content).toContain('npm run check');
+    expect(result.content).toContain('final workspace change');
+    expect(result.content).toContain('retry complete_task');
     expect(getTask().verificationEvidence[0]?.passed).toBe(false);
+  });
+
+  it('treats authoritative revision drift as an unverified workspace change', async () => {
+    const registry = new AgentToolRegistry();
+    const { context, runtime, getTask } = createContext();
+    context.updateTask((task) => ({ ...task, requiresPlan: false, changedWorkspace: false, workspaceRevision: 0 }));
+    await runtime.materializeResource('s-1', 'c-1', 'res-1', 'external.txt');
+    const result = await registry.execute({ id: 'complete-drift', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context);
+    expect(result.ok).toBe(false);
+    expect(result.content).toContain('recognized verification');
+    expect(getTask()).toMatchObject({ changedWorkspace: true, workspaceRevision: 1, verified: false, verifiedRevision: -1 });
   });
 
   it('invalidates successful verification after a later workspace write and blocks stale completion', async () => {
@@ -140,6 +156,8 @@ describe('AgentToolRegistry', () => {
     const timedOut = await registry.execute({ id: 'timeout', name: 'shell_run', arguments: '{"command":"serve","mode":"background"}' }, context);
     expect(timedOut.content).toContain('Command still running');
     expect(timedOut.verification).toBeUndefined();
+    expect(timedOut.changedWorkspace).toBeUndefined();
+    expect(getTask()).toMatchObject({ changedWorkspace: false, verified: false, verifiedRevision: -1 });
     expect((await registry.execute({ id: 'observe', name: 'process_observe', arguments: '{"process_id":"p-live"}' }, context)).content).toContain('(no new output)');
     expect((await registry.execute({ id: 'input', name: 'process_input', arguments: '{"process_id":"p-live","input":"y"}' }, context)).content).toContain('not running');
     expect((await registry.execute({ id: 'stop', name: 'process_stop', arguments: '{"process_id":"p-live"}' }, context)).content).toContain('not running');
@@ -174,7 +192,9 @@ describe('AgentToolRegistry', () => {
     expect((await registry.execute({ id: 'background', name: 'shell_run', arguments: '{"command":"npm test","mode":"background"}' }, context)).content).toContain('foreground');
     expect((await registry.execute({ id: 'mutating-verify', name: 'shell_run', arguments: '{"command":"echo changed > file.txt","mode":"foreground"}' }, context)).content).toContain('verification commands only');
     context.updateTask((task) => ({ ...task, plan: [{ id: 'verify', title: 'Verify', status: 'completed' }] }));
-    expect((await registry.execute({ id: 'unverified-complete', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context)).content).toContain('must pass');
+    const unverified = await registry.execute({ id: 'unverified-complete', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context);
+    expect(unverified.content).toContain('shell_run');
+    expect(unverified.content).toContain('foreground');
     await registry.execute({ id: 'verify-pass', name: 'shell_run', arguments: '{"command":"npm test","mode":"foreground"}' }, context);
     expect((await registry.execute({ id: 'verified-complete', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context)).stopRun).toBe('completed');
     expect(runtime.runShell).not.toHaveBeenCalledWith(expect.objectContaining({ mode: 'background' }));

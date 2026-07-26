@@ -103,6 +103,19 @@ class FailingVerificationRuntime extends FakeRuntime {
   }
 }
 
+class BackgroundServerRuntime extends FakeRuntime {
+  readonly process: ProcessStatus = { id: 'server-1', sessionId: 'server-session', runId: 'server-run', containerId: 'server-container', command: 'npm run dev', isRunning: true, output: 'ready', cursor: 5 };
+  stopRunCalls = 0;
+
+  override async runShell(request: ShellRunRequest): Promise<ShellRunResult> {
+    this.commands.push(request.command);
+    return { timedOut: false, process: { ...this.process, sessionId: request.sessionId, runId: request.runId, containerId: request.containerId, command: request.command } };
+  }
+
+  override stopRun(): void { this.stopRunCalls += 1; }
+  override getProcesses(): ProcessStatus[] { return [this.process]; }
+}
+
 describe('Agent Core v2', () => {
   it('preserves reasoning on a final plain assistant message', async () => {
     const events: AgentEvent[] = [];
@@ -114,6 +127,81 @@ describe('Agent Core v2', () => {
     await engine.execute();
     const assistant = events.find((event) => event.kind === 'message' && event.message.role === 'assistant');
     expect(assistant).toMatchObject({ kind: 'message', message: { content: 'Hello.', reasoning_content: 'Checked the request first.' } });
+  });
+
+  it('finishes a server-start task from one plain response and keeps the background process alive', async () => {
+    const runtime = new BackgroundServerRuntime();
+    const events: AgentEvent[] = [];
+    const client = new ScriptedClient([
+      tool('server', 'shell_run', { command: 'npm run dev', mode: 'background' }),
+      { message: { role: 'assistant', content: 'Server is running at http://localhost:3000.' }, toolCalls: [] },
+    ]);
+    const engine = new AgentEngine({ sessionId: 'server-session', containerId: 'server-container', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Start the server', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+
+    await engine.execute();
+
+    expect(engine.getRun()).toMatchObject({ phase: 'completed', modelTurns: 2, task: { changedWorkspace: false, verified: false } });
+    expect(runtime.stopRunCalls).toBe(0);
+    expect(runtime.getProcesses()[0]).toMatchObject({ isRunning: true });
+    expect(events.filter((event) => event.kind === 'message' && event.message.role === 'assistant' && event.message.content.includes('Server is running'))).toHaveLength(1);
+  });
+
+  it('allows a verified non-trivial task to finish from a final plain response', async () => {
+    const events: AgentEvent[] = [];
+    const client = new ScriptedClient([
+      tool('plan', 'update_plan', { items: [{ id: 'deliver', title: 'Implement and verify', status: 'in_progress' }] }),
+      tool('patch', 'apply_patch', { changes: [{ path: 'demo.txt', content: 'done' }] }),
+      tool('verify', 'shell_run', { command: 'npm test', mode: 'foreground' }),
+      tool('plan-done', 'update_plan', { items: [{ id: 'deliver', title: 'Implement and verify', status: 'completed' }] }),
+      { message: { role: 'assistant', content: 'Implemented and verified.' }, toolCalls: [] },
+    ]);
+    const engine = new AgentEngine({ sessionId: 's-implicit', containerId: 'c-implicit', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Implement and test the requested workspace change.', initialMessages: [], client, runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+
+    await engine.execute();
+
+    expect(engine.getRun()).toMatchObject({ phase: 'completed', modelTurns: 5, task: { changedWorkspace: true, verified: true, verifiedRevision: 0 } });
+    expect(events.some((event) => event.kind === 'tool_requested' && event.toolCall.function.name === 'complete_task')).toBe(false);
+    expect(events.at(-1)).toMatchObject({ kind: 'run_finished', summary: 'Implemented and verified.' });
+  });
+
+  it('withholds a plain completion while the execution plan is unfinished', async () => {
+    const events: AgentEvent[] = [];
+    const client = new ScriptedClient([
+      tool('plan', 'update_plan', { items: [{ id: 'deliver', title: 'Finish the requested work', status: 'in_progress' }] }),
+      { message: { role: 'assistant', content: 'Finished before the plan.' }, toolCalls: [] },
+      tool('plan-done', 'update_plan', { items: [{ id: 'deliver', title: 'Finish the requested work', status: 'completed' }] }),
+      { message: { role: 'assistant', content: 'Finished after the plan.' }, toolCalls: [] },
+    ]);
+    const engine = new AgentEngine({ sessionId: 's-plan-gate', containerId: 'c-plan-gate', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Complete this non-trivial request.', initialMessages: [], client, runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+
+    await engine.execute();
+
+    const assistantText = events.filter((event): event is Extract<AgentEvent, { kind: 'message' }> => event.kind === 'message' && event.message.role === 'assistant').map((event) => event.message.content);
+    expect(assistantText).not.toContain('Finished before the plan.');
+    expect(assistantText).toContain('Finished after the plan.');
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'phase_changed', phase: 'planning' }));
+    expect(engine.getRun().phase).toBe('completed');
+  });
+
+  it('withholds a premature plain completion until current-revision verification passes', async () => {
+    const events: AgentEvent[] = [];
+    const client = new ScriptedClient([
+      tool('plan', 'update_plan', { items: [{ id: 'deliver', title: 'Implement and verify', status: 'completed' }] }),
+      tool('patch', 'apply_patch', { changes: [{ path: 'demo.txt', content: 'done' }] }),
+      { message: { role: 'assistant', content: 'Finished too early.' }, toolCalls: [] },
+      tool('verify', 'shell_run', { command: 'npm test', mode: 'foreground' }),
+      { message: { role: 'assistant', content: 'Finished after verification.' }, toolCalls: [] },
+    ]);
+    const engine = new AgentEngine({ sessionId: 's-withheld', containerId: 'c-withheld', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Implement and test the requested workspace change.', initialMessages: [], client, runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+
+    await engine.execute();
+
+    const assistantText = events.filter((event): event is Extract<AgentEvent, { kind: 'message' }> => event.kind === 'message' && event.message.role === 'assistant').map((event) => event.message.content);
+    expect(assistantText).not.toContain('Finished too early.');
+    expect(assistantText).toContain('Finished after verification.');
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'assistant_delta', transient: true, content: '', reasoningContent: '' }));
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'phase_changed', phase: 'verifying' }));
+    expect(engine.getRun().phase).toBe('completed');
   });
 
   it('persists reasoning that a provider returns only through streaming deltas', async () => {

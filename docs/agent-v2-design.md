@@ -37,7 +37,7 @@ preparing → planning → acting → observing / verifying
 计划、证据、当前 revision 验证通过 → completed
 ```
 
-每个 Run 固定 session、container、模型、人格、预算、任务契约和取消域。非简单任务必须记录计划；模型普通文本不能替代 `complete_task`；写入后的完成门会重新读取真实 container revision，要求它与最近通过验证的 revision 完全一致。失败验证会撤销旧 pass。
+每个 Run 固定 session、container、模型、人格、预算、任务契约和取消域。非简单任务必须记录计划；`complete_task` 是带结构化证据的首选结束路径，但模型的非空普通文本也会作为完成尝试。两条路径共享计划、真实 container revision 和验证门；不满足时普通文本不会先作为最终消息展示。失败验证会撤销旧 pass。
 
 恢复永远创建新 runId、AbortController 和事件侧链，并记录 `parentRunId`。旧请求、进程、PID 和控制器不会复活。刷新时活动父 Run、子 Run 和 delegated task 都变为 `interrupted`。
 
@@ -48,10 +48,10 @@ preparing → planning → acting → observing / verifying
 3. 计算完整请求预算：系统提示、工具 schema、媒体估算和 transcript；必要时自动 compact。
 4. 调用模型；网络、429 与 5xx 仅做有限退避。主请求 PTL 最多尝试三次，每次删除最旧 20% 的完整消息组；连续失败后写入确定性摘要并打开熔断。
 5. assistant tool call 与匹配 tool result 作为完整组进入 transcript。终止控制调用只能位于批次末尾，否则整批拒绝。
-6. 最多四路执行并发安全只读工具；`apply_patch`、`materialize_resource` 和 `shell_run` 使用容器级 mutation lease。shell 进程结束还会形成显式 revision 边界，避免文件 watch 延迟时认证旧版本。
+6. 最多四路执行并发安全只读工具；`apply_patch`、`materialize_resource` 和 `shell_run` 使用容器级 mutation lease。前台非验证 shell 保守视为 workspace mutation；后台 shell 只记录进程进度并撤销旧 pass。shell 进程结束仍形成显式 revision 边界，实际文件 watch/revision 漂移会在完成前转为 changed/unverified，避免认证旧版本。
 7. 工具批次后 flush 工作区、更新任务、保存单一 checkpoint 和事件尾序号。
 8. 同一工具与参数连续第三次出现时只给一次 recovery guidance；第四次仍重复则立即失败，不把预算耗尽在无效兜底循环中。
-9. 计划、证据和当前 workspace revision 均满足后才能完成。
+9. 计划和当前 workspace revision 验证满足后才能完成；缺少验证时恢复提示必须明确要求 `shell_run` foreground、可识别且不修改文件的项目检查、退出码 0、最后写入后执行以及完成重试动作。
 
 ## 4. 自动上下文压缩
 
@@ -119,6 +119,7 @@ RunBoard 以树形摘要展示子任务；展开子任务时按 run 索引读取
 - 所有文件路径通过容器根目录解析并拒绝逃逸。
 - 进程所有权是 `(sessionId, runId, containerId)`；不匹配的观察、输入和停止失败。
 - verify shell 同时要求 foreground 和 `isVerificationCommand(command)`；普通前台 shell 不因角色名而获得权限。
+- 后台 `shell_run` 用于服务等持续进程，不单独制造 workspace mutation；如果它实际写文件或退出，权威 revision 漂移仍会使完成门要求重新验证。
 - Agent 只能读取有界用户终端缓冲，不能向用户交互 shell 写入；所有命令都必须通过 Agent-owned `shell_run` 执行并受进程所有权与 mutation lease 约束。
 - write scope 同时约束 `apply_patch` 与 `materialize_resource`。
 - `AgentToolResult.modelContent` 和 `resourceReferences` 可影响下一次模型内容，但不会把 Blob 放入 ledger。

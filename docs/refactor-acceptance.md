@@ -86,6 +86,9 @@
 - [x] child 写入使父旧验证失效；child failed verification 也撤销旧 pass。
 - [x] root complete 时重新读取当前 runtime revision。
 - [x] shell 进程结束显式推进 runtime revision；验证记录不能绑定命令执行前的 revision。
+- [x] `complete_task` 与无工具最终文本共享 plan/revision/verification 门；不合格的文本不会先投影成用户可见完成消息。
+- [x] 验证阻断明确给出 `shell_run` foreground、可识别检查、exit 0、最后写入顺序和重试动作。
+- [x] 后台服务器启动只记录进程进度，不凭空标记 workspace mutation；真实 revision 漂移仍撤销旧验证。
 - [x] Agent 对用户终端只有有界只读缓冲；所有命令使用 Agent-owned `shell_run`，不存在绕过 lease 的终端注入工具。
 - [x] 父取消等待所有 child terminal、task 持久化和 owned process 停止。
 

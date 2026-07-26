@@ -50,7 +50,7 @@ async function openResourceSubagentWorkspace(page: import('@playwright/test').Pa
   await expect(composer).toBeEnabled({ timeout: 100_000 });
   await page.locator('.chat-composer-shell input[type="file"]').setInputFiles({ name: 'requirements.txt', mimeType: 'text/plain', buffer: Buffer.from('visual resource fixture') });
   await composer.fill('Please delegate an explorer to review the attached resource and report structured evidence for this visual baseline.');
-  await composer.press('Enter');
+  await page.locator('.chat-submit').click();
   await expect(page.locator('.task-list-phase')).toHaveText('completed', { timeout: 60_000 });
   await page.locator('.task-list-summary').click();
   await expect(page.locator('.task-list-subagent')).toHaveCount(1);
@@ -95,5 +95,6 @@ test('workspace resource card and subtask tree keep the desktop visual baseline'
 test('workspace resource card and subtask tree keep the mobile visual baseline', async ({ page }) => {
   test.setTimeout(120_000);
   await openResourceSubagentWorkspace(page, { width: 390, height: 844 });
+  await expect(page.locator('.chat-input')).toHaveCSS('scrollbar-width', 'none');
   await expect(page).toHaveScreenshot('workspace-resources-subagents-mobile.png', { maxDiffPixelRatio: 0.002 });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode, type SyntheticEvent } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { ArrowDown, FileText, Plus, Send, Square, X } from 'lucide-react';
 import type { ChatAttachment } from '@/entities/message/types';
 import { useI18n } from '@/shared/i18n';
@@ -20,14 +20,22 @@ interface ChatComposerProps {
   onHeightChange?: (height: number) => void;
 }
 
+const MOBILE_WORKSPACE_BREAKPOINT = 900;
+
 export function ChatComposer({ input, isRunning, isTerminalReady, isAtBottom, taskList, attachments = [], attachmentError, onFilesSelected, onRemoveAttachment, onInputChange, onSubmit, onStop, onScrollToBottom, onHeightChange }: ChatComposerProps) {
   const { t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
+  const [isMobileViewport, setIsMobileViewport] = useState(() => typeof window !== 'undefined' && window.innerWidth <= MOBILE_WORKSPACE_BREAKPOINT);
   const hasTaskList = Boolean(taskList);
   const hasAttachments = attachments.length > 0;
   const hasAttachmentError = Boolean(attachmentError);
   const resetHeight = (element: HTMLTextAreaElement | null) => { if (element) element.style.height = '44px'; };
+  useEffect(() => {
+    const updateViewport = () => setIsMobileViewport(window.innerWidth <= MOBILE_WORKSPACE_BREAKPOINT);
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
+  }, []);
   useEffect(() => {
     const shell = shellRef.current;
     if (!shell || !onHeightChange) return;
@@ -66,7 +74,7 @@ export function ChatComposer({ input, isRunning, isTerminalReady, isAtBottom, ta
         <button type="button" className="chat-attach-btn glass-input" onClick={() => fileInputRef.current?.click()} disabled={isRunning || !isTerminalReady} title={t('chat.attachFiles')} aria-label={t('chat.attachFiles')}><Plus size={20} /></button>
       </div>
       <div className="chat-input-row">
-        <textarea className="input-field glass-input chat-input" rows={1} value={input} onChange={(event) => onInputChange(event.target.value, event.target)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSubmit(event); setTimeout(onScrollToBottom, 50); resetHeight(event.currentTarget); } }} disabled={isRunning || !isTerminalReady} placeholder={isTerminalReady ? t('chat.askAnything') : t('chat.booting')} />
+        <textarea className="input-field glass-input chat-input" rows={1} value={input} onChange={(event) => onInputChange(event.target.value, event.target)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !isMobileViewport) { event.preventDefault(); onSubmit(event); setTimeout(onScrollToBottom, 50); resetHeight(event.currentTarget); } }} disabled={isRunning || !isTerminalReady} placeholder={isTerminalReady ? t('chat.askAnything') : t('chat.booting')} />
         <button type="button" onClick={(event) => { if (isRunning) onStop(); else { onSubmit(event); setTimeout(onScrollToBottom, 50); resetHeight(event.currentTarget.previousElementSibling as HTMLTextAreaElement); } }} disabled={!isRunning && (!isTerminalReady || (!input.trim() && attachments.length === 0))} className="btn btn-primary glass-btn chat-submit">{isRunning ? <Square size={16} fill="currentColor" /> : <Send size={20} className="chat-send-icon" />}</button>
       </div>
     </div>

@@ -14,6 +14,7 @@ import { createId } from '@/shared/lib/ids';
 import { isAbortError, isPromptTooLongModelError, retryModelRequest } from './modelRetry';
 import { scheduleToolBatch } from './toolBatchScheduler';
 import { initialTask, isNonTrivial, rebuildTaskForResume } from './task';
+import { evaluateCompletionGate } from './completion';
 import { ResourceProcessorRegistry } from './resourceProcessor';
 import { AgentFamilyBudget, ContainerMutationLease } from './agentFamily';
 import { canonicalizeMessage } from '@/shared/contracts/message';
@@ -461,16 +462,19 @@ export class AgentEngine {
           continue;
         }
         if (response.message.content.trim()) {
+          const gate = await evaluateCompletionGate({ task: this.task, agentRole: this.run.agentRole ?? 'root', runtime: this.options.runtime, containerId: this.options.containerId });
+          this.updateTask(() => gate.task);
+          if (!gate.ok) {
+            await this.emitter.emit('assistant_delta', { content: '', reasoningContent: '', transient: true });
+            this.transcript.push({ role: 'system', content: `Recovery required: ${gate.message}` });
+            await this.phase(gate.phase, 'Model attempted completion before satisfying the task gates.');
+            continue;
+          }
           await this.emitMessage({
             role: 'assistant',
             content: response.message.content,
             ...(response.message.reasoning_content ? { reasoning_content: response.message.reasoning_content } : {}),
           });
-          if (this.task.requiresPlan || (this.task.changedWorkspace && !this.task.verified)) {
-            this.transcript.push({ role: 'system', content: 'Recovery required: do not end this non-trivial run in plain text. Maintain the plan, verify any changes, and use complete_task with factual evidence.' });
-            await this.phase('planning', 'Model attempted an unstructured completion.');
-            continue;
-          }
           await this.finish(response.message.content);
           return;
         }

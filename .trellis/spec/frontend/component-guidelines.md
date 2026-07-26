@@ -61,6 +61,12 @@ When `usePresence(value, exitDuration)` retains a component for CSS exit motion,
 - Async failures must become visible state such as `role="alert"`; do not silently replace a failed user action with an unverified fallback.
 - Loading regions use an appropriate status indication and must not leave controls active when the operation is unsafe.
 
+## Chat composer keyboard contract
+
+`ChatComposer` follows the workspace's existing `900px` responsive boundary. At widths of `900px` or less, plain Enter keeps the textarea's native newline behavior and the visible send button is the submission control. Above `900px`, plain Enter submits and Shift+Enter inserts a newline. Enter during IME composition never submits on either side of the breakpoint.
+
+The mounted component must react when `window.innerWidth` crosses the breakpoint; do not read the viewport only once at module load or require a page refresh. The textarea keeps `overflow-y: auto` for long input while hiding scrollbar chrome with both `scrollbar-width: none` and a WebKit scrollbar rule. Component tests must cover desktop, mobile, IME, send-button, and resize behavior; browser coverage must assert the hidden-scrollbar style at mobile width.
+
 ## Intrinsic disclosure motion
 
 Keep native `<details>/<summary>` semantics for expandable tool or diagnostic rows. When the collapsed and expanded intrinsic dimensions differ enough to cause a visible jump, the owning disclosure component may measure both `getBoundingClientRect()` states and animate explicit `width`/`height` values with the Web Animations API.

@@ -50,16 +50,13 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
     if (modelTurn === 2) {
       await route.fulfill({
         contentType: 'text/event-stream',
-        body: streamResponse({ tool_calls: [
-          { index: 0, id: 'foreground', type: 'function', function: { name: 'shell_run', arguments: JSON.stringify({ command: 'node --test', mode: 'foreground' }) } },
-          { index: 1, id: 'plan-complete', type: 'function', function: { name: 'update_plan', arguments: JSON.stringify({ items: [{ id: 'runtime', title: 'Runtime smoke', status: 'completed' }] }) } },
-        ] }),
+        body: streamTools([{ id: 'plan-complete', name: 'update_plan', arguments: { items: [{ id: 'runtime', title: 'Runtime smoke', status: 'completed' }] } }]),
       });
       return;
     }
     await route.fulfill({
       contentType: 'text/event-stream',
-      body: streamResponse({ tool_calls: [{ index: 0, id: 'complete', type: 'function', function: { name: 'complete_task', arguments: JSON.stringify({ summary: 'Runtime smoke complete', evidence: ['foreground exited', 'background processes started'] }) } }] }),
+      body: streamResponse({ content: 'Runtime smoke complete' }),
     });
   });
 

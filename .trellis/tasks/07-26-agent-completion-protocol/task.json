@@ -1,0 +1,28 @@
+{
+  "id": "agent-completion-protocol",
+  "name": "agent-completion-protocol",
+  "title": "Refine agent completion and verification protocol",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "CJackHwang",
+  "assignee": "CJackHwang",
+  "createdAt": "2026-07-26",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-26-mobile-chat-composer-input"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

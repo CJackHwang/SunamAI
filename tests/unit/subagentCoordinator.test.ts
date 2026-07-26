@@ -55,7 +55,7 @@ class DeferredClient implements AgentModelClient {
     });
   }
 
-  finish(): void { this.resolve?.(plainResponse); }
+  finish(response: AgentModelResponse = plainResponse): void { this.resolve?.(response); }
 }
 
 class FailingClient implements AgentModelClient {
@@ -137,7 +137,11 @@ describe('AgentFamilyCoordinator', () => {
     expect(secondStarted).toBe(false);
     first.finish();
     await second.started;
-    second.finish();
+    const verifyCalls = [
+      { id: 'verify-command', name: 'shell_run', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground' }) },
+      { id: 'verify-complete', name: 'complete_task', arguments: JSON.stringify({ summary: 'Verification passed.', evidence: ['npm test passed'] }) },
+    ];
+    second.finish({ message: { role: 'assistant', content: '', tool_calls: verifyCalls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })) }, toolCalls: verifyCalls });
     await family.wait([implement.runId, verify.runId]);
     expect(maximum).toBe(1);
   });
