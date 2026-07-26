@@ -17,6 +17,7 @@ import { useWorkspaceRuntime } from '@/features/runtime/WorkspaceRuntimeContext'
 import { readChatAttachments } from '@/features/chat/lib/chatAttachments';
 import { useI18n } from '@/shared/i18n';
 import { toErrorMessage } from '@/shared/lib/errors';
+import { isDefaultSessionTitle } from '@/entities/workspace/defaults';
 import './Workspace.css';
 
 const DualTerminal = lazy(() => import('@/widgets/workspace/DualTerminal'));
@@ -35,7 +36,7 @@ interface WorkspaceProps {
 
 function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, updateSessionStatus }: WorkspaceProps) {
   const { t } = useI18n();
-  const { runtime, webcontainer, isReady: isRuntimeReady, error: runtimeError, getContainerRoot } = useWorkspaceRuntime();
+  const { runtime, webcontainer, isReady: isRuntimeReady, error: runtimeError, isRestarting, forceRestart, getContainerRoot } = useWorkspaceRuntime();
   const { events, runs, messages, activeRun, latestRun, streamingContent, streamingReasoning, persistenceError: agentPersistenceError, hasOlderEvents, hasNewerEvents, loadOlderEvents, loadRunEvents, showNewerEvents, startTask, resumeTask, stopTask } = useAgentV2(apiKey, baseUrl, apiModel, sunamModel, runtime, activeSessionId, activeContainerId, updateSessionStatus);
   const sessions = useWorkspaceSelector((state) => state.sessions);
   const containers = useWorkspaceSelector((state) => state.containers);
@@ -94,7 +95,7 @@ function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel
       isNewSession = true;
     } else {
       const session = sessions.find((item) => item.id === sessionId);
-      isNewSession = session?.title === '新建对话' || session?.title === '新对话';
+      isNewSession = Boolean(session && isDefaultSessionTitle(session.title));
     }
     const prompt = input.trim() || t('chat.analyzeAttachments');
     if (isNewSession) {
@@ -121,7 +122,7 @@ function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel
       </div>
       <div className="terminal-section">
         <Suspense fallback={<div className="motion-fade-in workspace-lazy-state" />}>
-          <DualTerminal runtime={runtime} webcontainer={webcontainer} onReady={() => setIsTerminalReady(true)} activeTab={terminalTab} onTabChange={selectTerminalTab} layoutState={layoutState} onLayoutChange={setLayoutState} activeContainerId={activeContainerId} activeContainerName={activeContainer?.name ?? null} activeSessionId={activeSessionId} rootDir={activeContainerId ? getContainerRoot(activeContainerId) : '/'} />
+          <DualTerminal runtime={runtime} webcontainer={webcontainer} onReady={() => setIsTerminalReady(true)} activeTab={terminalTab} onTabChange={selectTerminalTab} layoutState={layoutState} onLayoutChange={setLayoutState} activeContainerId={activeContainerId} activeContainerName={activeContainer?.name ?? null} activeSessionId={activeSessionId} rootDir={activeContainerId ? getContainerRoot(activeContainerId) : '/'} isRestarting={isRestarting} onForceRestart={forceRestart} />
         </Suspense>
       </div>
       {(runtimeError || agentPersistenceError) && <div role="alert" className="workspace-runtime-error motion-notice-in">{runtimeError || agentPersistenceError}</div>}

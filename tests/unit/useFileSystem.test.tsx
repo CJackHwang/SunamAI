@@ -64,4 +64,25 @@ describe('useFileSystem', () => {
     await act(async () => { await result.current.navigateTo('/outside'); });
     expect(result.current.error).toContain('Cannot navigate outside the container root');
   });
+
+  it('ignores a stale directory read after switching container roots', async () => {
+    let resolveOld!: (entries: Array<{ name: string; isDirectory: () => boolean }>) => void;
+    const fixture = {
+      fs: {
+        readdir: vi.fn((path: string) => path === '/old'
+          ? new Promise<Array<{ name: string; isDirectory: () => boolean }>>((resolve) => { resolveOld = resolve; })
+          : Promise.resolve([{ name: 'current.txt', isDirectory: () => false }])),
+        watch: () => ({ close: () => undefined }),
+      },
+    } as unknown as WebContainer;
+    const { result, rerender } = renderHook(({ root }) => useFileSystem(fixture, root), { initialProps: { root: '/old' } });
+
+    rerender({ root: '/new' });
+    await waitFor(() => expect(result.current.currentPath).toBe('/new'));
+    await waitFor(() => expect(result.current.entries.map((entry) => entry.name)).toEqual(['current.txt']));
+    await act(async () => { resolveOld([{ name: 'stale.txt', isDirectory: () => false }]); await Promise.resolve(); });
+
+    expect(result.current.currentPath).toBe('/new');
+    expect(result.current.entries.map((entry) => entry.name)).toEqual(['current.txt']);
+  });
 });

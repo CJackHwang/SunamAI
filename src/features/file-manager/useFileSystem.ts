@@ -16,7 +16,7 @@ function isWithinRoot(path: string, rootDir: string): boolean {
 function getParentPath(path: string, rootDir: string): string | null {
   if (path === rootDir || path === '/') return null;
   const parent = path.substring(0, path.lastIndexOf('/')) || '/';
-  return rootDir !== '/' && !parent.startsWith(rootDir) ? rootDir : parent;
+  return isWithinRoot(parent, rootDir) ? parent : rootDir;
 }
 
 async function movePath(wc: WebContainer, source: string, destination: string): Promise<void> {
@@ -30,11 +30,16 @@ export function useFileSystem(wc: WebContainer | null, rootDir = '/') {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const currentPathRef = useRef(currentPath);
+  const rootDirRef = useRef(rootDir);
+  const navigationGenerationRef = useRef(0);
   const sizeCacheRef = useRef(new Map<string, number>());
   currentPathRef.current = currentPath;
+  rootDirRef.current = rootDir;
 
   const navigateTo = useCallback(async (directory: string) => {
     if (!wc) return;
+    const requestRoot = rootDir;
+    const generation = ++navigationGenerationRef.current;
     if (!isWithinRoot(directory, rootDir)) {
       setError('Cannot navigate outside the container root');
       return;
@@ -50,23 +55,32 @@ export function useFileSystem(wc: WebContainer | null, rootDir = '/') {
         return { name: entry.name, isDirectory: false, size: cachedSize ?? null };
       });
       listed.sort((left, right) => left.isDirectory !== right.isDirectory ? (left.isDirectory ? -1 : 1) : left.name.localeCompare(right.name));
+      if (generation !== navigationGenerationRef.current || rootDirRef.current !== requestRoot) return;
       setEntries(listed);
       setCurrentPath(directory);
     } catch (caught) {
+      if (generation !== navigationGenerationRef.current || rootDirRef.current !== requestRoot) return;
       const message = caught instanceof Error ? caught.message : String(caught);
       if (message.includes('ENOENT') && directory !== rootDir) {
-        const parent = directory.substring(0, directory.lastIndexOf('/')) || rootDir;
+        const candidate = directory.substring(0, directory.lastIndexOf('/')) || rootDir;
+        const parent = isWithinRoot(candidate, rootDir) ? candidate : rootDir;
         queueMicrotask(() => { void navigateTo(parent); });
       } else {
         setEntries([]);
         setError(`Failed to read directory: ${message}`);
       }
     } finally {
-      setIsLoading(false);
+      if (generation === navigationGenerationRef.current && rootDirRef.current === requestRoot) setIsLoading(false);
     }
   }, [rootDir, wc]);
 
-  useEffect(() => { if (wc) { setCurrentPath(rootDir); void navigateTo(rootDir); } }, [navigateTo, rootDir, wc]);
+  useEffect(() => {
+    navigationGenerationRef.current += 1;
+    setCurrentPath(rootDir);
+    setEntries([]);
+    setError(null);
+    if (wc) void navigateTo(rootDir);
+  }, [navigateTo, rootDir, wc]);
   const refresh = useCallback(() => { void navigateTo(currentPathRef.current); }, [navigateTo]);
 
   useEffect(() => {

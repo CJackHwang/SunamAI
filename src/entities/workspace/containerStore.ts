@@ -1,13 +1,14 @@
 import { createId } from '@/shared/lib/ids';
 import type { Container, WorkspacePersistenceRepository, WorkspaceState } from '@/entities/workspace/types';
 import { prepareWorkspaceDeletion } from './deletionCoordinator';
+import { DEFAULT_WORKSPACE_CREATION_DEFAULTS, type WorkspaceCreationDefaults } from './defaults';
 
 function normalizeContainerName(name: string) {
   return name.trim().normalize('NFKC').toLocaleLowerCase();
 }
 
-function nextUniqueContainerName(containers: Container[], requestedName = '新容器', excludedId?: string) {
-  const baseName = requestedName.trim() || '新容器';
+function nextUniqueContainerName(containers: Container[], requestedName = DEFAULT_WORKSPACE_CREATION_DEFAULTS.containerName, excludedId?: string) {
+  const baseName = requestedName.trim() || DEFAULT_WORKSPACE_CREATION_DEFAULTS.containerName;
   const occupied = new Set(containers
     .filter((container) => container.id !== excludedId)
     .map((container) => normalizeContainerName(container.name)));
@@ -24,13 +25,14 @@ export function createContainerActions(
   getState: () => WorkspaceState,
   now: () => number,
   repository: WorkspacePersistenceRepository,
-  enqueuePersistence: (operation: () => Promise<void>) => Promise<void>
+  enqueuePersistence: (operation: () => Promise<void>) => Promise<void>,
+  getCreationDefaults: () => WorkspaceCreationDefaults,
 ) {
   return {
     createContainer: () => {
       const state = getState();
       const timestamp = now();
-      const container: Container = { id: createId('c'), name: nextUniqueContainerName(state.containers), updatedAt: timestamp };
+      const container: Container = { id: createId('c'), name: nextUniqueContainerName(state.containers, getCreationDefaults().containerName), updatedAt: timestamp };
       setState((previous) => ({ ...previous, containers: [container, ...previous.containers], activeContainerId: container.id }));
       return container.id;
     },

@@ -3,6 +3,7 @@ import type { SessionStatus, WorkspacePersistenceRepository, WorkspaceState } fr
 import { toErrorMessage } from '@/shared/lib/errors';
 import { createSessionActions } from './sessionStore';
 import { createContainerActions } from './containerStore';
+import { DEFAULT_WORKSPACE_CREATION_DEFAULTS, type WorkspaceCreationDefaults } from './defaults';
 
 export type { Container, Session, WorkspaceState } from '@/entities/workspace/types';
 
@@ -17,6 +18,7 @@ export interface WorkspaceStore {
   hydrate: () => Promise<void>;
   reload: () => Promise<void>;
   reset: () => Promise<void>;
+  configureCreationDefaults: (defaults: WorkspaceCreationDefaults) => void;
   createSession: () => string;
   renameSession: (id: string, title: string) => void;
   deleteSession: (id: string) => Promise<void>;
@@ -48,10 +50,12 @@ export function createWorkspaceStore(
   initialState: WorkspaceState = createInitialWorkspaceState(),
   now: () => number = Date.now,
   repository: WorkspacePersistenceRepository = lazyWorkspacePersistence,
+  initialCreationDefaults: WorkspaceCreationDefaults = DEFAULT_WORKSPACE_CREATION_DEFAULTS,
 ): WorkspaceStore {
   let state: WorkspaceSnapshot = { ...initialState, hydrated: false, persistenceError: null };
   let hydration: Promise<void> | null = null;
   let writeChain = Promise.resolve();
+  let creationDefaults = { ...initialCreationDefaults };
   const listeners = new Set<() => void>();
   
   const subscribe = (listener: () => void) => {
@@ -93,8 +97,9 @@ export function createWorkspaceStore(
   const getState = () => state;
   const isHydratedAndSafe = () => state.hydrated && !state.persistenceError;
   
-  const sessionActions = createSessionActions(setState, getState, isHydratedAndSafe, now, repository, enqueuePersistence);
-  const containerActions = createContainerActions(setState, getState, now, repository, enqueuePersistence);
+  const getCreationDefaults = () => creationDefaults;
+  const sessionActions = createSessionActions(setState, getState, isHydratedAndSafe, now, repository, enqueuePersistence, getCreationDefaults);
+  const containerActions = createContainerActions(setState, getState, now, repository, enqueuePersistence, getCreationDefaults);
 
   return {
     subscribe,
@@ -103,7 +108,7 @@ export function createWorkspaceStore(
       if (hydration) return hydration;
       hydration = (async () => {
         const loaded = await repository.loadWorkspace();
-        const next = ensureWorkspaceRecordIsSafe(loaded) ?? createInitialWorkspaceState(now());
+        const next = ensureWorkspaceRecordIsSafe(loaded) ?? createInitialWorkspaceState(now(), creationDefaults);
         state = { ...next, hydrated: true, persistenceError: null };
         if (!loaded.value) persist();
         listeners.forEach((listener) => listener());
@@ -121,7 +126,7 @@ export function createWorkspaceStore(
       listeners.forEach((listener) => listener());
       try {
         const loaded = await repository.loadWorkspace();
-        state = { ...(ensureWorkspaceRecordIsSafe(loaded) ?? createInitialWorkspaceState(now())), hydrated: true, persistenceError: null };
+        state = { ...(ensureWorkspaceRecordIsSafe(loaded) ?? createInitialWorkspaceState(now(), creationDefaults)), hydrated: true, persistenceError: null };
         listeners.forEach((listener) => listener());
       } catch (error) {
         state = { ...state, hydrated: false, persistenceError: toErrorMessage(error) };
@@ -129,10 +134,16 @@ export function createWorkspaceStore(
       }
     },
     reset: async () => {
-      const next = createInitialWorkspaceState(now());
+      const next = createInitialWorkspaceState(now(), creationDefaults);
       state = { ...next, hydrated: true, persistenceError: null };
       await enqueuePersistence(() => repository.saveWorkspace(next));
       listeners.forEach((listener) => listener());
+    },
+    configureCreationDefaults: (defaults) => {
+      creationDefaults = {
+        sessionTitle: defaults.sessionTitle.trim() || DEFAULT_WORKSPACE_CREATION_DEFAULTS.sessionTitle,
+        containerName: defaults.containerName.trim() || DEFAULT_WORKSPACE_CREATION_DEFAULTS.containerName,
+      };
     },
     ...sessionActions,
     ...containerActions,

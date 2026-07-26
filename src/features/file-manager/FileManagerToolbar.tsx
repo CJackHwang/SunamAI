@@ -14,8 +14,9 @@ interface FileManagerToolbarProps {
 
 export function FileManagerToolbar({ rootDir, rootLabel, currentPath, onNavigate, onRefresh, onCreateFile, onCreateFolder, onUpload }: FileManagerToolbarProps) {
   const { t } = useI18n();
-  const rootName = rootLabel ?? (rootDir !== '/' ? rootDir.replace(/^\//, '') : 'sunam');
-  const relativePath = currentPath.startsWith(rootDir) && rootDir !== '/' ? currentPath.slice(rootDir.length) : currentPath;
+  const rootName = rootLabel ?? (rootDir !== '/' ? rootDir.split('/').filter(Boolean).at(-1) ?? 'sunam' : 'sunam');
+  const isCurrentPathValid = rootDir === '/' || currentPath === rootDir || currentPath.startsWith(`${rootDir}/`);
+  const relativePath = !isCurrentPathValid ? '' : rootDir !== '/' ? currentPath.slice(rootDir.length) : currentPath;
   const segments = relativePath === '' || relativePath === '/' ? ['/'] : ['/', ...relativePath.split('/').filter(Boolean)];
   return <div className="fm-toolbar">
     <div className="fm-breadcrumb">{segments.map((segment, index) => {

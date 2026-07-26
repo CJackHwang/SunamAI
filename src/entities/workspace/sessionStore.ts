@@ -1,11 +1,10 @@
 import { createId } from '@/shared/lib/ids';
 import type { Session, SessionStatus, WorkspacePersistenceRepository, WorkspaceState } from '@/entities/workspace/types';
 import { prepareWorkspaceDeletion } from './deletionCoordinator';
-
-const EMPTY_SESSION_TITLES = new Set(['新对话', '新建对话']);
+import { isDefaultSessionTitle, type WorkspaceCreationDefaults } from './defaults';
 
 function isReusableEmptySession(session: Session) {
-  return EMPTY_SESSION_TITLES.has(session.title.trim()) && session.status === undefined;
+  return isDefaultSessionTitle(session.title) && session.status === undefined;
 }
 
 export function createSessionActions(
@@ -14,7 +13,8 @@ export function createSessionActions(
   isHydratedAndSafe: () => boolean,
   now: () => number,
   repository: WorkspacePersistenceRepository,
-  enqueuePersistence: (operation: () => Promise<void>) => Promise<void>
+  enqueuePersistence: (operation: () => Promise<void>) => Promise<void>,
+  getCreationDefaults: () => WorkspaceCreationDefaults,
 ) {
   return {
     createSession: () => {
@@ -33,7 +33,7 @@ export function createSessionActions(
       }
       
       const timestamp = now();
-      const session: Session = { id: createId('s'), title: '新对话', updatedAt: timestamp };
+      const session: Session = { id: createId('s'), title: getCreationDefaults().sessionTitle, updatedAt: timestamp };
       setState((previous) => ({ ...previous, sessions: [session, ...previous.sessions], activeSessionId: session.id }));
       return session.id;
     },
