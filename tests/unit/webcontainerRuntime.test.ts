@@ -24,6 +24,7 @@ function createRuntime(snapshot: Record<string, unknown> | null = null) {
     mount: vi.fn(async () => undefined),
     export: vi.fn(async () => ({})),
     spawn: vi.fn(async () => process),
+    on: vi.fn(() => () => undefined),
   };
   const repository = {
     loadSnapshotState: vi.fn(async () => ({
@@ -83,6 +84,7 @@ function createFilesystemRuntime() {
     mount: vi.fn(async () => undefined),
     export: vi.fn(async () => ({ 'snapshot.txt': { file: { contents: 'saved' } } })),
     spawn: vi.fn(async () => process),
+    on: vi.fn(() => () => undefined),
   };
   const resources = new Map([
     ['text-resource', { id: 'text-resource', sessionId: 's-1', originatingRunId: 'r-1', name: 'note.txt', kind: 'text' as const, mimeType: 'text/plain', size: 13, sha256: 'text-hash', createdAt: 1, blob: new NodeBlob(['one\ntwo\nthree']) as unknown as Blob }],

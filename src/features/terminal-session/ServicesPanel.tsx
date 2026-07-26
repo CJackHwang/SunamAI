@@ -1,24 +1,37 @@
-import { Check, Copy, MonitorPlay, StopCircle } from 'lucide-react';
+import { Check, Copy, Loader2, MonitorPlay, StopCircle } from 'lucide-react';
 import { useState } from 'react';
 import { useI18n } from '@/shared/i18n';
 import type { ProcessStatus } from '@/shared/contracts/agentRuntime';
+import type { RuntimePortStatus } from '@/shared/contracts/terminal';
 import { toErrorMessage } from '@/shared/lib/errors';
 import { toDisplayWorkspacePath } from './displayPaths';
 import { EmptyState, ErrorState } from '@/shared/ui/AsyncState';
 import './ServicesPanel.css';
 
 interface ServicePanelProps {
-  ports: Array<{ port: number; url: string }>;
+  ports: RuntimePortStatus[];
   processes: ProcessStatus[];
   containerName: string;
+  isRestarting: boolean;
   onPreview: (port: number, url: string) => void;
+  onStopPort: (port: number) => Promise<boolean>;
+  onForceRestart: () => Promise<void>;
   onKillProcess: (process: ProcessStatus) => void;
 }
 
-export function ServicesPanel({ ports, processes, containerName, onPreview, onKillProcess }: ServicePanelProps) {
+export function ServicesPanel({ ports, processes, containerName, isRestarting, onPreview, onStopPort, onForceRestart, onKillProcess }: ServicePanelProps) {
   const { t, format } = useI18n();
   const [copiedPort, setCopiedPort] = useState<number | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busyPort, setBusyPort] = useState<number | null>(null);
+  const stateLabel = (state: Exclude<RuntimePortStatus['state'], 'managed'>) => {
+    switch (state) {
+      case 'identifying': return t('services.state.identifying');
+      case 'orphaned': return t('services.state.orphaned');
+      case 'stopping': return t('services.state.stopping');
+    }
+  };
 
   const copyAddress = async (port: number, url: string) => {
     try {
@@ -31,6 +44,28 @@ export function ServicesPanel({ ports, processes, containerName, onPreview, onKi
     }
   };
 
+  const stopPort = async (port: number) => {
+    setBusyPort(port);
+    setActionError(null);
+    try {
+      if (!await onStopPort(port)) setActionError(t('services.stopFailed'));
+    } catch (error) {
+      setActionError(`${t('services.stopFailed')}: ${toErrorMessage(error)}`);
+    } finally {
+      setBusyPort(null);
+    }
+  };
+
+  const forceRestart = async () => {
+    if (!window.confirm(t('services.forceRestartConfirm'))) return;
+    setActionError(null);
+    try {
+      await onForceRestart();
+    } catch (error) {
+      setActionError(`${t('services.forceRestartFailed')}: ${toErrorMessage(error)}`);
+    }
+  };
+
   return <div className="services-panel motion-panel-in">
     <section className="services-ports" aria-labelledby="runtime-ports-heading">
       <div className="services-heading-row">
@@ -40,16 +75,23 @@ export function ServicesPanel({ ports, processes, containerName, onPreview, onKi
       {ports.length === 0
         ? <EmptyState className="panel-empty-state">{t('services.noPorts')}</EmptyState>
         : <div className="services-port-list">{ports.map((port) => <div className="service-row list-row service-port-row" key={port.port}>
-          <button type="button" className="service-preview-trigger" onClick={() => onPreview(port.port, port.url)} title={port.url} aria-label={format('services.previewPort', { port: port.port })}>
-            <span className="service-port-number">{format('services.port', { port: port.port })}</span>
+          <button type="button" className="service-preview-trigger" onClick={() => onPreview(port.port, port.url)} title={port.url} aria-label={format('services.previewPort', { port: port.port })} disabled={!port.url}>
+            <span className="service-port-number">{format('services.port', { port: port.port })}{port.state !== 'managed' && <span className={`service-port-state service-port-state-${port.state}`}>{stateLabel(port.state)}</span>}</span>
             <span className="service-port-url">{port.url}</span>
             <MonitorPlay size={16} />
           </button>
-          <button className="icon-button" onClick={() => { void copyAddress(port.port, port.url); }} title={t('services.copy')} aria-label={format('services.copyPort', { port: port.port })}>
+          <button className="icon-button" onClick={() => { void copyAddress(port.port, port.url); }} title={t('services.copy')} aria-label={format('services.copyPort', { port: port.port })} disabled={!port.url || isRestarting}>
             {copiedPort === port.port ? <Check size={16} /> : <Copy size={16} />}
           </button>
+          {port.state === 'managed' || port.state === 'stopping'
+            ? <button className="icon-button icon-button-danger" onClick={() => { void stopPort(port.port); }} title={t('services.stop')} aria-label={format('services.stopPort', { port: port.port })} disabled={port.state === 'stopping' || busyPort === port.port || isRestarting}>{busyPort === port.port || port.state === 'stopping' ? <Loader2 className="lucide-spin" size={18} /> : <StopCircle size={18} />}</button>
+            : port.state === 'orphaned'
+              ? <button className="btn btn-danger services-force-restart" onClick={() => { void forceRestart(); }} disabled={isRestarting}><span className="services-warning-mark" aria-hidden="true">!</span>{isRestarting ? t('services.restarting') : t('services.forceRestart')}</button>
+              : <span className="services-identifying" role="status"><Loader2 className="lucide-spin" size={16} />{t('services.identifying')}</span>}
         </div>)}</div>}
       {copyError && <ErrorState className="panel-inline-error">{copyError}</ErrorState>}
+      {actionError && <ErrorState className="panel-inline-error">{actionError}</ErrorState>}
+      {isRestarting && <div className="services-restart-status" role="status"><Loader2 className="lucide-spin" size={16} />{t('services.restarting')}</div>}
     </section>
 
     <section className="services-processes" aria-labelledby="container-processes-heading">

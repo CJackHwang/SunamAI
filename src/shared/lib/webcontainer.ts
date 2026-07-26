@@ -39,3 +39,14 @@ export const getWebContainer = async (): Promise<WebContainer> => {
 
   return bootPromise;
 };
+
+export const resetWebContainer = async (): Promise<void> => {
+  const instance = webcontainerInstance ?? await bootPromise;
+  if (!instance) {
+    bootPromise = null;
+    return;
+  }
+  webcontainerInstance = null;
+  bootPromise = null;
+  await instance.teardown();
+};

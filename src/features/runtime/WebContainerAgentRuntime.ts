@@ -9,6 +9,7 @@ import type {
   WorkspaceTreeEntry,
   RuntimeResourceDescriptor,
 } from '@/shared/contracts/agentRuntime';
+import type { RuntimePortStatus } from '@/shared/contracts/terminal';
 import { getContainerRoot } from '@/shared/lib/containerPaths';
 import { toErrorMessage } from '@/shared/lib/errors';
 import { clipTextToTokenBudget } from '@/shared/lib/tokenEstimate';
@@ -17,6 +18,7 @@ import { v3Persistence, type V3PersistenceRepository } from '@/entities/persiste
 import { ProcessRegistry } from './processRegistry';
 import { WorkspaceSnapshotCoordinator } from './snapshotCoordinator';
 import { WorkspaceFileSystem } from './workspaceFileSystem';
+import { RuntimeServiceRegistry } from './serviceRegistry';
 
 const MAX_PROCESS_OUTPUT = 20_000;
 
@@ -29,18 +31,19 @@ function sleep(milliseconds: number): Promise<void> {
  * A terminal may observe this class, but process ownership always remains with its Run.
  */
 export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
-  private readonly webcontainer: WebContainer;
   private readonly files: WorkspaceFileSystem;
   private readonly processes = new ProcessRegistry();
   private readonly snapshots: WorkspaceSnapshotCoordinator;
+  private readonly services: RuntimeServiceRegistry;
   private readonly repository: V3PersistenceRepository;
+  private readonly errorListeners = new Set<(error: string) => void>();
   private userTerminalBuffer = '';
 
   constructor(webcontainer: WebContainer, repository: V3PersistenceRepository = v3Persistence) {
-    this.webcontainer = webcontainer;
     this.files = new WorkspaceFileSystem(webcontainer);
     this.repository = repository;
     this.snapshots = new WorkspaceSnapshotCoordinator(webcontainer, repository);
+    this.services = new RuntimeServiceRegistry(webcontainer, (error) => this.publishError(toErrorMessage(error)));
   }
 
   getUserTerminalBuffer(): string {
@@ -58,7 +61,15 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
     return this.processes.subscribe(listener);
   }
 
-  subscribeErrors(listener: (error: string) => void): () => void { return this.snapshots.subscribeErrors(listener); }
+  subscribeErrors(listener: (error: string) => void): () => void {
+    const unsubscribeSnapshots = this.snapshots.subscribeErrors(listener);
+    this.errorListeners.add(listener);
+    return () => { unsubscribeSnapshots(); this.errorListeners.delete(listener); };
+  }
+
+  private publishError(message: string): void {
+    this.errorListeners.forEach((listener) => listener(message));
+  }
 
   async ensureContainer(containerId: string): Promise<void> {
     await this.snapshots.ensure(containerId);
@@ -107,9 +118,22 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
   }
 
   dispose(): void {
+    this.services.dispose();
     this.snapshots.dispose();
     this.processes.dispose();
+    this.errorListeners.clear();
   }
+
+  getPorts(): RuntimePortStatus[] { return this.services.getPorts(); }
+  subscribePorts(listener: () => void): () => void { return this.services.subscribe(listener); }
+  stopPort(port: number): Promise<boolean> { return this.services.stopPort(port); }
+
+  async spawnUserShell(containerId: string): Promise<{ launchId: string; process: Awaited<ReturnType<WebContainer['spawn']>> }> {
+    await this.ensureContainer(containerId);
+    return this.services.spawn({ source: 'terminal', containerId, command: 'jsh', cwd: getContainerRoot(containerId) });
+  }
+
+  stopUserShell(launchId: string): boolean { return this.services.stopLaunch(launchId); }
 
   async listWorkspace(containerId: string, maxDepth: number): Promise<WorkspaceTreeEntry[]> {
     return this.files.list(containerId, maxDepth);
@@ -134,7 +158,16 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
     if (request.signal?.aborted) throw request.signal.reason;
     await this.ensureContainer(request.containerId);
     const id = createId('proc');
-    const process = await this.webcontainer.spawn('jsh', ['-c', request.command], { env: {}, cwd: getContainerRoot(request.containerId) });
+    const { process } = await this.services.spawn({
+      source: 'agent',
+      containerId: request.containerId,
+      command: 'jsh',
+      args: ['-c', request.command],
+      cwd: getContainerRoot(request.containerId),
+      processId: id,
+      sessionId: request.sessionId,
+      runId: request.runId,
+    });
     const status: ProcessStatus = {
       id,
       sessionId: request.sessionId,

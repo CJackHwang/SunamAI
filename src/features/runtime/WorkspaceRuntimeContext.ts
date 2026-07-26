@@ -8,6 +8,8 @@ export interface WorkspaceRuntimeContextValue {
   runtime: WebContainerAgentRuntime | null;
   error: string | null;
   isReady: boolean;
+  isRestarting: boolean;
+  forceRestart: () => Promise<void>;
   getContainerRoot: typeof getContainerRoot;
 }
 

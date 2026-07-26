@@ -18,29 +18,10 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   });
 
   let modelTurn = 0;
-  let stopTurn = 0;
   await page.route('https://example.invalid/v1/chat/completions', async (route) => {
     const request = route.request().postDataJSON() as { stream?: boolean; tools?: unknown[]; messages?: Array<{ role?: string; content?: unknown }> };
     if (!request.stream || !request.tools?.length) {
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Runtime smoke' } }] }) });
-      return;
-    }
-    const lastUser = [...(request.messages ?? [])].reverse().find((message) => message.role === 'user');
-    if (String(lastUser?.content).includes('Stop runtime service on port 3457')) {
-      stopTurn += 1;
-      if (stopTurn === 1) {
-        await route.fulfill({ contentType: 'text/event-stream', body: streamTools([{ id: 'list-processes', name: 'process_list', arguments: {} }]) });
-        return;
-      }
-      if (stopTurn === 2) {
-        const listMessage = [...(request.messages ?? [])].reverse().find((message) => message.role === 'tool' && typeof message.content === 'string' && message.content.includes('"processId"'));
-        const processes = JSON.parse(String(listMessage?.content ?? '[]')) as Array<{ processId: string; command: string }>;
-        const server = processes.find((process) => process.command.includes('3457'));
-        if (!server) throw new Error('Runtime fixture did not receive the earlier-run server process.');
-        await route.fulfill({ contentType: 'text/event-stream', body: streamTools([{ id: 'stop-process', name: 'process_stop', arguments: { process_id: server.processId } }]) });
-        return;
-      }
-      await route.fulfill({ contentType: 'text/event-stream', body: streamResponse({ content: 'Runtime service stopped' }) });
       return;
     }
     modelTurn += 1;
@@ -101,7 +82,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await rightNavigation.getByTitle('终端').click();
   await expect(page.locator('.terminal-environment-dot')).toHaveCount(0);
   const terminalRows = page.locator('.xterm-rows').nth(1);
-  await expect(terminalRows).toContainText('/containers/默认容器');
+  await expect(terminalRows).toContainText('/containers/新容器');
   await expect(terminalRows).not.toContainText(/\.sunam\/workspaces\/c-/);
   await expect(terminalRows).not.toContainText('//containers');
 
@@ -109,6 +90,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   const services = page.locator('.services-panel');
   const processList = page.locator('.services-process-list');
   await expect(services.getByText('端口 3457')).toBeVisible();
+  await expect(services.getByRole('button', { name: '停止端口 3457 的服务' })).toBeVisible();
   await expect(page.locator('.service-process-row')).toHaveCount(18);
   await expect(services).toHaveCSS('overflow', 'hidden');
   await expect(processList).toHaveCSS('overflow-y', 'auto');
@@ -171,13 +153,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   });
   expect(mobileLayout).toEqual({ pageFits: true, contained: true });
 
-  await mobileNavigation.getByRole('button', { name: '对话' }).click();
-  await composer.fill('Stop runtime service on port 3457');
-  await page.locator('.chat-submit').click();
-  await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph')
-    .filter({ hasText: /^Runtime service stopped$/ }))
-    .toHaveCount(1, { timeout: 100_000 });
-  await mobileNavigation.getByRole('button', { name: '服务' }).click();
+  await services.getByRole('button', { name: '停止端口 3457 的服务' }).click();
   const serverProcess = page.locator('.service-process-row').filter({ hasText: '3457' });
   await expect(services.getByText('端口 3457')).toBeHidden();
   await expect(serverProcess).toHaveCount(0);
