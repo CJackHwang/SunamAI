@@ -70,6 +70,13 @@ The user value is a predictable conversation: starting a server produces one fin
 - Relevance and truthfulness are behavioral instructions in the Agent prompt: the model must choose a check appropriate to the task, must not mask failures, and must not cite an unrelated successful command as proof.
 - Background commands remain process progress rather than verification because they do not provide a terminal exit result for the current revision.
 
+### R8. Cross-run process management
+
+- A root Agent can list running Agent-owned processes from earlier Runs when they belong to the same session and container.
+- Root process observe/input/stop actions resolve the selected registry entry and reuse its original exact `sessionId + runId + containerId` ownership; they must not guess operating-system PIDs or kill by port.
+- Processes from other sessions or containers remain hidden and inaccessible. Delegated agents do not gain cross-run process tools, and cancellation continues to stop only the cancelling Run's exact ownership domain.
+- Explicit process stop advances and flushes the runtime revision exactly once, then synchronizes the task to that post-stop revision. A process-only stop must be able to complete without unrelated workspace verification, while pre-existing revision drift still becomes changed/unverified.
+
 ## Acceptance Criteria
 
 - [x] When a changed workspace has not passed current-revision verification, the rejection text names `shell_run`, `foreground`, a truthful relevant check, exit code 0, final-write ordering, the absence of command/port whitelists, and the retry action.
@@ -90,6 +97,10 @@ The user value is a predictable conversation: starting a server produces one fin
 - [x] Foreground checks accept arbitrary project commands, arguments, ports, and shell composition without a runtime whitelist.
 - [x] A foreground read/inspection command can refresh current-revision verification without forcing another specially named test command.
 - [x] The prompt explicitly requires relevant checks, truthful evidence, non-zero failure propagation, and re-verification after later workspace mutation.
+- [x] A follow-up root Run can list and stop a service started by an earlier Run in the same session/container.
+- [x] Cross-session and cross-container processes remain unavailable to Agent process tools.
+- [x] The stop path uses the registered Agent process ID and original ownership rather than an OS PID or port-kill heuristic.
+- [x] Process shutdown synchronizes the post-stop revision so the successful stop can produce one final response instead of looping to the model-turn limit.
 
 ## Out of Scope
 
@@ -97,6 +108,7 @@ The user value is a predictable conversation: starting a server produces one fin
 - Adding a new user-facing completion setting or manual stop/continue preference.
 - Changing provider wire protocols, model-specific behavior, or persona prompts unrelated to completion instructions.
 - Adding another runtime command parser or project-specific verification allowlist.
+- Allowing a root Agent to manage processes from another session or container.
 - Changing persistence database versions or migrating existing `sunam-v3` records unless implementation evidence proves it unavoidable.
 - Changing desktop Enter/Shift+Enter semantics or hiding scrollbars outside the composer textarea.
 
@@ -118,4 +130,4 @@ There are no unresolved product, scope, compatibility, or risk decisions blockin
 - Shared completion-gate unit coverage proves explicit and plain completion use the same plan/revision/verification policy and actionable recovery guidance.
 - Agent-engine regressions prove premature plain drafts are withheld, verified non-trivial work completes without an extra tool turn, and server-start completion keeps the process alive.
 - Component and browser coverage prove the responsive Enter behavior, IME guard, resize handling, send-button path, and hidden scrollbar style.
-- Final `npm run check:all` passed on 2026-07-26.
+- Final `npm run check:all` passed on 2026-07-27, including the real cross-Run process-list/stop regression.

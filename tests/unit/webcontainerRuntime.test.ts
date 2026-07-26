@@ -107,7 +107,7 @@ describe('WebContainerAgentRuntime process ownership', () => {
     await runtime.runShell({ command: 'two', mode: 'background', sessionId: 's-2', runId: 'r-2', containerId: 'c-2' });
     expect(runtime.getProcesses({ containerId: 'c-1' }).map((process) => process.command)).toEqual(['one']);
     expect(runtime.getProcesses()).toHaveLength(2);
-    expect(runtime.stopProcess(first.process.id, { sessionId: 's-1', runId: 'r-1', containerId: 'c-1' })).toBe(true);
+    await expect(runtime.stopProcess(first.process.id, { sessionId: 's-1', runId: 'r-1', containerId: 'c-1' })).resolves.toBe(true);
     expect(runtime.getProcesses({ containerId: 'c-1' })).toEqual([]);
   });
 
@@ -135,11 +135,35 @@ describe('WebContainerAgentRuntime process ownership', () => {
     expect(runtime.observeProcess(result.process.id, owner)).not.toBeNull();
     expect(runtime.observeProcess(result.process.id, intruder)).toBeNull();
     await expect(runtime.sendProcessInput(result.process.id, intruder, 'nope')).resolves.toBe(false);
-    expect(runtime.stopProcess(result.process.id, intruder)).toBe(false);
+    await expect(runtime.stopProcess(result.process.id, intruder)).resolves.toBe(false);
     expect(kill).not.toHaveBeenCalled();
 
     runtime.stopRun(owner);
     expect(kill).toHaveBeenCalledOnce();
+  });
+
+  it('advances the runtime revision exactly once when a registered process is explicitly stopped', async () => {
+    const { runtime, webcontainer } = createRuntime();
+    let resolveExit!: (exitCode: number) => void;
+    const kill = vi.fn();
+    vi.mocked(webcontainer.spawn).mockResolvedValueOnce({
+      input: new WritableStream<string>(),
+      output: new ReadableStream<string>({ start(controller) { controller.close(); } }),
+      exit: new Promise<number>((resolve) => { resolveExit = resolve; }),
+      kill,
+    } as never);
+    const owner = { sessionId: 's-1', runId: 'r-old', containerId: 'c-1' };
+    const result = await runtime.runShell({ command: 'npm run dev -- --port 1919', mode: 'background', ...owner });
+    const beforeStop = await runtime.getWorkspaceRevision('c-1');
+
+    await expect(runtime.stopProcess(result.process.id, owner)).resolves.toBe(true);
+    const afterStop = await runtime.getWorkspaceRevision('c-1');
+    expect(afterStop).toBe(beforeStop + 1);
+    expect(kill).toHaveBeenCalledOnce();
+    expect(runtime.getProcesses(owner)).toEqual([]);
+
+    resolveExit(0);
+    await vi.waitFor(async () => expect(await runtime.getWorkspaceRevision('c-1')).toBe(afterStop));
   });
 
   it('stops an owned foreground process when its run signal is aborted', async () => {

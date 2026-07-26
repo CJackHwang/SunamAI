@@ -1,5 +1,23 @@
 import { z } from 'zod';
-import { defineTool, type RegisteredTool } from './base';
+import type { ProcessOwnership, ProcessStatus } from '@/shared/contracts/agentRuntime';
+import { defineTool, type RegisteredTool, type ToolExecutionContext } from './base';
+
+function processScope(context: ToolExecutionContext): Partial<ProcessOwnership> {
+  const scope = { sessionId: context.sessionId, containerId: context.containerId };
+  return context.agentRole === 'root' ? scope : { ...scope, runId: context.runId };
+}
+
+function accessibleProcesses(context: ToolExecutionContext): ProcessStatus[] {
+  return context.runtime.getProcesses(processScope(context));
+}
+
+function accessibleProcess(context: ToolExecutionContext, processId: string): ProcessStatus | undefined {
+  return accessibleProcesses(context).find((process) => process.id === processId);
+}
+
+function ownershipOf(process: ProcessStatus): ProcessOwnership {
+  return { sessionId: process.sessionId, runId: process.runId, containerId: process.containerId };
+}
 
 export const processTools: RegisteredTool[] = [
   defineTool({
@@ -15,7 +33,7 @@ export const processTools: RegisteredTool[] = [
       const result = await context.runtime.runShell({ command: input.command, mode: input.mode, ...(input.timeout_ms ? { timeoutMs: input.timeout_ms } : {}), containerId: context.containerId, sessionId: context.sessionId, runId: context.runId, signal: context.signal });
       const process = result.process;
       const output = process.output || '(no output)';
-      const content = `${result.timedOut ? 'Command still running after timeout.' : `Exit: ${process.exitCode ?? 'running'}`}\nPID: ${process.id}\n${output}`;
+      const content = `${result.timedOut ? 'Command still running after timeout.' : `Exit: ${process.exitCode ?? 'running'}`}\nAgent process ID: ${process.id}\n${output}`;
       const verification = input.mode === 'foreground' ? { command: input.command, passed: !result.timedOut && process.exitCode === 0 } : undefined;
       const workspaceRevision = await context.runtime.getWorkspaceRevision(context.containerId);
       if (verification) context.updateTask((task) => ({
@@ -31,8 +49,31 @@ export const processTools: RegisteredTool[] = [
     },
   }),
   defineTool({
+    name: 'process_list',
+    description: 'List running Agent-owned processes in the current session and container, including processes started by earlier root runs. Use this before observing, sending input to, or stopping a previously started service; do not guess operating-system PIDs or kill by port.',
+    schema: z.object({}),
+    readOnly: true,
+    concurrencySafe: true,
+    dataImpact: 'none',
+    timeoutMs: 5_000,
+    resultType: 'process',
+    async execute(_input, context) {
+      const processes = accessibleProcesses(context);
+      if (!processes.length) return { ok: true, content: '(no running Agent processes in this session and container)', data: [] };
+      const summaries = processes.map((process) => ({
+        processId: process.id,
+        ownerRunId: process.runId,
+        command: process.command,
+        isRunning: process.isRunning,
+        outputTail: process.output.slice(-1_000),
+      }));
+      const processMetadata = summaries.map(({ outputTail: _outputTail, ...process }) => process);
+      return { ok: true, content: JSON.stringify(summaries, null, 2), data: processMetadata };
+    },
+  }),
+  defineTool({
     name: 'process_observe',
-    description: 'Observe incremental output and exit state of an Agent-owned background process.',
+    description: 'Observe incremental output and exit state of an Agent-owned process in the current session and container. Call process_list first when the process was started by an earlier run.',
     schema: z.object({ process_id: z.string().min(1), cursor: z.number().int().min(0).optional() }),
     readOnly: true,
     concurrencySafe: true,
@@ -40,14 +81,16 @@ export const processTools: RegisteredTool[] = [
     timeoutMs: 5_000,
     resultType: 'process',
     async execute(input, context) {
-      const process = context.runtime.observeProcess(input.process_id, { sessionId: context.sessionId, runId: context.runId, containerId: context.containerId }, input.cursor);
-      if (!process) return { ok: false, content: 'Process not found.' };
+      const accessible = accessibleProcess(context, input.process_id);
+      if (!accessible) return { ok: false, content: 'Process not found in the current session and container. Call process_list to refresh the running-process list.' };
+      const process = context.runtime.observeProcess(input.process_id, ownershipOf(accessible), input.cursor);
+      if (!process) return { ok: false, content: 'Process exited before it could be observed. Call process_list to refresh the running-process list.' };
       return { ok: true, content: `Running: ${process.isRunning}\nExit: ${process.exitCode ?? 'pending'}\nCursor: ${process.cursor}\n${process.output || '(no new output)'}`, data: process };
     },
   }),
   defineTool({
     name: 'process_input',
-    description: 'Send input to an Agent-owned interactive process. IMPORTANT: To execute a command (press Enter), you MUST append "\\r" to your input. To send Ctrl+C, send "\\x03".',
+    description: 'Send input to an Agent-owned interactive process in the current session and container, including one started by an earlier root run. Call process_list first. IMPORTANT: To execute a command (press Enter), append "\\r"; to send Ctrl+C, send "\\x03".',
     schema: z.object({ process_id: z.string().min(1), input: z.string() }),
     readOnly: false,
     concurrencySafe: false,
@@ -55,13 +98,15 @@ export const processTools: RegisteredTool[] = [
     timeoutMs: 5_000,
     resultType: 'control',
     async execute(input, context) {
-      const sent = await context.runtime.sendProcessInput(input.process_id, { sessionId: context.sessionId, runId: context.runId, containerId: context.containerId }, input.input);
-      return { ok: sent, content: sent ? 'Input sent.' : 'Process is not running.' };
+      const process = accessibleProcess(context, input.process_id);
+      if (!process) return { ok: false, content: 'Process not found in the current session and container. Call process_list to refresh the running-process list.' };
+      const sent = await context.runtime.sendProcessInput(input.process_id, ownershipOf(process), input.input);
+      return { ok: sent, content: sent ? 'Input sent.' : 'Process exited before input could be sent. Call process_list to refresh the running-process list.' };
     },
   }),
   defineTool({
     name: 'process_stop',
-    description: 'Stop an Agent-owned background process that is no longer needed.',
+    description: 'Stop an Agent-owned process in the current session and container, including a service started by an earlier root run. Call process_list first and stop the registered process ID instead of guessing a PID or killing by port.',
     schema: z.object({ process_id: z.string().min(1) }),
     readOnly: false,
     concurrencySafe: false,
@@ -69,8 +114,24 @@ export const processTools: RegisteredTool[] = [
     timeoutMs: 5_000,
     resultType: 'control',
     async execute(input, context) {
-      const stopped = context.runtime.stopProcess(input.process_id, { sessionId: context.sessionId, runId: context.runId, containerId: context.containerId });
-      return { ok: stopped, content: stopped ? 'Process stopped.' : 'Process is not running.' };
+      const process = accessibleProcess(context, input.process_id);
+      if (!process) return { ok: false, content: 'Process not found in the current session and container. Call process_list to refresh the running-process list.' };
+      const taskRevisionBeforeStop = context.getTask().workspaceRevision;
+      const runtimeRevisionBeforeStop = await context.runtime.getWorkspaceRevision(context.containerId);
+      const stopped = await context.runtime.stopProcess(input.process_id, ownershipOf(process));
+      if (stopped) {
+        const workspaceRevision = await context.runtime.getWorkspaceRevision(context.containerId);
+        context.updateTask((task) => ({
+          ...task,
+          changedWorkspace: task.changedWorkspace
+            || taskRevisionBeforeStop !== runtimeRevisionBeforeStop
+            || workspaceRevision !== runtimeRevisionBeforeStop + 1,
+          workspaceRevision,
+          verified: false,
+          verifiedRevision: -1,
+        }));
+      }
+      return { ok: stopped, content: stopped ? 'Process stopped.' : 'Process exited before it could be stopped. Call process_list to refresh the running-process list.' };
     },
   }),
   defineTool({

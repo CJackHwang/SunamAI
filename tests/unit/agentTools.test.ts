@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AgentToolRegistry, type ToolExecutionContext } from '@/features/agent-core/tools';
 import type { TaskContract } from '@/features/agent-core/types';
-import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
+import type { AgentWorkspaceRuntime, ProcessOwnership, ProcessStatus } from '@/shared/contracts/agentRuntime';
 import { ContainerMutationLease } from '@/features/agent-core/agentFamily';
 import { buildAgentSystemPrompt, createChaosContract } from '@/features/agent-core/prompt';
 
@@ -23,7 +23,7 @@ function createContext() {
     runShell: vi.fn(async (request) => ({ timedOut: false, process: { id: 'p-1', sessionId: request.sessionId, runId: request.runId, containerId: request.containerId, command: request.command, isRunning: false, output: 'ok', cursor: 2, exitCode: 0 } })),
     observeProcess: vi.fn(() => null),
     sendProcessInput: vi.fn(async () => true),
-    stopProcess: vi.fn(() => true),
+    stopProcess: vi.fn(async () => true),
     stopRun: vi.fn(),
     getProcesses: vi.fn(() => []),
     subscribe: vi.fn(() => () => undefined),
@@ -57,12 +57,14 @@ describe('AgentToolRegistry', () => {
     expect(prompt).toContain('ports, and shell composition are not restricted');
     expect(prompt).toContain('never use forced success or unrelated commands as fake evidence');
     expect(prompt).toContain('later workspace mutation requires another foreground check');
+    expect(prompt).toContain('Before managing a previously started service, call `process_list`');
+    expect(prompt).toContain('Do not guess OS PIDs or kill by port');
   });
 
   it('executes workspace, shell, process, and control tools with truthful task updates', async () => {
     const registry = new AgentToolRegistry();
     const { context, runtime, getTask } = createContext();
-    expect(registry.getApiDefinitions()).toHaveLength(21);
+    expect(registry.getApiDefinitions()).toHaveLength(22);
     expect(registry.getMetadata('workspace_tree')).toMatchObject({ concurrencySafe: true, dataImpact: 'none', timeoutMs: 10_000, resultType: 'tree' });
     expect(registry.getMetadata('apply_patch')).toMatchObject({ readOnly: false, dataImpact: 'workspace', resultType: 'changes' });
     expect(registry.getMetadata('missing')).toBeNull();
@@ -77,9 +79,14 @@ describe('AgentToolRegistry', () => {
     expect(shell.verification?.passed).toBe(true);
     expect(runtime.runShell).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 12_345 }));
     expect(getTask().verificationEvidence).toHaveLength(1);
-    expect((await registry.execute({ id: '6', name: 'process_observe', arguments: JSON.stringify({ process_id: 'p-1' }) }, context)).ok).toBe(false);
+    const previousRunProcess: ProcessStatus = { id: 'p-1', sessionId: 's-1', runId: 'r-previous', containerId: 'c-1', command: 'npm run dev -- --port 1919', isRunning: true, output: 'ready on 1919', cursor: 13 };
+    runtime.getProcesses = vi.fn(() => [previousRunProcess]);
+    runtime.observeProcess = vi.fn(() => previousRunProcess);
+    expect((await registry.execute({ id: 'process-list', name: 'process_list', arguments: '{}' }, context)).content).toContain('r-previous');
+    expect((await registry.execute({ id: '6', name: 'process_observe', arguments: JSON.stringify({ process_id: 'p-1' }) }, context)).ok).toBe(true);
     expect((await registry.execute({ id: '7', name: 'process_input', arguments: JSON.stringify({ process_id: 'p-1', input: 'y' }) }, context)).ok).toBe(true);
     expect((await registry.execute({ id: '8', name: 'process_stop', arguments: JSON.stringify({ process_id: 'p-1' }) }, context)).ok).toBe(true);
+    expect(runtime.stopProcess).toHaveBeenCalledWith('p-1', { sessionId: 's-1', runId: 'r-previous', containerId: 'c-1' });
     expect((await registry.execute({ id: '9', name: 'update_plan', arguments: JSON.stringify({ items: [{ id: 'plan', title: 'Done', status: 'completed' }] }) }, context)).ok).toBe(true);
     expect((await registry.execute({ id: 'resource-list', name: 'list_resources', arguments: '{}' }, context)).content).toBe('(no resources)');
     expect((await registry.execute({ id: 'resource-text', name: 'read_resource_text', arguments: '{"resource_id":"res-1","start_line":1}' }, context)).content).toBe('resource content');
@@ -90,6 +97,76 @@ describe('AgentToolRegistry', () => {
     expect((await registry.execute({ id: '11', name: 'ask_user', arguments: JSON.stringify({ question: 'Need input?' }) }, context)).stopRun).toBe('awaiting_user');
     expect((await registry.execute({ id: '12', name: 'complete_task', arguments: JSON.stringify({ summary: 'done', evidence: ['test'] }) }, context)).stopRun).toBe('completed');
     expect(runtime.runShell).toHaveBeenCalled();
+  });
+
+  it('lets a root run manage earlier-run processes only inside its session and container', async () => {
+    const registry = new AgentToolRegistry();
+    const { context, runtime, getTask } = createContext();
+    let runtimeRevision = 7;
+    const processes: ProcessStatus[] = [
+      { id: 'p-old', sessionId: 's-1', runId: 'r-old', containerId: 'c-1', command: 'npm run dev -- --port 1919', isRunning: true, output: 'http://localhost:1919', cursor: 21 },
+      { id: 'p-other-session', sessionId: 's-2', runId: 'r-other', containerId: 'c-1', command: 'other session', isRunning: true, output: '', cursor: 0 },
+      { id: 'p-other-container', sessionId: 's-1', runId: 'r-other', containerId: 'c-2', command: 'other container', isRunning: true, output: '', cursor: 0 },
+    ];
+    runtime.getProcesses = vi.fn((scope?: Partial<ProcessOwnership>) => processes.filter((process) => !scope
+      || (scope.sessionId === undefined || process.sessionId === scope.sessionId)
+      && (scope.runId === undefined || process.runId === scope.runId)
+      && (scope.containerId === undefined || process.containerId === scope.containerId)));
+    runtime.observeProcess = vi.fn((processId, owner) => processes.find((process) => process.id === processId
+      && process.sessionId === owner.sessionId
+      && process.runId === owner.runId
+      && process.containerId === owner.containerId) ?? null);
+    runtime.getWorkspaceRevision = vi.fn(async () => runtimeRevision);
+    runtime.stopProcess = vi.fn(async () => { runtimeRevision += 1; return true; });
+    context.updateTask((task) => ({ ...task, workspaceRevision: runtimeRevision }));
+
+    const listed = await registry.execute({ id: 'list-old', name: 'process_list', arguments: '{}' }, context);
+    expect(listed.content).toContain('p-old');
+    expect(listed.content).toContain('1919');
+    expect(listed.content).not.toContain('p-other-session');
+    expect(listed.content).not.toContain('p-other-container');
+    expect(runtime.getProcesses).toHaveBeenCalledWith({ sessionId: 's-1', containerId: 'c-1' });
+
+    expect((await registry.execute({ id: 'observe-old', name: 'process_observe', arguments: '{"process_id":"p-old"}' }, context)).ok).toBe(true);
+    expect((await registry.execute({ id: 'input-old', name: 'process_input', arguments: '{"process_id":"p-old","input":"\\u0003"}' }, context)).ok).toBe(true);
+    expect((await registry.execute({ id: 'stop-old', name: 'process_stop', arguments: '{"process_id":"p-old"}' }, context)).ok).toBe(true);
+    expect(runtime.observeProcess).toHaveBeenCalledWith('p-old', { sessionId: 's-1', runId: 'r-old', containerId: 'c-1' }, undefined);
+    expect(runtime.sendProcessInput).toHaveBeenCalledWith('p-old', { sessionId: 's-1', runId: 'r-old', containerId: 'c-1' }, '\u0003');
+    expect(runtime.stopProcess).toHaveBeenCalledWith('p-old', { sessionId: 's-1', runId: 'r-old', containerId: 'c-1' });
+    expect(getTask()).toMatchObject({ workspaceRevision: 8, changedWorkspace: false, verified: false, verifiedRevision: -1 });
+
+    context.agentRole = 'verify';
+    const restricted = await registry.execute({ id: 'list-restricted', name: 'process_list', arguments: '{}' }, context);
+    expect(restricted.data).toEqual([]);
+    expect(runtime.getProcesses).toHaveBeenLastCalledWith({ sessionId: 's-1', containerId: 'c-1', runId: 'r-1' });
+  });
+
+  it('preserves pre-stop workspace drift as changed and unverified', async () => {
+    const registry = new AgentToolRegistry();
+    const { context, runtime, getTask } = createContext();
+    const process: ProcessStatus = { id: 'p-drift', sessionId: 's-1', runId: 'r-old', containerId: 'c-1', command: 'dev server', isRunning: true, output: '', cursor: 0 };
+    let runtimeRevision = 4;
+    runtime.getProcesses = vi.fn(() => [process]);
+    runtime.getWorkspaceRevision = vi.fn(async () => runtimeRevision);
+    runtime.stopProcess = vi.fn(async () => { runtimeRevision += 1; return true; });
+    context.updateTask((task) => ({ ...task, workspaceRevision: 3, changedWorkspace: false }));
+
+    expect((await registry.execute({ id: 'stop-drift', name: 'process_stop', arguments: '{"process_id":"p-drift"}' }, context)).ok).toBe(true);
+    expect(getTask()).toMatchObject({ workspaceRevision: 5, changedWorkspace: true, verified: false, verifiedRevision: -1 });
+  });
+
+  it('preserves additional workspace drift that occurs while a process is stopping', async () => {
+    const registry = new AgentToolRegistry();
+    const { context, runtime, getTask } = createContext();
+    const process: ProcessStatus = { id: 'p-stop-drift', sessionId: 's-1', runId: 'r-old', containerId: 'c-1', command: 'dev server', isRunning: true, output: '', cursor: 0 };
+    let runtimeRevision = 6;
+    runtime.getProcesses = vi.fn(() => [process]);
+    runtime.getWorkspaceRevision = vi.fn(async () => runtimeRevision);
+    runtime.stopProcess = vi.fn(async () => { runtimeRevision += 2; return true; });
+    context.updateTask((task) => ({ ...task, workspaceRevision: runtimeRevision, changedWorkspace: false }));
+
+    expect((await registry.execute({ id: 'stop-with-drift', name: 'process_stop', arguments: '{"process_id":"p-stop-drift"}' }, context)).ok).toBe(true);
+    expect(getTask()).toMatchObject({ workspaceRevision: 8, changedWorkspace: true, verified: false, verifiedRevision: -1 });
   });
 
   it('blocks root completion when verification failed for a changed workspace', async () => {
@@ -157,8 +234,9 @@ describe('AgentToolRegistry', () => {
       process: { id: 'p-live', sessionId: request.sessionId, runId: request.runId, containerId: request.containerId, command: request.command, isRunning: true, output: '', cursor: 0 },
     }));
     runtime.observeProcess = vi.fn(() => ({ id: 'p-live', sessionId: 's-1', runId: 'r-1', containerId: 'c-1', command: 'serve', isRunning: true, output: '', cursor: 0 }));
+    runtime.getProcesses = vi.fn(() => [{ id: 'p-live', sessionId: 's-1', runId: 'r-1', containerId: 'c-1', command: 'serve', isRunning: true, output: '', cursor: 0 }]);
     runtime.sendProcessInput = vi.fn(async () => false);
-    runtime.stopProcess = vi.fn(() => false);
+    runtime.stopProcess = vi.fn(async () => false);
 
     expect((await registry.execute({ id: 'schema', name: 'workspace_tree', arguments: '{}' }, context)).content).toContain('validation failed');
     expect((await registry.execute({ id: 'default-json', name: 'report_progress', arguments: '' }, context)).ok).toBe(false);
@@ -173,8 +251,8 @@ describe('AgentToolRegistry', () => {
     expect(timedOut.changedWorkspace).toBeUndefined();
     expect(getTask()).toMatchObject({ changedWorkspace: false, verified: false, verifiedRevision: -1 });
     expect((await registry.execute({ id: 'observe', name: 'process_observe', arguments: '{"process_id":"p-live"}' }, context)).content).toContain('(no new output)');
-    expect((await registry.execute({ id: 'input', name: 'process_input', arguments: '{"process_id":"p-live","input":"y"}' }, context)).content).toContain('not running');
-    expect((await registry.execute({ id: 'stop', name: 'process_stop', arguments: '{"process_id":"p-live"}' }, context)).content).toContain('not running');
+    expect((await registry.execute({ id: 'input', name: 'process_input', arguments: '{"process_id":"p-live","input":"y"}' }, context)).content).toContain('exited before input');
+    expect((await registry.execute({ id: 'stop', name: 'process_stop', arguments: '{"process_id":"p-live"}' }, context)).content).toContain('exited before it could be stopped');
 
     context.updateTask((task) => ({ ...task, changedWorkspace: false }));
     expect((await registry.execute({ id: 'no-plan', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context)).content).toContain('needs a recorded execution plan');

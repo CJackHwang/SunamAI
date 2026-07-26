@@ -77,7 +77,7 @@ class FakeRuntime implements AgentWorkspaceRuntime {
   async runShell(request: ShellRunRequest): Promise<ShellRunResult> { this.commands.push(request.command); return { timedOut: false, process: { id: 'p-1', sessionId: request.sessionId, runId: request.runId, containerId: request.containerId, command: request.command, isRunning: false, output: 'passed', cursor: 6, exitCode: 0 } }; }
   observeProcess(): ProcessStatus | null { return null; }
   async sendProcessInput(): Promise<boolean> { return false; }
-  stopProcess(): boolean { return false; }
+  async stopProcess(): Promise<boolean> { return false; }
   stopRun(): void {}
   getProcesses(): ProcessStatus[] { return []; }
   subscribe(_listener: (event: RuntimeProcessEvent) => void): () => void { return () => undefined; }

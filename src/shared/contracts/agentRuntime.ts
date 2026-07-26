@@ -67,7 +67,7 @@ export interface AgentWorkspaceRuntime {
   runShell(request: ShellRunRequest): Promise<ShellRunResult>;
   observeProcess(processId: string, ownership: ProcessOwnership, cursor?: number): ProcessStatus | null;
   sendProcessInput(processId: string, ownership: ProcessOwnership, input: string): Promise<boolean>;
-  stopProcess(processId: string, ownership: ProcessOwnership): boolean;
+  stopProcess(processId: string, ownership: ProcessOwnership): Promise<boolean>;
   stopRun(ownership: ProcessOwnership): void;
   getProcesses(ownership?: Partial<ProcessOwnership>): ProcessStatus[];
   subscribe(listener: (event: RuntimeProcessEvent) => void): () => void;

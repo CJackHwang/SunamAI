@@ -157,6 +157,7 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
     void Promise.all([process.exit, outputDone]).then(([exitCode]) => {
       const snapshot = this.processes.observe(id, request);
       finalStatus = { ...(snapshot ?? status), isRunning: false, exitCode };
+      if (!snapshot) return;
       // A shell command is an opaque mutation boundary. Bump once at process
       // completion even when filesystem watch delivery is delayed, so a
       // verification record can never certify a pre-command revision.
@@ -191,8 +192,16 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
     return this.processes.sendInput(processId, ownership, input);
   }
 
-  stopProcess(processId: string, ownership: ProcessOwnership): boolean {
-    return this.processes.stop(processId, ownership);
+  async stopProcess(processId: string, ownership: ProcessOwnership): Promise<boolean> {
+    const stopped = this.processes.stop(processId, ownership);
+    if (!stopped) return false;
+    // Explicit process shutdown is a runtime boundary just like natural exit,
+    // but the registry entry is already gone. Advance and flush here so the
+    // caller can bind its task state to the post-stop revision exactly once.
+    this.snapshots.bumpRevision(ownership.containerId);
+    this.snapshots.schedule(ownership.containerId);
+    await this.snapshots.flush(ownership.containerId);
+    return true;
   }
 
   stopRun(ownership: ProcessOwnership): void {

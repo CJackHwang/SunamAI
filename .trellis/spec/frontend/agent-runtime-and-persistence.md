@@ -85,6 +85,10 @@ interface AgentWorkspaceRuntime {
     changes: Array<{ path: string; content: string; expectedContent?: string }>,
   ): Promise<WorkspaceChangeSummary[]>;
   runShell(request: ShellRunRequest): Promise<ShellRunResult>;
+  observeProcess(processId: string, ownership: ProcessOwnership, cursor?: number): ProcessStatus | null;
+  sendProcessInput(processId: string, ownership: ProcessOwnership, input: string): Promise<boolean>;
+  stopProcess(processId: string, ownership: ProcessOwnership): Promise<boolean>;
+  getProcesses(ownership?: Partial<ProcessOwnership>): ProcessStatus[];
   stopRun(ownership: ProcessOwnership): void;
 }
 ```
@@ -174,6 +178,15 @@ interface SubagentNotification {
 - Missing/stale verification recovery must name `shell_run`, foreground mode, a truthful task-relevant check, exit code 0, final-write ordering, and the completion retry action.
 - Runtime code must not whitelist or parse command names, package scripts, arguments, ports, or shell composition to determine verification. The Agent prompt requires relevant evidence, unmasked failures, and re-verification after later mutation.
 
+#### Process discovery and lifecycle
+
+- Every registered process retains exact `(sessionId, runId, containerId)` ownership. Runtime observe/input/stop methods still require that full original tuple.
+- Root `process_list` queries only `{ sessionId, containerId }`, so a follow-up root Run can discover earlier-Run processes in the same conversation/container. Processes from another session or container never enter its result.
+- Root observe/input/stop tools resolve the selected registered Agent process ID from that scoped list, then pass the registry entry's original full ownership to the runtime. Do not guess OS PIDs or kill by port when a registered process exists.
+- Delegated roles do not receive cross-run process management tools. Cancellation continues to call `stopRun` with the cancelling Run's exact ownership and does not stop an earlier completed Run's service.
+- Successful explicit `stopProcess` kills/removes the registry entry, advances and flushes the process-exit revision exactly once, and resolves only after the boundary is durable. The later natural-exit callback detects the missing registry entry and must not advance it a second time.
+- `process_stop` compares the task revision with the runtime revision before stopping and expects exactly one explicit-stop revision. Pre-existing drift or any additional revision during shutdown becomes changed/unverified; otherwise it synchronizes the process-only task to the post-stop revision so a truthful final response does not loop on a synthetic workspace change.
+
 #### Subagents and cancellation
 
 - Child Runs inherit only the compressed parent summary, Task Contract, resource manifest, authoritative revision, and explicit delegated goal. Never copy the parent transcript.
@@ -209,6 +222,10 @@ interface SubagentNotification {
 | Provider returns unrelated 400/422 | Propagate `LLMError`; do not mark vision unsupported or retry text-only. |
 | Path escapes active container or write scope | Reject before any write. |
 | Process ownership tuple mismatches | Observe returns `null`; input/stop returns `false`; no process side effect. |
+| Root lists processes after an earlier Run completed | Return running processes only from the same session/container, including original owner Run IDs and registered process IDs. |
+| Requested process belongs to another session/container | Omit it from `process_list`; observe/input/stop report scoped not-found and perform no side effect. |
+| Explicit stop succeeds | Kill/remove the registered process, advance/flush one exit revision, synchronize the task, and allow process-only completion. |
+| Process exits between list and observe/input/stop | Return a refreshable race message naming `process_list`; never claim that an inaccessible process was stopped. |
 | Verification revision differs from current runtime revision | Mark unverified and require new verification. |
 | Foreground command uses a custom script, arbitrary arguments/port, redirects, or compound shell syntax | Do not parse or reject it; record its real exit status on the post-command revision. |
 | Foreground command exits non-zero or times out | Record failed verification and invalidate the previous pass. |
@@ -224,10 +241,12 @@ interface SubagentNotification {
 
 - Good: A root delegates three read-only explorations, waits for structured notifications, serially applies one scoped implementation, runs foreground verification, rereads the container revision, and completes with revision-bound evidence.
 - Good runtime edge: A root starts an owned background server, completes any required plan, returns one plain final response, and finishes without stopping the process or demanding unrelated workspace verification.
+- Good lifecycle edge: A later root Run calls `process_list`, selects the registered service from the same session/container, stops it with its original ownership, observes the port/process disappear, and returns one final response.
 - Good development edge: A root runs a custom validator on the project's actual port, performs a foreground inspection, and completes from the latest successful exit evidence without a parser-specific wrapper script.
 - Base: A short text-only Run stays below budget, uses no resources/subagents, writes one Run/event stream/checkpoint, and completes without invoking compaction.
 - Good provider edge: A reasoning delta with `content: null` reaches `assistant_delta`, and the final durable assistant message retains the same accumulated `reasoning_content`.
 - Bad: A component stores an uploaded `File` in a message event, a provider branch is added inside `AgentEngine`, two writers mutate the same container outside the lease, or resume trusts `TaskContract.workspaceRevision` without reading runtime state.
+- Bad lifecycle edge: A follow-up Run guesses an OS PID, kills by port, or receives processes from another session/container instead of resolving a registered Agent process ID.
 - Bad provider edge: A strict string-only object schema silently drops an entire valid reasoning delta because an optional sibling field is null.
 
 ### 6. Tests Required
@@ -237,7 +256,7 @@ interface SubagentNotification {
 | Context/profile/token logic | Complete tool grouping; media stripping; micro-compaction safety; PTL three-attempt bound; abort; deterministic circuit; one oversized round ends inside effective window; task/resource/file/subagent rehydration. |
 | Model adapter | Exact outbound content parts; nullable content/reasoning delta normalization; final plain-message reasoning preservation; resource session ownership; usage mapping/estimation; successful vision caching; clear unsupported-vision retry; unrelated 400/422 does not retry. |
 | Resources | Count/size limits including existing IDs; atomic batch failure; same-session SHA dedupe; cross-session rejection; MIME spoof; invalid UTF-8; image 2048/1.5 MiB limits; Blob absent from ledger. |
-| Runtime/revision | Every mutation path advances authoritative revision; verification binds after shell exit; process ownership isolation; materialize; snapshot pre-export exclusions; `pagehide`/dispose/checkpoint flush. |
+| Runtime/revision | Every mutation path advances authoritative revision; verification binds after shell exit; process ownership isolation; same-session/container cross-Run list/observe/input/stop; explicit-stop single revision boundary; materialize; snapshot pre-export exclusions; `pagehide`/dispose/checkpoint flush. |
 | Completion | Explicit and plain responses share plan/revision/verification gates; actionable no-whitelist recovery guidance; arbitrary foreground checks/ports; failed-exit invalidation; rejected drafts are not projected; background server completion keeps the process alive. |
 | Persistence | One checkpoint/Run; stable 250-event session and Run pagination; deep quarantine; sanitizer; session/container transaction scope; shared-resource survival; snapshot cap keeps previous value; failed active snapshot still permits queued follow-up. |
 | Subagents | Depth/count/concurrency limits; global same-container mutation serialization; role/tool/write-scope rules; repeated task labels; family budgets; child failure/verification propagation; parent cancellation waits and stops owned processes. |
@@ -297,6 +316,26 @@ if (!KNOWN_VERIFICATION_COMMANDS.some((pattern) => pattern.test(command))) rejec
 const passed = !result.timedOut && result.process.exitCode === 0;
 recordVerification({ command, passed, workspaceRevision: currentRevision });
 // The system prompt requires a relevant check and forbids masked failures.
+```
+
+#### Wrong: kill a registered service by guessed port or current Run ownership
+
+```ts
+await runShell(`kill $(findPidForPort(port))`);
+runtime.stopProcess(processId, currentRunOwnership);
+```
+
+#### Correct: discover the scoped registry entry and reuse its exact ownership
+
+```ts
+const process = runtime.getProcesses({ sessionId, containerId })
+  .find((candidate) => candidate.id === processId);
+if (!process) return scopedNotFound();
+await runtime.stopProcess(process.id, {
+  sessionId: process.sessionId,
+  runId: process.runId,
+  containerId: process.containerId,
+});
 ```
 
 #### Wrong: add provider behavior to the engine

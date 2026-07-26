@@ -145,3 +145,16 @@ No message schema, persistence, or Workspace state change is required.
 Agent Core does not parse foreground command text to decide whether a command is worthy. Every foreground shell result records the actual exit status and post-command authoritative revision. This avoids false restrictions on direct validators, custom scripts, ports, compound shell commands, redirects, and project-specific workflows.
 
 The Agent system prompt owns semantic correctness: choose a task-relevant check, let failures exit non-zero, never use forced success or unrelated commands as evidence, and verify again after any later workspace mutation. The completion gate still fails closed on missing evidence, non-zero foreground results, and revision drift; it simply stops pretending that a generic parser can understand every project's development workflow.
+
+## 10. Cross-run process control
+
+The process registry remains authoritative and keeps exact ownership on every entry. Root process tools use a two-step access path:
+
+1. Query `getProcesses({ sessionId, containerId })` to discover only processes accessible to the current conversation/container.
+2. Resolve the requested registered process ID and pass that entry's original full ownership tuple to `observeProcess`, `sendProcessInput`, or `stopProcess`.
+
+This permits a follow-up root Run to manage a server left alive by an earlier completed Run without weakening the runtime's exact ownership check. Other sessions/containers are absent from the query result. Delegated roles do not expose these process tools; Run cancellation still calls `stopRun` with the cancelling Run's exact ownership.
+
+`process_list` returns bounded process summaries with the registered Agent process ID, owner Run ID, command, running state, and a short output tail. Tool and prompt descriptions require registry-based management instead of guessing OS PIDs or killing by port.
+
+Explicit `stopProcess` becomes asynchronous. A successful stop removes/kills the registry entry, advances and flushes the process-exit revision exactly once, and lets `process_stop` synchronize the task to the post-stop revision. If runtime drift existed before the stop or any additional revision appears during shutdown, the task remains changed/unverified; otherwise a process-only stop can complete immediately.

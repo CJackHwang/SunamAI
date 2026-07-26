@@ -91,6 +91,9 @@
 - [x] 后台服务器启动只记录进程进度，不凭空标记 workspace mutation；真实 revision 漂移仍撤销旧验证。
 - [x] 前台验证不限制命令名、脚本名、参数、端口或 shell 组合；自定义检查直接按真实 exit status 记录。
 - [x] prompt 要求任务相关检查、不得掩盖失败或伪造证据；后台命令仍不能冒充验证。
+- [x] root 后续 Run 可通过 `process_list` 管理同一 session/container 内由较早 Run 启动的服务；其他 session/container 不可见。
+- [x] `process_observe`、`process_input`、`process_stop` 使用登记进程的原始完整所有权，不通过端口猜 PID。
+- [x] 显式停止只推进并 flush 一次退出 revision，任务同步到 post-stop revision 后可直接给出一次最终回复。
 - [x] Agent 对用户终端只有有界只读缓冲；所有命令使用 Agent-owned `shell_run`，不存在绕过 lease 的终端注入工具。
 - [x] 父取消等待所有 child terminal、task 持久化和 owned process 停止。
 

@@ -23,7 +23,7 @@ class RuntimeStub implements AgentWorkspaceRuntime {
   async runShell(request: ShellRunRequest): Promise<ShellRunResult> { return { timedOut: false, process: { id: 'process', sessionId: request.sessionId, runId: request.runId, containerId: request.containerId, command: request.command, isRunning: false, output: '', cursor: 0, exitCode: 0 } }; }
   observeProcess(_processId: string, _ownership: ProcessOwnership): ProcessStatus | null { return null; }
   async sendProcessInput(): Promise<boolean> { return false; }
-  stopProcess(): boolean { return false; }
+  async stopProcess(): Promise<boolean> { return false; }
   stopRun(): void {}
   getProcesses(): ProcessStatus[] { return []; }
   subscribe(_listener: (event: RuntimeProcessEvent) => void): () => void { return () => undefined; }

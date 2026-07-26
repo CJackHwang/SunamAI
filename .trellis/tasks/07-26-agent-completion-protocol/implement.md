@@ -94,8 +94,8 @@ Primary files:
 
 ## Verification evidence
 
-- `npm run check:all` passed on 2026-07-26: 36 test files / 185 tests, 7 E2E tests, 4 visual tests, 3 real WebContainer runtime tests, production build, bundle limits, and production dependency audit.
-- Coverage: statements 91.36%, branches 83.15%, functions 90.39%, lines 95.14%.
+- `npm run check:all` passed on 2026-07-27: 36 test files / 189 tests, 7 E2E tests, 4 visual tests, 3 real WebContainer runtime tests, production build, bundle limits, and production dependency audit.
+- Coverage: statements 91.33%, branches 83.17%, functions 90.51%, lines 95.21%.
 - Mobile visual regression includes a browser assertion that `.chat-input` computes `scrollbar-width: none`; the baseline passed without an update.
 - The real WebContainer server-start smoke completes from one no-tool response and preserves the owned background processes.
 
@@ -107,3 +107,14 @@ Primary files:
 - [x] Move relevance, failure propagation, and anti-fake-evidence requirements into the Agent prompt.
 - [x] Add/update executable specs and acceptance documentation.
 - [x] Run focused regressions and the final `npm run check:all` gate.
+
+## 9. Cross-run process lifecycle follow-up
+
+- [x] Add `process_list` for root-visible processes in the current session/container.
+- [x] Resolve observe/input/stop through the registry entry's original exact ownership.
+- [x] Keep other sessions/containers hidden and delegated roles Run-scoped/tool-restricted.
+- [x] Rename shell output from ambiguous `PID` to `Agent process ID` and instruct the model not to kill registered services by port.
+- [x] Make explicit process stop advance/flush the exit revision exactly once and synchronize task state.
+- [x] Add unit regressions for earlier-Run access and scope isolation.
+- [x] Add a real WebContainer regression that starts a service, completes the first Run, then lists/stops it from a follow-up Run.
+- [x] Run the final focused checks and `npm run check:all`, then refresh verification evidence.

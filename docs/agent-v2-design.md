@@ -118,6 +118,8 @@ RunBoard 以树形摘要展示子任务；展开子任务时按 run 索引读取
 
 - 所有文件路径通过容器根目录解析并拒绝逃逸。
 - 进程所有权是 `(sessionId, runId, containerId)`；不匹配的观察、输入和停止失败。
+- root 的 `process_list` 可以列出同一 session/container 内由较早 Run 启动的进程；后续观察、输入和停止使用列表记录的原始完整所有权。其他 session/container 不可见，子 Agent 不获得跨 Run 进程工具。
+- 关闭已登记服务必须使用 Agent process ID，不通过端口猜 PID。显式停止异步等待一次 post-stop revision flush，并同步当前任务 revision，避免服务已经关闭但完成门继续循环。
 - verify shell 只要求 foreground；不使用通用命令解析器猜测项目验证语义，也不允许启动后台服务。
 - 后台 `shell_run` 用于服务等持续进程，不单独制造 workspace mutation；如果它实际写文件或退出，权威 revision 漂移仍会使完成门要求重新验证。
 - 验证后仍可继续读取或运行前台检查；前台命令会在新的 shell revision 上刷新真实 exit evidence，后续 workspace 写入仍要求再次检查。
