@@ -82,3 +82,27 @@ Improved guarded Agent completion, mobile composer input, prompt-governed verifi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: Fix workspace runtime and Agent lifecycle bugs
+
+**Date**: 2026-07-27
+**Task**: Fix workspace runtime and Agent lifecycle bugs
+**Branch**: `main`
+
+### Summary
+
+Fixed stale file navigation, localized workspace defaults, runtime-owned service and port management with snapshot-first force restart, and bounded Agent checkpoint synchronization; full release gate passed.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7d1edbe` | (see git log) |
+| `6848e04` | (see git log) |
+| `1357a4a` | (see git log) |
+| `04227b7` | (see git log) |
+
+### Status
+
+[OK] **Completed**
