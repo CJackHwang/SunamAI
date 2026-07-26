@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState, type SyntheticEvent } from 'react';
-import type { TerminalLayout, TerminalTab } from '@/features/terminal-session/types';
+import type { TerminalLayout, TerminalTab } from '@/shared/contracts/terminal';
 import { RunBoard } from '@/features/agent-core/RunBoard';
 import { useAgentV2 } from '@/features/agent-core/useAgentV2';
 import { useChatAutoScroll } from '@/features/chat/hooks/useChatAutoScroll';
@@ -11,7 +11,7 @@ import { generateTitle } from '@/features/session/titleService';
 import type { SunamModel } from '@/shared/config/models';
 import type { SessionStatus } from '@/entities/workspace/types';
 import type { ChatAttachment } from '@/entities/message/types';
-import { useWorkspaceStore } from '@/entities/workspace/store';
+import { useWorkspaceActions, useWorkspaceSelector } from '@/entities/workspace/useWorkspaceStore';
 import { WorkspaceRuntimeProvider } from '@/features/runtime/WorkspaceRuntimeProvider';
 import { useWorkspaceRuntime } from '@/features/runtime/WorkspaceRuntimeContext';
 import { readChatAttachments } from '@/features/chat/lib/chatAttachments';
@@ -19,7 +19,7 @@ import { useI18n } from '@/shared/i18n';
 import { toErrorMessage } from '@/shared/lib/errors';
 import './Workspace.css';
 
-const DualTerminal = lazy(() => import('@/features/terminal-session/DualTerminal'));
+const DualTerminal = lazy(() => import('@/widgets/workspace/DualTerminal'));
 
 interface WorkspaceProps {
   apiKey: string;
@@ -36,8 +36,10 @@ interface WorkspaceProps {
 function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, updateSessionStatus }: WorkspaceProps) {
   const { t } = useI18n();
   const { runtime, webcontainer, isReady: isRuntimeReady, error: runtimeError, getContainerRoot } = useWorkspaceRuntime();
-  const { events, messages, activeRun, latestRun, streamingContent, streamingReasoning, persistenceError: agentPersistenceError, startTask, resumeTask, stopTask } = useAgentV2(apiKey, baseUrl, apiModel, sunamModel, runtime, activeSessionId, activeContainerId, updateSessionStatus);
-  const { sessions, containers, createSession, createContainer, renameSession } = useWorkspaceStore();
+  const { events, runs, messages, activeRun, latestRun, streamingContent, streamingReasoning, persistenceError: agentPersistenceError, hasOlderEvents, hasNewerEvents, loadOlderEvents, loadRunEvents, showNewerEvents, startTask, resumeTask, stopTask } = useAgentV2(apiKey, baseUrl, apiModel, sunamModel, runtime, activeSessionId, activeContainerId, updateSessionStatus);
+  const sessions = useWorkspaceSelector((state) => state.sessions);
+  const containers = useWorkspaceSelector((state) => state.containers);
+  const { createSession, createContainer, renameSession } = useWorkspaceActions();
   const isRunning = Boolean(activeRun);
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -50,6 +52,21 @@ function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel
   const [layoutState, setLayoutState] = useState<TerminalLayout>('collapsed');
   const { containerRef, isAtBottom, onScroll, scrollToBottom } = useChatAutoScroll([messages, isRunning, streamingContent, streamingReasoning, composerHeight]);
   const activeContainer = containers.find((container) => container.id === activeContainerId) ?? null;
+  const handleChatScroll = () => {
+    onScroll();
+    const container = containerRef.current;
+    if (!container) return;
+    if (container.scrollHeight - container.scrollTop - container.clientHeight < 120 && hasNewerEvents) {
+      showNewerEvents();
+      return;
+    }
+    if (container.scrollTop > 120 || !hasOlderEvents) return;
+    const previousHeight = container.scrollHeight;
+    void loadOlderEvents().then((loaded) => {
+      if (!loaded) return;
+      requestAnimationFrame(() => { if (containerRef.current === container) container.scrollTop += container.scrollHeight - previousHeight; });
+    });
+  };
 
   useEffect(() => {
     let wasMobile = window.innerWidth <= 900;
@@ -98,9 +115,9 @@ function WorkspaceContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel
   return (
     <div className="workspace-container" data-active-tab={mobileActive} data-layout={layoutState}>
       <div className="chat-section">
-        <ModelSelector model={sunamModel} isOpen={isModelMenuOpen} onToggle={() => setIsModelMenuOpen((open) => !open)} onSelect={(model) => { setSunamModel(model); setIsModelMenuOpen(false); }} onMobileSidebarToggle={onMobileSidebarToggle} />
-        <ChatMessageList messages={messages} isRunning={isRunning} containerRef={containerRef} onScroll={onScroll} bottomInset={composerHeight + 16} streamingContent={streamingContent} streamingReasoning={streamingReasoning} />
-        <ChatComposer input={input} attachments={attachments} attachmentError={attachmentError} isRunning={Boolean(isRunning)} isTerminalReady={isTerminalReady} isAtBottom={isAtBottom} taskList={<RunBoard run={activeRun ?? latestRun} events={events} liveOutput={streamingContent} onResume={() => resumeTask(latestRun)} />} onFilesSelected={(files) => { void readChatAttachments(files).then((next) => { setAttachments((current) => [...current, ...next].slice(0, 8)); setAttachmentError(null); }).catch((error) => setAttachmentError(error instanceof Error ? error.message : String(error))); }} onRemoveAttachment={(index) => setAttachments((current) => current.filter((_attachment, candidateIndex) => candidateIndex !== index))} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} onHeightChange={setComposerHeight} />
+        <ModelSelector model={sunamModel} isOpen={isModelMenuOpen} onToggle={() => setIsModelMenuOpen((open) => !open)} onSelect={(model) => { setSunamModel(model); setIsModelMenuOpen(false); }} {...(onMobileSidebarToggle ? { onMobileSidebarToggle } : {})} />
+        <ChatMessageList messages={messages} isRunning={isRunning} containerRef={containerRef} onScroll={handleChatScroll} bottomInset={composerHeight + 16} streamingContent={streamingContent} streamingReasoning={streamingReasoning} />
+        <ChatComposer input={input} attachments={attachments} attachmentError={attachmentError} isRunning={Boolean(isRunning)} isTerminalReady={isTerminalReady} isAtBottom={isAtBottom} taskList={<RunBoard run={activeRun ?? latestRun} runs={runs} events={events} liveOutput={streamingContent} {...(isRuntimeReady ? { onResume: () => resumeTask(latestRun) } : {})} onLoadRunEvents={loadRunEvents} />} onFilesSelected={(files) => { void readChatAttachments([...attachments.flatMap((attachment) => attachment.file ?? []), ...files]).then((next) => { setAttachments(next); setAttachmentError(null); }).catch((error) => setAttachmentError(error instanceof Error ? error.message : String(error))); }} onRemoveAttachment={(index) => setAttachments((current) => current.filter((_attachment, candidateIndex) => candidateIndex !== index))} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} onHeightChange={setComposerHeight} />
       </div>
       <div className="terminal-section">
         <Suspense fallback={<div className="motion-fade-in workspace-lazy-state" />}>

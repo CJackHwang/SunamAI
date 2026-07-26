@@ -1,19 +1,17 @@
-import { useEffect, useSyncExternalStore } from 'react';
 import { createInitialWorkspaceState } from '@/entities/workspace/repository';
-import type { SessionStatus, WorkspaceState } from '@/entities/workspace/types';
-import { v2Persistence, type V2PersistenceRepository } from '@/shared/persistence/v2Repository';
+import type { SessionStatus, WorkspacePersistenceRepository, WorkspaceState } from '@/entities/workspace/types';
 import { toErrorMessage } from '@/shared/lib/errors';
 import { createSessionActions } from './sessionStore';
 import { createContainerActions } from './containerStore';
 
 export type { Container, Session, WorkspaceState } from '@/entities/workspace/types';
 
-interface WorkspaceSnapshot extends WorkspaceState {
+export interface WorkspaceSnapshot extends WorkspaceState {
   hydrated: boolean;
   persistenceError: string | null;
 }
 
-interface WorkspaceStore {
+export interface WorkspaceStore {
   subscribe: (listener: () => void) => () => void;
   getSnapshot: () => WorkspaceSnapshot;
   hydrate: () => Promise<void>;
@@ -21,20 +19,27 @@ interface WorkspaceStore {
   reset: () => Promise<void>;
   createSession: () => string;
   renameSession: (id: string, title: string) => void;
-  deleteSession: (id: string) => void;
+  deleteSession: (id: string) => Promise<void>;
   togglePinSession: (id: string) => void;
   updateSessionStatus: (id: string, status: SessionStatus) => void;
   selectSession: (id: string) => void;
   createContainer: () => string;
   renameContainer: (id: string, name: string) => void;
-  deleteContainer: (id: string) => void;
+  deleteContainer: (id: string) => Promise<void>;
   togglePinContainer: (id: string) => void;
   selectContainer: (id: string) => void;
 }
 
 const DAMAGED_WORKSPACE_MESSAGE = 'The saved workspace is damaged and was isolated. Retry after reviewing the storage error; no replacement workspace was written.';
 
-function ensureWorkspaceRecordIsSafe(result: Awaited<ReturnType<V2PersistenceRepository['loadWorkspace']>>) {
+const lazyWorkspacePersistence: WorkspacePersistenceRepository = {
+  async loadWorkspace() { return (await import('@/entities/persistence/v3Repository')).v3Persistence.loadWorkspace(); },
+  async saveWorkspace(workspace) { return (await import('@/entities/persistence/v3Repository')).v3Persistence.saveWorkspace(workspace); },
+  async deleteSession(sessionId, nextWorkspace) { return (await import('@/entities/persistence/v3Repository')).v3Persistence.deleteSession(sessionId, nextWorkspace); },
+  async deleteContainer(containerId, nextWorkspace) { return (await import('@/entities/persistence/v3Repository')).v3Persistence.deleteContainer(containerId, nextWorkspace); },
+};
+
+function ensureWorkspaceRecordIsSafe(result: Awaited<ReturnType<WorkspacePersistenceRepository['loadWorkspace']>>) {
   if (!result.value && result.issues.length) throw new Error(DAMAGED_WORKSPACE_MESSAGE);
   return result.value;
 }
@@ -42,7 +47,7 @@ function ensureWorkspaceRecordIsSafe(result: Awaited<ReturnType<V2PersistenceRep
 export function createWorkspaceStore(
   initialState: WorkspaceState = createInitialWorkspaceState(),
   now: () => number = Date.now,
-  repository: V2PersistenceRepository = v2Persistence,
+  repository: WorkspacePersistenceRepository = lazyWorkspacePersistence,
 ): WorkspaceStore {
   let state: WorkspaceSnapshot = { ...initialState, hydrated: false, persistenceError: null };
   let hydration: Promise<void> | null = null;
@@ -54,32 +59,42 @@ export function createWorkspaceStore(
     return () => listeners.delete(listener);
   };
   
-  const persist = (next: WorkspaceState) => {
-    writeChain = writeChain.then(() => repository.saveWorkspace(next)).catch((error) => {
+  const reportPersistenceError = (error: unknown) => {
       state = { ...state, persistenceError: toErrorMessage(error) };
       listeners.forEach((listener) => listener());
-    });
+  };
+
+  const enqueuePersistence = (operation: () => Promise<void>): Promise<void> => {
+    writeChain = writeChain.then(operation).catch(reportPersistenceError);
+    return writeChain;
+  };
+
+  const currentWorkspaceState = (): WorkspaceState => ({
+    sessions: state.sessions,
+    containers: state.containers,
+    activeSessionId: state.activeSessionId,
+    activeContainerId: state.activeContainerId,
+  });
+
+  const persist = () => {
+    void enqueuePersistence(() => repository.saveWorkspace(currentWorkspaceState()));
   };
   
-  const setState = (updater: (previous: WorkspaceState) => WorkspaceState) => {
-    if (!state.hydrated || state.persistenceError) return;
+  const setState = (updater: (previous: WorkspaceState) => WorkspaceState, options: { persist?: boolean } = {}): WorkspaceState => {
+    if (!state.hydrated || state.persistenceError) return state;
     const nextState = updater(state);
-    if (nextState === state) return;
+    if (nextState === state) return state;
     state = { ...nextState, hydrated: state.hydrated, persistenceError: null };
-    persist(state);
+    if (options.persist !== false) persist();
     listeners.forEach((listener) => listener());
+    return state;
   };
   
   const getState = () => state;
   const isHydratedAndSafe = () => state.hydrated && !state.persistenceError;
   
-  const reportPersistenceError = (error: unknown) => {
-    state = { ...state, persistenceError: toErrorMessage(error) };
-    listeners.forEach((listener) => listener());
-  };
-
-  const sessionActions = createSessionActions(setState, getState, isHydratedAndSafe, now, repository, reportPersistenceError);
-  const containerActions = createContainerActions(setState, getState, now, repository, reportPersistenceError);
+  const sessionActions = createSessionActions(setState, getState, isHydratedAndSafe, now, repository, enqueuePersistence);
+  const containerActions = createContainerActions(setState, getState, now, repository, enqueuePersistence);
 
   return {
     subscribe,
@@ -90,7 +105,7 @@ export function createWorkspaceStore(
         const loaded = await repository.loadWorkspace();
         const next = ensureWorkspaceRecordIsSafe(loaded) ?? createInitialWorkspaceState(now());
         state = { ...next, hydrated: true, persistenceError: null };
-        if (!loaded.value) persist(next);
+        if (!loaded.value) persist();
         listeners.forEach((listener) => listener());
         await writeChain;
       })().catch((error) => {
@@ -100,6 +115,7 @@ export function createWorkspaceStore(
       return hydration;
     },
     reload: async () => {
+      await writeChain;
       hydration = null;
       state = { ...state, hydrated: false, persistenceError: null };
       listeners.forEach((listener) => listener());
@@ -115,38 +131,10 @@ export function createWorkspaceStore(
     reset: async () => {
       const next = createInitialWorkspaceState(now());
       state = { ...next, hydrated: true, persistenceError: null };
-      await repository.saveWorkspace(next);
+      await enqueuePersistence(() => repository.saveWorkspace(next));
       listeners.forEach((listener) => listener());
     },
     ...sessionActions,
     ...containerActions,
-  };
-}
-
-const workspaceStore = createWorkspaceStore({
-  sessions: [],
-  containers: [],
-  activeSessionId: null,
-  activeContainerId: null,
-});
-
-export function useWorkspaceStore() {
-  const state = useSyncExternalStore(workspaceStore.subscribe, workspaceStore.getSnapshot, workspaceStore.getSnapshot);
-  useEffect(() => { void workspaceStore.hydrate(); }, []);
-  return {
-    ...state,
-    reloadWorkspace: workspaceStore.reload,
-    resetWorkspace: workspaceStore.reset,
-    createSession: workspaceStore.createSession,
-    renameSession: workspaceStore.renameSession,
-    deleteSession: workspaceStore.deleteSession,
-    togglePinSession: workspaceStore.togglePinSession,
-    updateSessionStatus: workspaceStore.updateSessionStatus,
-    selectSession: workspaceStore.selectSession,
-    createContainer: workspaceStore.createContainer,
-    renameContainer: workspaceStore.renameContainer,
-    deleteContainer: workspaceStore.deleteContainer,
-    togglePinContainer: workspaceStore.togglePinContainer,
-    selectContainer: workspaceStore.selectContainer,
   };
 }

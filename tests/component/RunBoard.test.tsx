@@ -42,4 +42,18 @@ describe('RunBoard', () => {
     expect(view.getByText('未验收')).toBeInTheDocument();
     expect(view.queryByText('已验收')).not.toBeInTheDocument();
   });
+
+  it('loads and reveals a child transcript only when the child is expanded', async () => {
+    const user = userEvent.setup();
+    const onLoadRunEvents = vi.fn();
+    const child: AgentRun = { ...interruptedRun, id: 'child', parentRunId: interruptedRun.id, rootRunId: interruptedRun.id, depth: 1, agentRole: 'explore', delegatedTaskId: 'inspect', phase: 'completed', finalSummary: 'Inspection complete.' };
+    const events = [{ id: 'child:1', kind: 'message' as const, sessionId: 's-1', runId: child.id, sequence: 1, createdAt: 1, message: { role: 'assistant' as const, content: 'Found the relevant file.' } }];
+    const rendered = render(<I18nProvider><RunBoard run={interruptedRun} runs={[interruptedRun, child]} events={events} onLoadRunEvents={onLoadRunEvents} /></I18nProvider>);
+    const view = within(rendered.container);
+    await user.click(view.getByRole('button', { name: /任务列表/ }));
+    expect(view.queryByText('Found the relevant file.')).not.toBeVisible();
+    await user.click(view.getByText('explore'));
+    expect(onLoadRunEvents).toHaveBeenCalledWith('child');
+    expect(view.getByText('Found the relevant file.')).toBeVisible();
+  });
 });

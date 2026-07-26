@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { SquarePen, History, Box, Plus, Search } from 'lucide-react';
-import { useWorkspaceStore } from '@/entities/workspace/store';
+import { useWorkspaceActions, useWorkspaceSelector } from '@/entities/workspace/useWorkspaceStore';
 import { WorkspaceResourceList } from '@/features/session/ui/WorkspaceResourceList';
 import { useI18n } from '@/shared/i18n';
 import { usePresence } from '@/shared/ui/usePresence';
@@ -37,11 +37,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
   const isCollapsed = isMobile ? false : _isCollapsed;
   const { presentValue: isMobileOverlayPresent, isExiting: isMobileOverlayExiting } = usePresence(isMobileOpen ? true : null, 240);
 
+  const sessions = useWorkspaceSelector((state) => state.sessions);
+  const containers = useWorkspaceSelector((state) => state.containers);
+  const activeSessionId = useWorkspaceSelector((state) => state.activeSessionId);
+  const activeContainerId = useWorkspaceSelector((state) => state.activeContainerId);
   const {
-    sessions,
-    containers,
-    activeSessionId,
-    activeContainerId,
     createSession,
     renameSession,
     deleteSession,
@@ -52,7 +52,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
     deleteContainer,
     togglePinContainer,
     selectContainer
-  } = useWorkspaceStore();
+  } = useWorkspaceActions();
 
   const sortedSessions = [...sessions].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
   const sortedContainers = [...containers].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
@@ -93,7 +93,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
         <SidebarHeader 
           isCollapsed={isCollapsed} 
           setIsCollapsed={setIsCollapsed} 
-          onCloseMobile={onCloseMobile} 
+          {...(onCloseMobile ? { onCloseMobile } : {})}
         />
 
         <div className="sidebar-content">
@@ -138,14 +138,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
 
         <SidebarFooter 
           isCollapsed={isCollapsed} 
-          onOpenSettings={onOpenSettings} 
+          {...(onOpenSettings ? { onOpenSettings } : {})}
         />
 
       </div>
 
       <SidebarResourceContextMenu 
         menu={contextMenu} 
-        resource={contextResource} 
+        {...(contextResource ? { resource: contextResource } : {})}
         dimmed={isMobile} 
         labels={{ rename: t('sidebar.rename'), generateTitle: t('sidebar.generateTitle'), pin: t('sidebar.pin'), unpin: t('sidebar.unpin'), delete: t('sidebar.delete') }} 
         onClose={closeContextMenu} 

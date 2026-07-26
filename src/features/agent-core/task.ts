@@ -1,7 +1,7 @@
 import type { TaskContract } from './types';
 
 export function isNonTrivial(prompt: string): boolean {
-  return prompt.length > 80 || /(?:build|implement|fix|add|change|create|修改|实现|修复|新增|开发)/i.test(prompt);
+  return prompt.length > 80 || /(?:build|implement|fix|add|change|create|delete|remove|refactor|migrate|audit|test|check|修改|实现|修复|新增|开发|删除|迁移|重构|核查|检查|测试)/i.test(prompt);
 }
 
 export function initialTask(objective: string): TaskContract {
@@ -25,7 +25,7 @@ function cloneTask(task: TaskContract): TaskContract {
     ...task,
     acceptanceCriteria: [...task.acceptanceCriteria],
     constraints: [...task.constraints],
-    plan: task.plan.map((item) => ({ ...item, evidence: item.evidence ? [...item.evidence] : undefined })),
+    plan: task.plan.map((item) => ({ ...item, ...(item.evidence ? { evidence: [...item.evidence] } : {}) })),
     evidence: [...task.evidence],
     verificationEvidence: task.verificationEvidence.map((evidence) => ({ ...evidence })),
   };

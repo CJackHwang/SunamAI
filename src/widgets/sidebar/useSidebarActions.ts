@@ -1,7 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
 import { generateAutoTitle } from '@/features/session/titleService';
-import { AgentEventStore } from '@/features/agent-core/eventStore';
-import { projectMessages } from '@/features/agent-core/projector';
+import type { TranslationKey } from '@/shared/i18n';
 import { readAppSettings } from '@/shared/lib/settings';
 import type { SidebarContextMenuState, SidebarEditingState, SidebarResourceKind } from './sidebarResources';
 import { sidebarResourceLabel, findSidebarResource } from './sidebarResources';
@@ -12,18 +11,17 @@ export function useSidebarActions(
   containers: Container[],
   renameSession: (id: string, title: string) => void,
   renameContainer: (id: string, title: string) => void,
-  deleteSession: (id: string) => void,
-  deleteContainer: (id: string) => void,
+  deleteSession: (id: string) => Promise<void>,
+  deleteContainer: (id: string) => Promise<void>,
   togglePinSession: (id: string) => void,
   togglePinContainer: (id: string) => void,
-  t: (key: any) => string
+  t: (key: TranslationKey) => string
 ) {
   const [contextMenu, setContextMenu] = useState<SidebarContextMenuState | null>(null);
   const [editing, setEditing] = useState<SidebarEditingState | null>(null);
   const [generatingTitleId, setGeneratingTitleId] = useState<string | null>(null);
   
   const editInputRef = useRef<HTMLInputElement>(null);
-  const eventStoreRef = useRef(new AgentEventStore());
 
   useEffect(() => {
     if (editing && editInputRef.current) {
@@ -66,7 +64,11 @@ export function useSidebarActions(
     try {
       let input: string;
       if (type === 'session') {
-        const events = await eventStoreRef.current.loadSessionEvents(id);
+        const [{ AgentEventStore }, { projectMessages }] = await Promise.all([
+          import('@/features/agent-core/eventStore'),
+          import('@/features/agent-core/projector'),
+        ]);
+        const events = await new AgentEventStore().loadSessionEvents(id);
         input = projectMessages(events).find((message) => message.role === 'user')?.content || '无有效对话记录，请随意发挥。';
       } else {
         input = '这是一个容器的自动重命名，请随意起名。';
@@ -101,15 +103,15 @@ export function useSidebarActions(
     closeContextMenu();
   };
 
-  const onDelete = () => {
+  const onDelete = async () => {
     if (!contextMenu) return;
     const session = contextMenu.type === 'session';
     if (!session && !window.confirm(t('sidebar.confirmDeleteContainer'))) {
       closeContextMenu();
       return;
     }
-    if (session) deleteSession(contextMenu.id);
-    else deleteContainer(contextMenu.id);
+    if (session) await deleteSession(contextMenu.id);
+    else await deleteContainer(contextMenu.id);
     closeContextMenu();
   };
 

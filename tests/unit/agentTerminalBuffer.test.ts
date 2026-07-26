@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { appendAgentTerminalBuffer, flushAgentTerminalBuffers, getAgentTerminalBuffer, getAgentTerminalPersistenceError, subscribeAgentTerminalPersistence } from '@/features/terminal-session/agentTerminalBuffer';
-import { v2Persistence } from '@/shared/persistence/v2Repository';
+import { v3Persistence } from '@/entities/persistence/v3Repository';
 
 describe('agent terminal buffer', () => {
   it('keeps only current-tab terminal output in memory within its size bound', async () => {
@@ -15,7 +15,7 @@ describe('agent terminal buffer', () => {
     const sessionId = `terminal-error-${Date.now()}`;
     const listener = vi.fn();
     const unsubscribe = subscribeAgentTerminalPersistence(listener);
-    const save = vi.spyOn(v2Persistence, 'saveTerminalHistory').mockRejectedValueOnce(new Error('disk unavailable'));
+    const save = vi.spyOn(v3Persistence, 'saveTerminalHistory').mockRejectedValueOnce(new Error('disk unavailable'));
     appendAgentTerminalBuffer(sessionId, 'output');
     await vi.waitFor(() => expect(listener).toHaveBeenCalledWith(sessionId, 'disk unavailable'));
     expect(getAgentTerminalPersistenceError(sessionId)).toBe('disk unavailable');
@@ -25,7 +25,7 @@ describe('agent terminal buffer', () => {
 
   it('coalesces terminal chunks before flushing the latest bounded history', async () => {
     const sessionId = `terminal-flush-${Date.now()}`;
-    const save = vi.spyOn(v2Persistence, 'saveTerminalHistory').mockResolvedValue(undefined);
+    const save = vi.spyOn(v3Persistence, 'saveTerminalHistory').mockResolvedValue(undefined);
     appendAgentTerminalBuffer(sessionId, 'first');
     appendAgentTerminalBuffer(sessionId, '-second');
     await flushAgentTerminalBuffers();

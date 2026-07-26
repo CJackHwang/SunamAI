@@ -4,6 +4,10 @@ function streamResponse(delta: object): string {
   return `data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`;
 }
 
+function streamTools(calls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>): string {
+  return streamResponse({ tool_calls: calls.map((call, index) => ({ index, id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } })) });
+}
+
 test('real WebContainer keeps Agent processes, ports, and scrolling inside the services panel', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.addInitScript(() => {
@@ -23,7 +27,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
     modelTurn += 1;
     if (modelTurn === 1) {
       const backgroundCalls = Array.from({ length: 18 }, (_, index) => ({
-        index: index + 2,
+        index: index + 1,
         id: `background-${index}`,
         type: 'function' as const,
         function: {
@@ -37,9 +41,18 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
       await route.fulfill({
         contentType: 'text/event-stream',
         body: streamResponse({ tool_calls: [
-          { index: 0, id: 'plan', type: 'function', function: { name: 'update_plan', arguments: JSON.stringify({ items: [{ id: 'runtime', title: 'Runtime smoke', status: 'completed' }] }) } },
-          { index: 1, id: 'foreground', type: 'function', function: { name: 'shell_run', arguments: JSON.stringify({ command: 'echo runtime-foreground', mode: 'foreground' }) } },
+          { index: 0, id: 'plan', type: 'function', function: { name: 'update_plan', arguments: JSON.stringify({ items: [{ id: 'runtime', title: 'Runtime smoke', status: 'in_progress' }] }) } },
           ...backgroundCalls,
+        ] }),
+      });
+      return;
+    }
+    if (modelTurn === 2) {
+      await route.fulfill({
+        contentType: 'text/event-stream',
+        body: streamResponse({ tool_calls: [
+          { index: 0, id: 'foreground', type: 'function', function: { name: 'shell_run', arguments: JSON.stringify({ command: 'node --test', mode: 'foreground' }) } },
+          { index: 1, id: 'plan-complete', type: 'function', function: { name: 'update_plan', arguments: JSON.stringify({ items: [{ id: 'runtime', title: 'Runtime smoke', status: 'completed' }] }) } },
         ] }),
       });
       return;
@@ -84,6 +97,9 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(services).toHaveCSS('overflow', 'hidden');
   await expect(processList).toHaveCSS('overflow-y', 'auto');
   await expect(page.locator('.service-process-command').first()).not.toContainText('.sunam/workspaces');
+  await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph')
+    .filter({ hasText: /^Runtime smoke complete$/ }))
+    .toHaveCount(1, { timeout: 100_000 });
 
   await services.getByRole('button', { name: '预览端口 3457' }).click();
   const preview = page.getByRole('dialog', { name: '端口 3457 实时预览' });
@@ -143,4 +159,161 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await serverProcess.getByRole('button').click();
   await expect(services.getByText('端口 3457')).toBeHidden();
   await expect(serverProcess).toHaveCount(0);
+});
+
+test('real WebContainer materializes a resource and excludes generated directories before snapshot serialization', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem('sunam_v2_api_key', 'runtime-resource-no-network');
+    localStorage.setItem('sunam_v2_base_url', 'https://runtime-resource.invalid/v1');
+    localStorage.setItem('sunam_v2_api_model', 'runtime-resource');
+  });
+  let turn = 0;
+  await page.route('https://runtime-resource.invalid/v1/chat/completions', async (route) => {
+    const body = route.request().postDataJSON() as { stream?: boolean; messages?: Array<{ content: unknown }> };
+    if (!body.stream) {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Runtime resource' } }] }) });
+      return;
+    }
+    turn += 1;
+    if (turn === 1) {
+      const transcript = JSON.stringify(body.messages ?? []);
+      const resourceId = transcript.match(/file resource: (res-[0-9a-f-]+)/i)?.[1];
+      if (!resourceId) throw new Error('Runtime fixture did not receive a resource id.');
+      await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
+        { id: 'plan', name: 'update_plan', arguments: { items: [{ id: 'resource', title: 'Materialize and verify resource', status: 'in_progress' }] } },
+        { id: 'materialize', name: 'materialize_resource', arguments: { resource_id: resourceId, path: 'package.json' } },
+      ]) });
+      return;
+    }
+    if (turn === 2) {
+      await route.fulfill({ contentType: 'text/event-stream', body: streamTools([{ id: 'verify', name: 'shell_run', arguments: { command: 'npm test', mode: 'foreground' } }]) });
+      return;
+    }
+    await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
+      { id: 'plan-done', name: 'update_plan', arguments: { items: [{ id: 'resource', title: 'Materialize and verify resource', status: 'completed' }] } },
+      { id: 'complete', name: 'complete_task', arguments: { summary: 'Resource materialized and snapshot filtered.', evidence: ['npm test passed in the materialized project.'] } },
+    ]) });
+  });
+
+  await page.goto('/');
+  const composer = page.locator('textarea[placeholder="问 Sunam 任何问题..."]');
+  await expect(composer).toBeEnabled();
+  const packageJson = JSON.stringify({ scripts: { test: "mkdir -p node_modules/pkg dist src && echo ignored > node_modules/pkg/a.txt && echo built > dist/a.js && echo kept > src/kept.txt" } });
+  await page.locator('.chat-composer-shell input[type="file"]').setInputFiles({ name: 'package.json', mimeType: 'application/json', buffer: Buffer.from(packageJson) });
+  await composer.fill('Materialize this project resource, run its verification, and preserve only source workspace data in the durable snapshot.');
+  await composer.press('Enter');
+  await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph')
+    .filter({ hasText: /^Resource materialized and snapshot filtered\.$/ }))
+    .toBeVisible({ timeout: 100_000 });
+
+  const snapshot = await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('sunam-v3');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = database.transaction(['workspace', 'snapshots'], 'readonly');
+    const workspace = await new Promise<any>((resolve, reject) => {
+      const request = transaction.objectStore('workspace').get('current');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const record = await new Promise<any>((resolve, reject) => {
+      const request = transaction.objectStore('snapshots').get(workspace?.payload?.activeContainerId);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    database.close();
+    const tree = record?.payload?.tree ?? {};
+    return {
+      rootEntries: Object.keys(tree),
+      srcEntries: Object.keys(tree.src?.directory ?? {}),
+      revision: record?.payload?.revision,
+      fileCount: record?.payload?.fileCount,
+      byteSize: record?.payload?.byteSize,
+    };
+  });
+  expect(snapshot.rootEntries).toContain('src');
+  expect(snapshot.srcEntries).toContain('kept.txt');
+  expect(snapshot.rootEntries).not.toContain('node_modules');
+  expect(snapshot.rootEntries).not.toContain('dist');
+  expect(snapshot.revision).toBeGreaterThan(0);
+  expect(snapshot.fileCount).toBeGreaterThan(0);
+  expect(snapshot.byteSize).toBeGreaterThan(0);
+});
+
+test('real WebContainer cascades parent cancellation into a verify child process', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem('sunam_v2_api_key', 'runtime-child-no-network');
+    localStorage.setItem('sunam_v2_base_url', 'https://runtime-child.invalid/v1');
+    localStorage.setItem('sunam_v2_api_model', 'runtime-child');
+  });
+  let rootTurn = 0;
+  await page.route('https://runtime-child.invalid/v1/chat/completions', async (route) => {
+    const body = route.request().postDataJSON() as { stream?: boolean; messages?: Array<{ role: string; content: unknown }> };
+    if (!body.stream) {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Runtime child' } }] }) });
+      return;
+    }
+    const lastUser = [...(body.messages ?? [])].reverse().find((message) => message.role === 'user');
+    if (String(lastUser?.content).includes('Run the long verification command.')) {
+      await route.fulfill({ contentType: 'text/event-stream', body: streamTools([{ id: 'child-shell', name: 'shell_run', arguments: { command: 'npm test', mode: 'foreground', timeout_ms: 300_000 } }]) });
+      return;
+    }
+    rootTurn += 1;
+    if (rootTurn === 1) {
+      const transcript = JSON.stringify(body.messages ?? []);
+      const resourceId = transcript.match(/file resource: (res-[0-9a-f-]+)/i)?.[1];
+      if (!resourceId) throw new Error('Cancellation fixture did not receive a resource id.');
+      await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
+        { id: 'plan', name: 'update_plan', arguments: { items: [{ id: 'cancel', title: 'Start and cancel child verification', status: 'in_progress' }] } },
+        { id: 'materialize', name: 'materialize_resource', arguments: { resource_id: resourceId, path: 'package.json' } },
+        { id: 'spawn', name: 'spawn_subagent', arguments: { task_id: 'long-verify', role: 'verify', prompt: 'Run the long verification command.' } },
+      ]) });
+      return;
+    }
+    const runId = JSON.stringify(body.messages ?? []).match(/r-child-[0-9a-f-]{20,}/i)?.[0];
+    if (!runId) throw new Error('Cancellation fixture did not receive a child run id.');
+    await route.fulfill({ contentType: 'text/event-stream', body: streamTools([{ id: 'wait', name: 'wait_subagents', arguments: { run_ids: [runId] } }]) });
+  });
+
+  await page.goto('/');
+  const composer = page.locator('textarea[placeholder="问 Sunam 任何问题..."]');
+  await expect(composer).toBeEnabled();
+  const packageJson = JSON.stringify({ scripts: { test: 'node -e "setInterval(()=>{},1000)"' } });
+  await page.locator('.chat-composer-shell input[type="file"]').setInputFiles({ name: 'package.json', mimeType: 'application/json', buffer: Buffer.from(packageJson) });
+  await composer.fill('Start a verify child using this project resource, then wait while its long verification command runs.');
+  await composer.press('Enter');
+  await page.getByRole('button', { name: '服务' }).click();
+  await expect(page.locator('.service-process-row')).toHaveCount(1, { timeout: 100_000 });
+  await page.locator('.chat-submit').click();
+  await expect(page.locator('.service-process-row')).toHaveCount(0, { timeout: 30_000 });
+  await expect.poll(async () => page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('sunam-v3');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = database.transaction(['runs', 'agentTasks'], 'readonly');
+    const runs = await new Promise<any[]>((resolve, reject) => {
+      const request = transaction.objectStore('runs').getAll();
+      request.onsuccess = () => resolve(request.result.map((record) => record.payload));
+      request.onerror = () => reject(request.error);
+    });
+    const tasks = await new Promise<any[]>((resolve, reject) => {
+      const request = transaction.objectStore('agentTasks').getAll();
+      request.onsuccess = () => resolve(request.result.map((record) => record.payload));
+      request.onerror = () => reject(request.error);
+    });
+    database.close();
+    return {
+      rootCancelled: runs.some((run) => run.agentRole === 'root' && run.phase === 'cancelled'),
+      childCancelled: runs.some((run) => run.agentRole === 'verify' && run.phase === 'cancelled'),
+      taskCancelled: tasks.some((task) => task.role === 'verify' && task.status === 'cancelled'),
+    };
+  })).toEqual({ rootCancelled: true, childCancelled: true, taskCancelled: true });
 });

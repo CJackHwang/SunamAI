@@ -42,12 +42,8 @@ export default defineConfig({
       // a new precache while an old page is running can break lazy chunk loads.
       registerType: 'prompt',
       includeAssets: [
-        'favicon.svg',
-        'icons.svg',
         'icon-bg-svg.svg',
         'icon-nobg-svg.svg',
-        'sunam-appicon-192.png',
-        'sunam-appicon-512.png',
       ],
       manifest: {
         name: 'Sunam',

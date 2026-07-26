@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { listModels } from '@/shared/api/models';
 import { SUPPORTED_LOCALES, type Locale, useI18n } from '@/shared/i18n';
 import { Modal } from '@/shared/ui/Modal';
 import { ErrorState } from '@/shared/ui/AsyncState';
@@ -31,10 +30,11 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
     setIsFetchingModels(true);
     setFetchError(null);
     try {
+      const { listModels } = await import('@/shared/api/models');
       const ids = await listModels(apiKey, baseUrl);
       setModelsList(ids);
       if (ids.length > 0 && !ids.includes(model)) {
-        setModel(ids[0]);
+        setModel(ids[0]!);
       }
     } catch {
       setFetchError(t('settings.fetchModelsError'));
@@ -44,13 +44,14 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
   };
 
   return (
-    <Modal title={t('settings.title')} onDismiss={initialApiKey ? onClose : undefined} isExiting={isExiting}>
+    <Modal title={t('settings.title')} {...(initialApiKey ? { onDismiss: onClose } : {})} isExiting={isExiting}>
         
         <div className="settings-field">
-          <label>
+          <label htmlFor="settings-base-url">
             {t('settings.baseUrl')}
           </label>
           <input 
+            id="settings-base-url"
             className="input-field settings-control"
             value={baseUrl}
             onChange={e => setBaseUrl(e.target.value)}
@@ -59,10 +60,11 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
         </div>
 
         <div className="settings-field">
-          <label>
+          <label htmlFor="settings-api-key">
             {t('settings.apiKey')}
           </label>
           <input 
+            id="settings-api-key"
             className="input-field settings-control"
             type="password"
             value={apiKey}
@@ -72,12 +74,13 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
         </div>
 
         <div className="settings-field">
-          <label>
+          <label htmlFor="settings-model">
             {t('settings.model')}
           </label>
           <div className="settings-model-row">
             {modelsList.length > 0 ? (
               <select
+                id="settings-model"
                 className="input-field settings-model-control"
                 value={model}
                 onChange={e => setModel(e.target.value)}
@@ -88,6 +91,7 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
               </select>
             ) : (
               <input 
+                id="settings-model"
                 className="input-field settings-model-control"
                 value={model}
                 onChange={e => setModel(e.target.value)}
@@ -105,10 +109,10 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
         </div>
 
         <div className="settings-field">
-          <label>
+          <label htmlFor="settings-language">
             {t('settings.language')}
           </label>
-          <select className="input-field settings-control" value={locale} onChange={(event) => { void onLocaleChange(event.target.value as Locale); }}>
+          <select id="settings-language" className="input-field settings-control" value={locale} onChange={(event) => { void onLocaleChange(event.target.value as Locale); }}>
             {SUPPORTED_LOCALES.map((supportedLocale) => <option key={supportedLocale} value={supportedLocale}>{supportedLocale}</option>)}
           </select>
         </div>

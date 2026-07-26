@@ -21,3 +21,10 @@ export interface WorkspaceState {
   activeSessionId: string | null;
   activeContainerId: string | null;
 }
+
+export interface WorkspacePersistenceRepository {
+  loadWorkspace(): Promise<{ value: WorkspaceState | null; issues: unknown[] }>;
+  saveWorkspace(workspace: WorkspaceState): Promise<void>;
+  deleteSession(sessionId: string, nextWorkspace?: WorkspaceState): Promise<void>;
+  deleteContainer(containerId: string, nextWorkspace?: WorkspaceState): Promise<void>;
+}

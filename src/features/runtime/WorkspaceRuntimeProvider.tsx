@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type PropsWithChildren } from 'react';
 import type { WebContainer } from '@webcontainer/api';
-import { WebContainerAgentRuntime } from '@/features/terminal-session/WebContainerAgentRuntime';
+import { WebContainerAgentRuntime } from '@/features/runtime/WebContainerAgentRuntime';
 import { getWebContainer } from '@/shared/lib/webcontainer';
 import { getContainerRoot } from '@/shared/lib/containerPaths';
 import { WorkspaceRuntimeContext, type WorkspaceRuntimeContextValue } from './WorkspaceRuntimeContext';

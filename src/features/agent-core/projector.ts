@@ -19,7 +19,8 @@ export function sanitizeToolTranscript(messages: Message[]): Message[] {
       if ([...requiredIds].every((id) => responseIds.has(id))) {
         sanitized.push(message, ...toolMessages);
       } else if (message.content.trim()) {
-        sanitized.push({ ...message, tool_calls: undefined });
+        const { tool_calls: _toolCalls, ...withoutToolCalls } = message;
+        sanitized.push(withoutToolCalls);
       }
       index = cursor;
       continue;

@@ -1,4 +1,4 @@
-import type { CSSProperties, RefObject } from 'react';
+import { useMemo, type CSSProperties, type RefObject } from 'react';
 import type { Message } from '@/entities/message/types';
 import { useI18n } from '@/shared/i18n';
 import { ChatMessage } from './ChatMessage';
@@ -17,9 +17,14 @@ interface ChatMessageListProps {
 
 export function ChatMessageList({ messages, isRunning, containerRef, onScroll, bottomInset = 100, streamingContent = '', streamingReasoning = '' }: ChatMessageListProps) {
   const { t } = useI18n();
+  const toolResults = useMemo(() => {
+    const index = new Map<string, Message>();
+    for (const message of messages) if (message.role === 'tool' && message.tool_call_id) index.set(message.tool_call_id, message);
+    return index;
+  }, [messages]);
   return (
     <div ref={containerRef} onScroll={onScroll} className="chat-message-list" style={{ '--chat-bottom-inset': `${bottomInset}px` } as CSSProperties}>
-      {messages.map((message, index) => <ChatMessage key={`${message.role}-${index}`} message={message} toolOutputs={message.tool_calls ? messages.slice(index + 1).filter((candidate) => candidate.role === 'tool' && message.tool_calls!.some((tool) => tool.id === candidate.tool_call_id)) : []} />)}
+      {messages.map((message, index) => <ChatMessage key={`${message.role}-${index}`} message={message} toolOutputs={message.tool_calls?.flatMap((tool) => toolResults.get(tool.id) ?? []) ?? []} />)}
       {(streamingContent || streamingReasoning) && <ChatMessage message={{ role: 'assistant', content: streamingContent, reasoning_content: streamingReasoning, _ui_streaming: true }} toolOutputs={[]} />}
       {isRunning && !streamingContent && !streamingReasoning && <div className="chat-thinking-indicator motion-fade-in">{t('chat.thinking')}</div>}
     </div>

@@ -1,10 +1,19 @@
 import { toErrorMessage } from '@/shared/lib/errors';
+import { LLMError } from '@/shared/api/llmError';
 
 export function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
+export function isPromptTooLongModelError(error: unknown): boolean {
+  return error instanceof LLMError
+    && error.code === 'http_error'
+    && [400, 413, 422].includes(error.status ?? 0)
+    && /(?:context|token|prompt|length|too large|too long|maximum)/i.test(error.message);
+}
+
 function isRetryableModelError(error: unknown): boolean {
+  if (error instanceof LLMError) return error.retryable;
   return /\b429\b|\b5\d\d\b|network|fetch/i.test(toErrorMessage(error));
 }
 

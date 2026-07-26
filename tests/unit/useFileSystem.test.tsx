@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { WebContainer } from '@webcontainer/api';
 import { useFileSystem } from '@/features/file-manager/useFileSystem';
 
@@ -17,11 +17,11 @@ function createWebContainerFixture() {
   const fixture = {
     fs: {
       readdir: async (path: string) => children(path),
-      readFile: async (path: string, encoding?: string | null) => {
+      readFile: vi.fn(async (path: string, encoding?: string | null) => {
         const content = nodes.get(path)?.content;
         if (!content) throw new Error('ENOENT');
         return encoding ? new TextDecoder().decode(content) : content;
-      },
+      }),
       writeFile: async (path: string, data: string | Uint8Array) => { nodes.set(path, { directory: false, content: typeof data === 'string' ? new TextEncoder().encode(data) : data }); },
       mkdir: async (path: string) => { nodes.set(path, { directory: true }); return path; },
       rm: async (path: string) => { for (const key of Array.from(nodes.keys())) if (key === path || key.startsWith(`${path}/`)) nodes.delete(key); },
@@ -40,6 +40,10 @@ describe('useFileSystem', () => {
     const { fixture, nodes } = createWebContainerFixture();
     const { result } = renderHook(() => useFileSystem(fixture, '/c'));
     await waitFor(() => expect(result.current.entries.map((entry) => entry.name)).toEqual(['target', 'existing.txt']));
+    expect(fixture.fs.readFile).not.toHaveBeenCalled();
+    expect(result.current.entries.find((entry) => entry.name === 'existing.txt')?.size).toBeNull();
+    await act(async () => { await result.current.readFileRaw('existing.txt'); });
+    expect(result.current.entries.find((entry) => entry.name === 'existing.txt')?.size).toBe(3);
     await act(async () => { await result.current.createFile('new.txt', 'new'); });
     await waitFor(() => expect(nodes.has('/c/new.txt')).toBe(true));
     await act(async () => { await result.current.rename('new.txt', 'renamed.txt'); });

@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { WebContainer } from '@webcontainer/api';
-import type { WebContainerAgentRuntime } from '@/features/terminal-session/WebContainerAgentRuntime';
+import type { WebContainerAgentRuntime } from '@/features/runtime/WebContainerAgentRuntime';
 import { getContainerRoot } from '@/shared/lib/containerPaths';
 
 export interface WorkspaceRuntimeContextValue {

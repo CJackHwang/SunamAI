@@ -48,6 +48,7 @@ export function useFileManagerTouch(fs: {
     if (event.touches.length !== 1) return;
     clearLongPressTimer();
     const touch = event.touches[0];
+    if (!touch) return;
     const gesture: TouchGesture = { entry, startX: touch.clientX, startY: touch.clientY, x: touch.clientX, y: touch.clientY, armed: false, cancelled: false, dragging: false, target: null };
     touchGestureRef.current = gesture;
     isLongPressing.current = false;

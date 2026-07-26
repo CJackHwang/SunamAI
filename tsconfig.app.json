@@ -20,6 +20,12 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* Safety */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,

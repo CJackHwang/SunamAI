@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { WebContainerAgentRuntime } from '@/features/terminal-session/WebContainerAgentRuntime';
+import { WebContainerAgentRuntime } from '@/features/runtime/WebContainerAgentRuntime';
 import type { WebContainer } from '@webcontainer/api';
+import { Blob as NodeBlob } from 'node:buffer';
+import { estimateTextTokens } from '@/shared/lib/tokenEstimate';
 
 function createRuntime(snapshot: Record<string, unknown> | null = null) {
   const kill = vi.fn();
@@ -23,7 +25,13 @@ function createRuntime(snapshot: Record<string, unknown> | null = null) {
     export: vi.fn(async () => ({})),
     spawn: vi.fn(async () => process),
   };
-  const repository = { loadSnapshot: vi.fn(async () => ({ value: snapshot, issues: [] })), saveSnapshot: vi.fn(async () => undefined) };
+  const repository = {
+    loadSnapshotState: vi.fn(async () => ({
+      value: snapshot ? { containerId: 'c-1', tree: snapshot, fileCount: 1, byteSize: 1, revision: 7, updatedAt: 1 } : null,
+      issues: [],
+    })),
+    saveSnapshot: vi.fn(async () => undefined),
+  };
   return { runtime: new WebContainerAgentRuntime(webcontainer as unknown as WebContainer, repository as never), kill, webcontainer };
 }
 
@@ -76,7 +84,17 @@ function createFilesystemRuntime() {
     export: vi.fn(async () => ({ 'snapshot.txt': { file: { contents: 'saved' } } })),
     spawn: vi.fn(async () => process),
   };
-  const repository = { loadSnapshot: vi.fn(async () => ({ value: null, issues: [] })), saveSnapshot: vi.fn(async () => undefined) };
+  const resources = new Map([
+    ['text-resource', { id: 'text-resource', sessionId: 's-1', originatingRunId: 'r-1', name: 'note.txt', kind: 'text' as const, mimeType: 'text/plain', size: 13, sha256: 'text-hash', createdAt: 1, blob: new NodeBlob(['one\ntwo\nthree']) as unknown as Blob }],
+    ['cjk-resource', { id: 'cjk-resource', sessionId: 's-1', originatingRunId: 'r-1', name: 'cjk.txt', kind: 'text' as const, mimeType: 'text/plain', size: 600, sha256: 'cjk-hash', createdAt: 1, blob: new NodeBlob(['中文😀'.repeat(200)]) as unknown as Blob }],
+    ['image-resource', { id: 'image-resource', sessionId: 's-1', originatingRunId: 'r-1', name: 'image.png', kind: 'image' as const, mimeType: 'image/png', size: 3, sha256: 'image-hash', createdAt: 2, blob: new NodeBlob(['png']) as unknown as Blob }],
+  ]);
+  const repository = {
+    loadSnapshotState: vi.fn(async () => ({ value: null, issues: [] })),
+    saveSnapshot: vi.fn(async () => undefined),
+    listResources: vi.fn(async () => ({ value: [...resources.values()].map(({ blob: _blob, ...resource }) => resource), issues: [] })),
+    loadResource: vi.fn(async (id: string) => ({ value: resources.get(id) ?? null, issues: [] })),
+  };
   const runtime = new WebContainerAgentRuntime(webcontainer as unknown as WebContainer, repository as never);
   runtime.subscribe((event) => events.push(event.type));
   return { runtime, files, webcontainer, repository, inputs, watchers, events };
@@ -133,8 +151,8 @@ describe('WebContainerAgentRuntime process ownership', () => {
     expect(kill).toHaveBeenCalledOnce();
   });
 
-  it('restores the v2 snapshot into the shared container root before work starts', async () => {
-    const tree = { 'restored.txt': { file: { contents: 'v2' } } };
+  it('restores the v3 snapshot into the shared container root before work starts', async () => {
+    const tree = { 'restored.txt': { file: { contents: 'v3' } } };
     const { runtime, webcontainer } = createRuntime(tree);
     await runtime.ensureContainer('c-1');
     expect(webcontainer.mount).toHaveBeenCalledWith(tree, { mountPoint: '.sunam/workspaces/c-1' });
@@ -160,11 +178,13 @@ describe('WebContainerAgentRuntime process ownership', () => {
     await Promise.resolve();
     const ownership = { sessionId: 's-1', runId: 'r-1', containerId: 'c-1' };
     expect(result.timedOut).toBe(false);
+    expect(await runtime.getWorkspaceRevision('c-1')).toBeGreaterThanOrEqual(2);
     expect(runtime.getProcesses(ownership)).toHaveLength(0);
     expect(await runtime.sendProcessInput(result.process.id, ownership, 'input')).toBe(false);
     expect(events).toEqual(expect.arrayContaining(['started', 'output', 'exited']));
     await runtime.flushSnapshots();
-    expect(repository.saveSnapshot).toHaveBeenCalledWith('c-1', expect.any(Object));
+    expect(webcontainer.export).toHaveBeenCalledWith('.sunam/workspaces/c-1', expect.objectContaining({ format: 'json', excludes: expect.arrayContaining(['node_modules/**', 'dist/**']) }));
+    expect(repository.saveSnapshot).toHaveBeenCalledWith('c-1', expect.any(Object), expect.any(Number));
     runtime.dispose();
     expect(watchers[0]?.close).toHaveBeenCalledOnce();
     expect(inputs).toEqual([]);
@@ -192,5 +212,50 @@ describe('WebContainerAgentRuntime process ownership', () => {
       { path: 'same.txt', content: 'two' },
     ])).rejects.toThrow('duplicate path');
     expect(webcontainer.fs.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('reads, describes, and materializes persisted resources on demand', async () => {
+    const { runtime, files } = createFilesystemRuntime();
+    expect(await runtime.getWorkspaceRevision('c-1')).toBe(0);
+    expect(await runtime.listResources('s-1')).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'text-resource' }), expect.objectContaining({ id: 'image-resource' })]));
+    expect(await runtime.readResourceText('s-1', 'text-resource', 2, 3)).toBe('   2 | two\n   3 | three');
+    expect(await runtime.readResourceText('s-1', 'text-resource', 1, 3, 1)).toContain('resource range truncated');
+    const boundedCjk = await runtime.readResourceText('s-1', 'cjk-resource', 1, 3, 64);
+    expect(boundedCjk).toContain('resource range truncated');
+    expect(estimateTextTokens(boundedCjk)).toBeLessThanOrEqual(64);
+    await expect(runtime.readResourceText('s-1', 'image-resource')).rejects.toThrow('not a text resource');
+    await expect(runtime.readResourceText('s-1', 'missing')).rejects.toThrow('not found');
+    await expect(runtime.readResourceText('foreign-session', 'text-resource')).rejects.toThrow('not found in this session');
+    expect(await runtime.readResourceImage('s-1', 'image-resource')).toEqual(expect.objectContaining({ id: 'image-resource', kind: 'image' }));
+    await expect(runtime.readResourceImage('s-1', 'text-resource')).rejects.toThrow('not an image resource');
+    const change = await runtime.materializeResource('s-1', 'c-1', 'image-resource', 'assets/image.png');
+    expect(change).toMatchObject({ path: 'assets/image.png', kind: 'created', afterBytes: 3 });
+    expect(new TextDecoder().decode(files.get('.sunam/workspaces/c-1/assets/image.png'))).toBe('png');
+    expect(await runtime.getWorkspaceRevision('c-1')).toBe(1);
+  });
+
+  it('bounds the active user terminal without exposing an input bridge', () => {
+    const { runtime } = createFilesystemRuntime();
+    runtime.appendUserTerminalBuffer('a'.repeat(20_100));
+    runtime.appendUserTerminalBuffer('tail');
+    expect(runtime.getUserTerminalBuffer()).toHaveLength(20_000);
+    expect(runtime.getUserTerminalBuffer().endsWith('tail')).toBe(true);
+  });
+
+  it('surfaces snapshot write failures through the runtime error channel', async () => {
+    const { runtime, repository } = createFilesystemRuntime();
+    const errors: string[] = [];
+    runtime.subscribeErrors((error) => errors.push(error));
+    vi.mocked(repository.saveSnapshot).mockRejectedValueOnce(new Error('snapshot disk full'));
+    await expect(runtime.flushWorkspace('c-1')).rejects.toThrow('snapshot disk full');
+    expect(errors).toEqual(['snapshot disk full']);
+    runtime.dispose();
+  });
+
+  it('rejects a shell request that is already cancelled', async () => {
+    const { runtime } = createRuntime();
+    const controller = new AbortController();
+    controller.abort(new DOMException('stopped', 'AbortError'));
+    await expect(runtime.runShell({ command: 'never', mode: 'foreground', sessionId: 's-1', runId: 'r-1', containerId: 'c-1', signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
   });
 });

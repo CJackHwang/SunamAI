@@ -54,8 +54,9 @@ export const workspaceTools: RegisteredTool[] = [
     timeoutMs: 30_000,
     resultType: 'changes',
     async execute(input, context) {
-      const changes = await context.runtime.applyWorkspaceChanges(context.containerId, input.changes.map((change) => ({ path: change.path, content: change.content, expectedContent: change.expected_content })));
-      context.updateTask((task) => ({ ...task, changedWorkspace: true, workspaceRevision: task.workspaceRevision + 1, verified: false }));
+      const changes = await context.runtime.applyWorkspaceChanges(context.containerId, input.changes.map((change) => ({ path: change.path, content: change.content, ...(change.expected_content !== undefined ? { expectedContent: change.expected_content } : {}) })));
+      const workspaceRevision = await context.runtime.getWorkspaceRevision(context.containerId);
+      context.updateTask((task) => ({ ...task, changedWorkspace: true, workspaceRevision, verified: false, verifiedRevision: -1 }));
       return { ok: true, content: changes.map((change) => `${change.kind === 'created' ? 'Created' : 'Updated'} ${change.path} (${change.beforeBytes} → ${change.afterBytes} bytes)`).join('\n'), data: changes, changedWorkspace: true };
     },
   }),

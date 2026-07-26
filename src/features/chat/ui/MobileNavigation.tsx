@@ -1,5 +1,5 @@
 import { Folder, MessageSquare, Monitor, Server, Terminal } from 'lucide-react';
-import type { TerminalTab } from '@/features/terminal-session/types';
+import type { TerminalTab } from '@/shared/contracts/terminal';
 import { useI18n } from '@/shared/i18n';
 import './MobileNavigation.css';
 

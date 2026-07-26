@@ -1,5 +1,5 @@
 import { Folder, Maximize2, Minimize2, Monitor, PanelRightClose, Server, Terminal as TerminalIcon } from 'lucide-react';
-import type { TerminalLayout, TerminalTab } from './types';
+import type { TerminalLayout, TerminalTab } from '@/shared/contracts/terminal';
 import { useI18n } from '@/shared/i18n';
 import './TerminalTabs.css';
 

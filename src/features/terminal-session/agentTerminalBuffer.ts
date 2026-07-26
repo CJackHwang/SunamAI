@@ -1,4 +1,4 @@
-import { v2Persistence } from '@/shared/persistence/v2Repository';
+import { v3Persistence } from '@/entities/persistence/v3Repository';
 import { toErrorMessage } from '@/shared/lib/errors';
 
 const MAX_HISTORY_LENGTH = 50_000;
@@ -12,7 +12,7 @@ const writeChains = new Map<string, Promise<void>>();
 function persistBuffer(sessionId: string): Promise<void> {
   const content = buffers.get(sessionId) ?? '';
   const write = (writeChains.get(sessionId) ?? Promise.resolve())
-    .then(() => v2Persistence.saveTerminalHistory(sessionId, content))
+    .then(() => v3Persistence.saveTerminalHistory(sessionId, content))
     .then(() => {
       if (!persistenceErrors.delete(sessionId)) return;
       errorListeners.forEach((listener) => listener(sessionId, null));
@@ -70,7 +70,7 @@ export async function flushAgentTerminalBuffers(): Promise<void> {
 export async function restoreAgentTerminalBuffer(sessionId: string | null): Promise<string> {
   if (!sessionId) return '';
   if (buffers.has(sessionId)) return buffers.get(sessionId)!;
-  const stored = await v2Persistence.loadTerminalHistory(sessionId);
+  const stored = await v3Persistence.loadTerminalHistory(sessionId);
   const content = (stored.value ?? '').slice(-MAX_HISTORY_LENGTH);
   buffers.set(sessionId, content);
   return content;

@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import SettingsModal from '../widgets/settings/SettingsModal.tsx';
 import { Sidebar } from '../widgets/sidebar/Sidebar.tsx';
-import { useWorkspaceStore } from '@/entities/workspace/store';
+import { useWorkspaceActions, useWorkspaceSelector } from '@/entities/workspace/useWorkspaceStore';
 import { readAppSettings, saveConnectionSettings, saveSunamModel } from '@/shared/lib/settings';
 import type { SunamModel } from '@/shared/config/models';
 import { useI18n, type Locale } from '@/shared/i18n';
@@ -16,7 +16,11 @@ const MainPage: React.FC = () => {
   const [baseUrl, setBaseUrl] = useState(initialSettings.baseUrl);
   const [apiModel, setApiModel] = useState(initialSettings.apiModel);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const { activeSessionId, activeContainerId, updateSessionStatus, hydrated, persistenceError, reloadWorkspace } = useWorkspaceStore();
+  const activeSessionId = useWorkspaceSelector((state) => state.activeSessionId);
+  const activeContainerId = useWorkspaceSelector((state) => state.activeContainerId);
+  const hydrated = useWorkspaceSelector((state) => state.hydrated);
+  const persistenceError = useWorkspaceSelector((state) => state.persistenceError);
+  const { updateSessionStatus, reloadWorkspace } = useWorkspaceActions();
   const { locale, setLocale, t } = useI18n();
   const [sunamModel, setSunamModel] = useState<SunamModel>(initialSettings.sunamModel);
   

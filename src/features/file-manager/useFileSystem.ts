@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { WebContainer } from '@webcontainer/api';
 import type { FileEntry } from '@/entities/file/types';
-import { mapWithConcurrency } from '@/shared/lib/async';
 import { isSafeEntryName } from './fileUtils';
 
 export type { FileEntry } from '@/entities/file/types';
-
-const SIZE_CONCURRENCY = 8;
 
 function joinPath(base: string, name: string): string {
   return base === '/' ? `/${name}` : `${base}/${name}`;
@@ -46,19 +43,11 @@ export function useFileSystem(wc: WebContainer | null, rootDir = '/') {
     setError(null);
     try {
       const rawEntries = await wc.fs.readdir(directory, { withFileTypes: true });
-      const listed = await mapWithConcurrency(rawEntries, SIZE_CONCURRENCY, async (entry): Promise<FileEntry> => {
+      const listed = rawEntries.map((entry): FileEntry => {
         const path = joinPath(directory, entry.name);
         if (entry.isDirectory()) return { name: entry.name, isDirectory: true, size: 0 };
         const cachedSize = sizeCacheRef.current.get(path);
-        if (cachedSize !== undefined) return { name: entry.name, isDirectory: false, size: cachedSize };
-        try {
-          const content = await wc.fs.readFile(path);
-          const size = content.byteLength;
-          sizeCacheRef.current.set(path, size);
-          return { name: entry.name, isDirectory: false, size };
-        } catch {
-          return { name: entry.name, isDirectory: false, size: null };
-        }
+        return { name: entry.name, isDirectory: false, size: cachedSize ?? null };
       });
       listed.sort((left, right) => left.isDirectory !== right.isDirectory ? (left.isDirectory ? -1 : 1) : left.name.localeCompare(right.name));
       setEntries(listed);
@@ -106,8 +95,13 @@ export function useFileSystem(wc: WebContainer | null, rootDir = '/') {
   const remove = useCallback(async (name: string) => { if (!wc) return; await run(async () => { validate(name); await wc.fs.rm(joinPath(currentPathRef.current, name), { recursive: true }); }, 'Failed to delete'); }, [run, wc]);
   const rename = useCallback(async (oldName: string, newName: string) => { if (!wc) return; await run(async () => { validate(oldName); validate(newName); await movePath(wc, joinPath(currentPathRef.current, oldName), joinPath(currentPathRef.current, newName)); }, 'Failed to rename'); }, [run, wc]);
   const moveFile = useCallback(async (sourceName: string, destinationDir: string) => { if (!wc) return; await run(async () => { validate(sourceName); if (!isWithinRoot(destinationDir, rootDir)) throw new Error('Cannot move outside the container root'); await movePath(wc, joinPath(currentPathRef.current, sourceName), joinPath(destinationDir, sourceName)); }, 'Failed to move'); }, [rootDir, run, wc]);
-  const readFile = useCallback(async (name: string) => { if (!wc) return ''; validate(name); return wc.fs.readFile(joinPath(currentPathRef.current, name), 'utf-8'); }, [wc]);
-  const readFileRaw = useCallback(async (name: string) => { if (!wc) return new Uint8Array(); validate(name); return wc.fs.readFile(joinPath(currentPathRef.current, name)); }, [wc]);
+  const cacheSize = useCallback((name: string, size: number) => {
+    const path = joinPath(currentPathRef.current, name);
+    sizeCacheRef.current.set(path, size);
+    setEntries((current) => current.map((entry) => entry.name === name && !entry.isDirectory ? { ...entry, size } : entry));
+  }, []);
+  const readFile = useCallback(async (name: string) => { if (!wc) return ''; validate(name); const content = await wc.fs.readFile(joinPath(currentPathRef.current, name), 'utf-8'); cacheSize(name, new Blob([content]).size); return content; }, [cacheSize, wc]);
+  const readFileRaw = useCallback(async (name: string) => { if (!wc) return new Uint8Array(); validate(name); const content = await wc.fs.readFile(joinPath(currentPathRef.current, name)); cacheSize(name, content.byteLength); return content; }, [cacheSize, wc]);
   const uploadFile = useCallback(async (file: File) => { if (!wc) return; await run(async () => { validate(file.name); await wc.fs.writeFile(joinPath(currentPathRef.current, file.name), new Uint8Array(await file.arrayBuffer())); }, 'Failed to upload'); }, [run, wc]);
   const uploadFiles = useCallback(async (files: FileList | File[]) => { for (const file of Array.from(files)) await uploadFile(file); }, [uploadFile]);
 

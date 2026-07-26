@@ -28,6 +28,8 @@ export interface WorkspaceTreeEntry {
   isDirectory: boolean;
 }
 
+export interface RuntimeResourceDescriptor { id: string; name: string; kind: 'text' | 'image' | 'binary'; mimeType: string; size: number; sha256: string; createdAt: number; }
+
 export interface ShellRunRequest {
   command: string;
   containerId: string;
@@ -52,6 +54,12 @@ export interface ProcessOwnership {
 /** Browser-safe boundary between the Agent Core and WebContainer. */
 export interface AgentWorkspaceRuntime {
   ensureContainer(containerId: string): Promise<void>;
+  getWorkspaceRevision(containerId: string): Promise<number>;
+  flushWorkspace(containerId: string): Promise<void>;
+  listResources(sessionId: string): Promise<RuntimeResourceDescriptor[]>;
+  readResourceText(sessionId: string, resourceId: string, startLine?: number, endLine?: number, maxTokens?: number): Promise<string>;
+  readResourceImage(sessionId: string, resourceId: string): Promise<RuntimeResourceDescriptor>;
+  materializeResource(sessionId: string, containerId: string, resourceId: string, path: string): Promise<WorkspaceChangeSummary>;
   listWorkspace(containerId: string, maxDepth: number): Promise<WorkspaceTreeEntry[]>;
   readWorkspaceFile(containerId: string, path: string, startLine?: number, endLine?: number): Promise<string>;
   searchWorkspace(containerId: string, query: string, maxResults: number): Promise<Array<{ path: string; line: number; content: string }>>;
@@ -65,6 +73,4 @@ export interface AgentWorkspaceRuntime {
   subscribe(listener: (event: RuntimeProcessEvent) => void): () => void;
   getUserTerminalBuffer(): string;
   appendUserTerminalBuffer(data: string): void;
-  sendUserTerminalInput(data: string): Promise<boolean>;
-  onUserTerminalInput(listener: (data: string) => void): void;
 }

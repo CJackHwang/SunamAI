@@ -6,6 +6,6 @@ export function extractChatContent(argsString: string): string {
     return parsed.message || parsed.question || '';
   } catch {
     const match = argsString.match(/"message"\s*:\s*"([\s\S]*)/);
-    return match ? match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\') : '';
+    return match?.[1]?.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\') ?? '';
   }
 }

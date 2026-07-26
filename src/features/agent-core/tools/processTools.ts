@@ -12,19 +12,22 @@ export const processTools: RegisteredTool[] = [
     timeoutMs: 300_000,
     resultType: 'process',
     async execute(input, context) {
-      const result = await context.runtime.runShell({ command: input.command, mode: input.mode, timeoutMs: input.timeout_ms, containerId: context.containerId, sessionId: context.sessionId, runId: context.runId, signal: context.signal });
+      const result = await context.runtime.runShell({ command: input.command, mode: input.mode, ...(input.timeout_ms ? { timeoutMs: input.timeout_ms } : {}), containerId: context.containerId, sessionId: context.sessionId, runId: context.runId, signal: context.signal });
       const process = result.process;
       const output = process.output || '(no output)';
       const content = `${result.timedOut ? 'Command still running after timeout.' : `Exit: ${process.exitCode ?? 'running'}`}\nPID: ${process.id}\n${output}`;
       const verification = input.mode === 'foreground' && isVerificationCommand(input.command) ? { command: input.command, passed: !result.timedOut && process.exitCode === 0 } : undefined;
+      const workspaceRevision = await context.runtime.getWorkspaceRevision(context.containerId);
       if (verification) context.updateTask((task) => ({
         ...task,
-        verified: task.verified || verification.passed,
-        verifiedRevision: verification.passed ? task.workspaceRevision : task.verifiedRevision,
+        workspaceRevision,
+        verified: verification.passed,
+        verifiedRevision: verification.passed ? workspaceRevision : -1,
         evidence: [...task.evidence, `${verification.passed ? 'Verified' : 'Failed verification'}: ${input.command}`],
-        verificationEvidence: [...task.verificationEvidence, { ...verification, workspaceRevision: task.workspaceRevision, createdAt: Date.now() }],
+        verificationEvidence: [...task.verificationEvidence, { ...verification, workspaceRevision, createdAt: Date.now() }],
       }));
-      return { ok: !result.timedOut && (process.exitCode ?? 0) === 0, content, data: process, verification };
+      else context.updateTask((task) => ({ ...task, changedWorkspace: true, workspaceRevision, verified: false, verifiedRevision: -1 }));
+      return { ok: !result.timedOut && (process.exitCode ?? 0) === 0, content, data: process, ...(verification ? { verification } : { changedWorkspace: true }) };
     },
   }),
   defineTool({
@@ -83,20 +86,6 @@ export const processTools: RegisteredTool[] = [
       const buffer = context.runtime.getUserTerminalBuffer();
       if (!buffer) return { ok: true, content: '(User terminal is currently empty or has not received any output yet)' };
       return { ok: true, content: `--- USER TERMINAL RECENT OUTPUT ---\n${buffer}\n--- END USER TERMINAL ---` };
-    },
-  }),
-  defineTool({
-    name: 'write_user_terminal',
-    description: 'Send text input directly to the user\'s active terminal. Use this to execute commands in the user\'s foreground terminal, fix their running process, or take over their shell. IMPORTANT: To execute a command (press Enter), you MUST append "\\r" to your input. To send Ctrl+C, send "\\x03".',
-    schema: z.object({ input: z.string().min(1) }),
-    readOnly: false,
-    concurrencySafe: false,
-    dataImpact: 'process',
-    timeoutMs: 5_000,
-    resultType: 'control',
-    async execute(input, context) {
-      const sent = await context.runtime.sendUserTerminalInput(input.input);
-      return { ok: sent, content: sent ? 'Input sent to user terminal.' : 'User terminal is not active.' };
     },
   }),
 ];

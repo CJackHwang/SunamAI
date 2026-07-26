@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeSessionRecords, recoveredSessionStatus } from '@/features/agent-core/useAgentV2';
+import { detectEventTailDrift, detectWorkspaceDrift, mergeSessionRecords, recoveredSessionStatus, selectMessageWindow } from '@/features/agent-core/useAgentV2';
 import type { AgentRun } from '@/features/agent-core/types';
 
 describe('useAgentV2 session isolation', () => {
@@ -26,5 +26,24 @@ describe('useAgentV2 session isolation', () => {
 
     expect(recoveredSessionStatus([run('old', 'completed', 1), run('latest', 'interrupted', 2)])).toBe('idle');
     expect(recoveredSessionStatus([run('active', 'acting', 3)])).toBeNull();
+  });
+
+  it('detects resume drift only when a checkpoint revision is known and differs', () => {
+    expect(detectWorkspaceDrift(undefined, 4)).toBeUndefined();
+    expect(detectWorkspaceDrift(4, 4)).toBeUndefined();
+    expect(detectWorkspaceDrift(3, 4)).toEqual({ checkpointRevision: 3, currentRevision: 4 });
+  });
+
+  it('detects persisted events that landed after the checkpoint tail', () => {
+    expect(detectEventTailDrift(undefined, 5)).toBeUndefined();
+    expect(detectEventTailDrift(5, 5)).toBeUndefined();
+    expect(detectEventTailDrift(5, 7)).toEqual({ checkpointSequence: 5, currentSequence: 7 });
+  });
+
+  it('keeps a 5,000-message history inside the fixed 250-message DOM window', () => {
+    const messages = Array.from({ length: 5_000 }, (_, index) => index);
+    expect(selectMessageWindow(messages, null)).toEqual(messages.slice(4_750));
+    expect(selectMessageWindow(messages, 2_500)).toEqual(messages.slice(2_250, 2_500));
+    expect(selectMessageWindow(messages, 100)).toHaveLength(100);
   });
 });

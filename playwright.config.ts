@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH;
+
 export default defineConfig({
   testDir: './tests',
   testMatch: ['**/e2e/**/*.spec.ts', '**/visual/**/*.spec.ts'],
@@ -11,7 +13,13 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   snapshotPathTemplate: '{testDir}/{testFileDir}/{testFileName}-snapshots/{arg}{-projectName}{ext}',
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [{
+    name: 'chromium',
+    use: {
+      ...devices['Desktop Chrome'],
+      ...(executablePath ? { launchOptions: { executablePath } } : {}),
+    },
+  }],
   webServer: {
     command: 'npm run build && npm run preview -- --host 127.0.0.1',
     url: 'http://127.0.0.1:4173',

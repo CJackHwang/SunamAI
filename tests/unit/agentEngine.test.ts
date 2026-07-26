@@ -4,6 +4,7 @@ import { AgentEngine } from '@/features/agent-core/engine';
 import { AgentEventStore } from '@/features/agent-core/eventStore';
 import type { AgentModelClient } from '@/features/agent-core/modelClient';
 import type { AgentEvent, AgentModelResponse, TaskContract } from '@/features/agent-core/types';
+import { LLMError } from '@/shared/api/llmError';
 
 function tool(id: string, name: string, args: Record<string, unknown>): AgentModelResponse {
   return { message: { role: 'assistant', content: '', tool_calls: [{ id, type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, toolCalls: [{ id, name, arguments: JSON.stringify(args) }] };
@@ -61,11 +62,15 @@ class FakeRuntime implements AgentWorkspaceRuntime {
   readonly commands: string[] = [];
 
   async ensureContainer(): Promise<void> {}
+  async getWorkspaceRevision(): Promise<number> { return 0; }
+  async flushWorkspace(): Promise<void> {}
+  async listResources(): Promise<[]> { return []; }
+  async readResourceText(): Promise<string> { return ''; }
+  async readResourceImage() { return { id: 'res', name: 'image.png', kind: 'image' as const, mimeType: 'image/png', size: 1, sha256: 'x', createdAt: 1 }; }
+  async materializeResource(_containerId: string, _resourceId: string, path: string) { return { path, kind: 'created' as const, beforeBytes: 0, afterBytes: 1 }; }
   async listWorkspace(): Promise<WorkspaceTreeEntry[]> { return []; }
   getUserTerminalBuffer(): string { return ''; }
   appendUserTerminalBuffer(_data: string): void {}
-  async sendUserTerminalInput(_data: string): Promise<boolean> { return true; }
-  onUserTerminalInput(_listener: (data: string) => void): void {}
   async readWorkspaceFile(_containerId: string, path: string): Promise<string> { return this.files.get(path) ?? ''; }
   async searchWorkspace(): Promise<Array<{ path: string; line: number; content: string }>> { return []; }
   async applyWorkspaceChanges(_containerId: string, changes: Array<{ path: string; content: string }>) { changes.forEach((change) => this.files.set(change.path, change.content)); return changes.map((change) => ({ path: change.path, kind: 'updated' as const, beforeBytes: 0, afterBytes: change.content.length })); }
@@ -145,6 +150,17 @@ describe('Agent Core v2', () => {
     expect(events.some((event) => event.kind === 'tool_finished' && event.result.content.includes('invalid JSON'))).toBe(true);
   });
 
+  it('stops an identical rejected tool loop after one recovery turn', async () => {
+    const events: AgentEvent[] = [];
+    const repeated = Array.from({ length: 4 }, (_, index) => tool(`repeat-${index}`, 'complete_task', { summary: 'Done.', evidence: ['claim'] }));
+    const engine = new AgentEngine({ sessionId: 's-repeat', containerId: 'c-repeat', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Check this workspace.', initialMessages: [], client: new ScriptedClient(repeated), runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+
+    await engine.execute();
+
+    expect(engine.getRun()).toMatchObject({ phase: 'failed', modelTurns: 4, toolCalls: 4, error: 'Agent repeated complete_task with identical arguments after recovery guidance.' });
+    expect(events.filter((event) => event.kind === 'recovery_hint' && event.message.includes('consecutive times'))).toHaveLength(2);
+  });
+
   it('caps read-only tool execution at four concurrent calls while preserving result order', async () => {
     const runtime = new ConcurrentReadRuntime();
     const events: AgentEvent[] = [];
@@ -160,7 +176,7 @@ describe('Agent Core v2', () => {
     expect(events.filter((event) => event.kind === 'tool_finished').slice(0, 6).map((event) => event.toolCall.id)).toEqual(reads.map((call) => call.id));
   });
 
-  it('records a failed verification but allows the changed workspace run to finish if evidence is provided', async () => {
+  it('records a failed verification and refuses to complete the stale workspace revision', async () => {
     const runtime = new FailingVerificationRuntime();
     const events: AgentEvent[] = [];
     const client = new ScriptedClient([
@@ -171,9 +187,9 @@ describe('Agent Core v2', () => {
     ]);
     const engine = new AgentEngine({ sessionId: 's-4', containerId: 'c-4', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Implement and test a workspace change.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
     await engine.execute();
-    expect(engine.getRun().phase).toBe('completed');
+    expect(engine.getRun().phase).toBe('failed');
     expect(events.some((event) => event.kind === 'verification' && !event.passed)).toBe(true);
-    expect(events.some((event) => event.kind === 'tool_finished' && event.toolCall.function.name === 'complete_task' && event.result.ok)).toBe(true);
+    expect(events.some((event) => event.kind === 'tool_finished' && event.toolCall.function.name === 'complete_task' && !event.result.ok && event.result.content.includes('current workspace revision'))).toBe(true);
   });
 
   it('emits an exponential retry event for retryable model failures and can finish afterwards', async () => {
@@ -184,6 +200,22 @@ describe('Agent Core v2', () => {
     await engine.execute();
     expect(engine.getRun().phase).toBe('completed');
     expect(events.some((event) => event.kind === 'model_retry' && event.delayMs >= 500)).toBe(true);
+  });
+
+  it('backs off a prompt-too-long request three times by complete groups and persists deterministic fallback state', async () => {
+    const events: AgentEvent[] = [];
+    const tooLong = () => new LLMError('http_error', 'maximum context token length exceeded by prompt', { status: 400 });
+    const engine = new AgentEngine({
+      sessionId: 's-ptl', containerId: 'c-ptl', persona: 'Sunam 6.9 Pron', model: 'private-model', input: 'Inspect.',
+      initialMessages: Array.from({ length: 20 }, (_, index) => ({ role: 'user' as const, content: `history-${index}` })),
+      client: new ScriptedClient([tooLong(), tooLong(), tooLong()]), runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal,
+      onEvent: (event) => events.push(event), onRunChange: () => undefined,
+    });
+    await engine.execute();
+    expect(engine.getRun()).toMatchObject({ phase: 'failed', modelTurns: 3 });
+    expect(events.filter((event) => event.kind === 'recovery_hint' && event.message.includes('oldest 20%'))).toHaveLength(2);
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'context_compacted', fallback: true, fallbackReason: 'main_prompt_too_long' }));
+    expect(events.some((event) => event.kind === 'checkpoint')).toBe(true);
   });
 
   it('cancels immediately while waiting for a model retry', async () => {
@@ -225,13 +257,14 @@ describe('Agent Core v2', () => {
     const engine = new AgentEngine({
       sessionId: 's-resume', containerId: 'c-resume', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Continue from checkpoint.', initialMessages: [],
       client, runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: () => undefined, onRunChange: () => undefined,
-      resume: { sourceRunId: 'r-old', task, summary: 'Checkpoint facts.' },
+      resume: { sourceRunId: 'r-old', task, summary: 'Checkpoint facts.', workspaceDrift: { checkpointRevision: 2, currentRevision: 3 } },
     });
     await engine.execute();
     expect(engine.getRun()).toMatchObject({ phase: 'completed', parentRunId: 'r-old', task: { objective: 'Implement the original feature.', acceptanceCriteria: ['Original acceptance'] } });
     expect(engine.getRun().task.verificationEvidence).toHaveLength(2);
     expect(client.messages[0]?.content).toContain('Objective: Implement the original feature.');
     expect(client.messages[0]?.content).toContain('Checkpoint facts.');
+    expect(client.messages.some((message) => message.content.includes('RECOVERY WORKSPACE DRIFT'))).toBe(true);
   });
 
   it('rejects an oversized tool batch before partially executing it', async () => {

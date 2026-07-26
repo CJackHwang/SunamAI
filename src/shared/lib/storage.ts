@@ -9,7 +9,6 @@ export const STORAGE_KEYS = {
 export interface StorageLike {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
-  removeItem(key: string): void;
 }
 
 function getBrowserStorage(): StorageLike | null {
@@ -35,20 +34,4 @@ export function writeText(key: string, value: string, storage = getBrowserStorag
   } catch (error) {
     console.warn(`[Storage] Failed to write ${key}`, error);
   }
-}
-
-export function readJson<T>(key: string, fallback: T, storage = getBrowserStorage()): T {
-  const raw = readText(key, '', storage);
-  if (!raw) return fallback;
-
-  try {
-    return JSON.parse(raw) as T;
-  } catch (error) {
-    console.warn(`[Storage] Failed to parse ${key}; using fallback`, error);
-    return fallback;
-  }
-}
-
-export function writeJson<T>(key: string, value: T, storage = getBrowserStorage()): void {
-  writeText(key, JSON.stringify(value), storage);
 }

@@ -17,14 +17,17 @@
     "test:visual": "playwright test tests/visual",
     "test:runtime": "playwright test --config playwright.runtime.config.ts",
     "check:bundle": "node scripts/check-bundle.mjs",
-    "check": "npm run typecheck && npm run lint && npm run test:coverage && npm run build && npm run check:bundle",
+    "check:architecture": "node scripts/check-architecture.mjs",
+    "check": "npm run typecheck && npm run lint && npm run check:architecture && npm run test:coverage && npm run build && npm run check:bundle",
+    "check:audit": "npm audit --omit=dev --audit-level=high",
+    "check:all": "npm run check && npm run test:e2e && npm run test:visual && npm run test:runtime && npm run check:audit",
     "preview": "vite preview"
   },
   "dependencies": {
     "@webcontainer/api": "^1.6.4",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "lucide-react": "^1.25.0",
+    "lucide-react": "^1.26.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
@@ -33,7 +36,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1",
+    "@playwright/test": "^1.62.0",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

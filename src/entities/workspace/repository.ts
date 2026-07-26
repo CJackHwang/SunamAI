@@ -1,7 +1,7 @@
 import type { WorkspaceState } from './types';
 import { createId } from '@/shared/lib/ids';
 
-/** Creates the first durable workspace only when the v2 database has no workspace record. */
+/** Creates the first durable workspace only when the active v3 database has no workspace record. */
 export function createInitialWorkspaceState(now = Date.now()): WorkspaceState {
   const defaultSessionId = createId('s');
   const defaultContainerId = createId('c');

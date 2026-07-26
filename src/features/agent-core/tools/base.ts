@@ -1,6 +1,16 @@
 import { z } from 'zod';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
-import type { AgentToolResult, TaskContract } from '../types';
+import type { AgentRole, AgentToolResult, SubagentNotification, TaskContract } from '../types';
+import type { ContainerMutationLease } from '../agentFamily';
+
+export interface SubagentHost {
+  spawn(input: { taskId: string; role: Exclude<AgentRole, 'root'>; prompt: string; writeScope?: string[] }): Promise<{ runId: string; taskId: string; status: string }>;
+  wait(runIds: string[]): Promise<SubagentNotification[]>;
+  message(runId: string, message: string): Promise<boolean>;
+  stop(runId: string): Promise<boolean>;
+  stopAll(): Promise<void>;
+  snapshot(): string[];
+}
 
 export interface ToolExecutionContext {
   sessionId: string;
@@ -8,6 +18,10 @@ export interface ToolExecutionContext {
   containerId: string;
   runtime: AgentWorkspaceRuntime;
   signal: AbortSignal;
+  agentRole: AgentRole;
+  writeScope?: string[];
+  subagents?: SubagentHost;
+  mutationLease: ContainerMutationLease;
   getTask: () => TaskContract;
   updateTask: (updater: (current: TaskContract) => TaskContract) => void;
 }
@@ -20,7 +34,7 @@ export interface ToolDefinition<TSchema extends z.ZodType> {
   concurrencySafe: boolean;
   dataImpact: 'none' | 'workspace' | 'process' | 'task' | 'run';
   timeoutMs: number;
-  resultType: 'text' | 'tree' | 'matches' | 'changes' | 'process' | 'plan' | 'control';
+  resultType: 'text' | 'tree' | 'matches' | 'changes' | 'process' | 'plan' | 'control' | 'resources' | 'resource';
   execute(input: z.infer<TSchema>, context: ToolExecutionContext): Promise<AgentToolResult>;
 }
 
@@ -41,12 +55,14 @@ export function defineTool<TSchema extends z.ZodType>(definition: ToolDefinition
 }
 
 export function isVerificationCommand(command: string): boolean {
-  if (/\|\||[;|]|(^|[^&])&([^&]|$)/.test(command)) return false;
-  const finalCommand = command.split('&&').at(-1)?.trim() ?? '';
-  return [
+  if (/\|\||[;|<>`\r\n]|\$\(|(^|[^&])&([^&]|$)/.test(command)) return false;
+  const patterns = [
     /^(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|check|lint|build|typecheck|verify)(?=\s|$|:)/i,
+    /^node\s+--test(?=\s|$)/i,
     /^(?:npx\s+)?(?:pytest|vitest|jest|mocha|tsc)(?=\s|$)/i,
     /^(?:cargo|go|mvn|gradle)\s+test(?=\s|$)/i,
     /^(?:\.\/|[^\s]+\/)?(?:test|check|lint|build|typecheck|verify)(?:\.[a-z0-9]+)?(?=\s|$)/i,
-  ].some((pattern) => pattern.test(finalCommand));
+  ];
+  const segments = command.split('&&').map((segment) => segment.trim()).filter(Boolean);
+  return segments.length > 0 && segments.every((segment) => patterns.some((pattern) => pattern.test(segment)));
 }

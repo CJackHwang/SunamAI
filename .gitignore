@@ -1,26 +1,54 @@
-# Logs
-logs
+# Logs and process state
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+*.pid
+*.pid.lock
 
-node_modules
-dist
-dist-ssr
-coverage
-playwright-report
-test-results
-blob-report
+# Dependencies, builds, reports, and tool caches
+node_modules/
+dist/
+dist-ssr/
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.nyc_output/
+.vite/
+.cache/
+*.tsbuildinfo
+
+# Environment files and local credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
 *.local
+*.pem
+*.key
+*.p12
+*.pfx
+playwright/.auth/
+**/storageState.json
+
+# Temporary files
+.tmp/
+tmp/
+temp/
+*.tmp
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
+.history/
 .DS_Store
+Thumbs.db
+Desktop.ini
 *.suo
 *.ntvs*
 *.njsproj

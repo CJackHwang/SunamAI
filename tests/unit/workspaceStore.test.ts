@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceStore } from '@/entities/workspace/store';
 import type { WorkspaceState } from '@/entities/workspace/types';
-import { V2PersistenceRepository } from '@/shared/persistence/v2Repository';
-import { clearV2Database } from '../helpers/v2Database';
+import { V3PersistenceRepository } from '@/entities/persistence/v3Repository';
+import { clearV3Database } from '../helpers/persistenceDatabase';
+import { registerWorkspaceDeletionPreparation } from '@/entities/workspace/deletionCoordinator';
 
 const initialState: WorkspaceState = {
   sessions: [{ id: 's-old', title: '旧会话', updatedAt: 1 }],
@@ -26,7 +27,7 @@ describe('workspace store', () => {
     store.updateSessionStatus(sessionId, 'completed_unread');
     store.selectSession(sessionId);
     expect(store.getSnapshot().sessions[0]).toMatchObject({ title: '重命名', pinned: true, status: 'idle' });
-    store.deleteSession(sessionId);
+    await store.deleteSession(sessionId);
     expect(store.getSnapshot().activeSessionId).toBe('s-old');
   });
 
@@ -34,7 +35,7 @@ describe('workspace store', () => {
     const store = createWorkspaceStore(initialState, () => 50, transientRepository());
     await store.hydrate();
     const newId = store.createContainer();
-    store.deleteContainer(newId);
+    await store.deleteContainer(newId);
     expect(store.getSnapshot().activeContainerId).toBe('c-old');
   });
 
@@ -51,7 +52,7 @@ describe('workspace store', () => {
     expect(store.createSession()).toBe('s-empty');
     expect(store.getSnapshot().sessions).toHaveLength(1);
     expect(store.getSnapshot().activeSessionId).toBe('s-empty');
-    expect((repository as unknown as { deleteSession: ReturnType<typeof vi.fn> }).deleteSession).toHaveBeenCalledWith('s-redundant');
+    await vi.waitFor(() => expect((repository as unknown as { deleteSession: ReturnType<typeof vi.fn> }).deleteSession).toHaveBeenCalledWith('s-redundant', expect.objectContaining({ activeSessionId: 's-empty' })));
 
     store.updateSessionStatus('s-empty', 'running');
     expect(store.createSession()).not.toBe('s-empty');
@@ -73,9 +74,9 @@ describe('workspace store', () => {
     expect(firstId).not.toBe(secondId);
   });
 
-  it('hydrates the v2 workspace state on a fresh store', async () => {
-    const repository = new V2PersistenceRepository();
-    await clearV2Database();
+  it('hydrates the v3 workspace state on a fresh store', async () => {
+    const repository = new V3PersistenceRepository();
+    await clearV3Database();
     await repository.saveWorkspace(initialState);
     const store = createWorkspaceStore({ ...initialState, sessions: [], containers: [], activeSessionId: null, activeContainerId: null }, () => 60, repository);
     await store.hydrate();
@@ -100,7 +101,7 @@ describe('workspace store', () => {
     expect(store.getSnapshot().sessions[0]?.title).toBe('ready');
   });
 
-  it('renames, pins, selects, reloads, and resets v2 workspace metadata', async () => {
+  it('renames, pins, selects, reloads, and resets v3 workspace metadata', async () => {
     const repository = { saveWorkspace: vi.fn(async () => undefined), deleteSession: vi.fn(async () => undefined), deleteContainer: vi.fn(async () => undefined), loadWorkspace: vi.fn(async () => ({ value: { ...initialState, activeSessionId: 's-old', activeContainerId: 'c-old' }, issues: [] })) } as never;
     const store = createWorkspaceStore(initialState, () => 70, repository);
     await store.hydrate();
@@ -118,7 +119,7 @@ describe('workspace store', () => {
     expect((repository as { saveWorkspace: ReturnType<typeof vi.fn> }).saveWorkspace).toHaveBeenCalled();
   });
 
-  it('starts a fresh v2 workspace when none exists and leaves no stale active IDs after the last deletion', async () => {
+  it('starts a fresh v3 workspace when none exists and leaves no stale active IDs after the last deletion', async () => {
     const repository = { saveWorkspace: vi.fn(async () => undefined), deleteSession: vi.fn(async () => undefined), deleteContainer: vi.fn(async () => undefined), loadWorkspace: vi.fn(async () => ({ value: null, issues: [] })) } as never;
     const store = createWorkspaceStore({ sessions: [{ id: 'only-session', title: 'Only', updatedAt: 1, status: 'failed_unread' }], containers: [{ id: 'only-container', name: 'Only', updatedAt: 1 }], activeSessionId: 'only-session', activeContainerId: 'only-container' }, () => 80, repository);
     await store.hydrate();
@@ -132,12 +133,12 @@ describe('workspace store', () => {
     const isolatedState = { sessions: [{ id: 'last-session', title: 'Last', updatedAt: 1 }], containers: [{ id: 'last-container', name: 'Last', updatedAt: 1 }], activeSessionId: 'last-session', activeContainerId: 'last-container' } satisfies WorkspaceState;
     const isolated = createWorkspaceStore(isolatedState, () => 81, transientRepository(isolatedState));
     await isolated.hydrate();
-    isolated.deleteSession('last-session');
-    isolated.deleteContainer('last-container');
+    await isolated.deleteSession('last-session');
+    await isolated.deleteContainer('last-container');
     expect(isolated.getSnapshot()).toMatchObject({ activeSessionId: null, activeContainerId: null });
   });
 
-  it('pauses editing instead of inventing a workspace if v2 hydration fails', async () => {
+  it('pauses editing instead of inventing a workspace if v3 hydration fails', async () => {
     const repository = { saveWorkspace: vi.fn(async () => undefined), deleteSession: vi.fn(async () => undefined), deleteContainer: vi.fn(async () => undefined), loadWorkspace: vi.fn(async () => { throw new Error('indexeddb unavailable'); }) } as never;
     const store = createWorkspaceStore({ sessions: [], containers: [], activeSessionId: null, activeContainerId: null }, () => 90, repository);
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -177,7 +178,47 @@ describe('workspace store', () => {
     const repository = { saveWorkspace: vi.fn(async () => undefined), deleteSession: vi.fn(async () => { throw new Error('delete failed'); }), deleteContainer: vi.fn(async () => undefined), loadWorkspace: vi.fn(async () => ({ value: initialState, issues: [] })) } as never;
     const store = createWorkspaceStore(initialState, () => 92, repository);
     await store.hydrate();
-    store.deleteSession('s-old');
-    await vi.waitFor(() => expect(store.getSnapshot().persistenceError).toBe('delete failed'));
+    await store.deleteSession('s-old');
+    expect(store.getSnapshot().persistenceError).toBe('delete failed');
+  });
+
+  it('serializes workspace saves and transactional deletions in call order', async () => {
+    let releaseSave!: () => void;
+    const saveGate = new Promise<void>((resolve) => { releaseSave = resolve; });
+    const repository = {
+      saveWorkspace: vi.fn(() => saveGate),
+      deleteSession: vi.fn(async () => undefined),
+      deleteContainer: vi.fn(async () => undefined),
+      loadWorkspace: vi.fn(async () => ({ value: initialState, issues: [] })),
+    } as never;
+    const store = createWorkspaceStore(initialState, () => 93, repository);
+    await store.hydrate();
+    const sessionId = store.createSession();
+    const deletion = store.deleteSession(sessionId);
+    await Promise.resolve();
+    expect((repository as { deleteSession: ReturnType<typeof vi.fn> }).deleteSession).not.toHaveBeenCalled();
+    releaseSave();
+    await deletion;
+    await vi.waitFor(() => expect((repository as { deleteSession: ReturnType<typeof vi.fn> }).deleteSession).toHaveBeenCalledOnce());
+  });
+
+  it('waits for active-run deletion preparation before removing durable session data', async () => {
+    let releasePreparation!: () => void;
+    const preparationGate = new Promise<void>((resolve) => { releasePreparation = resolve; });
+    const preparation = vi.fn(() => preparationGate);
+    const unregister = registerWorkspaceDeletionPreparation(preparation);
+    const repository = transientRepository();
+    try {
+      const store = createWorkspaceStore(initialState, () => 94, repository);
+      await store.hydrate();
+      const deletion = store.deleteSession('s-old');
+      await vi.waitFor(() => expect(preparation).toHaveBeenCalledWith({ kind: 'session', id: 's-old' }));
+      expect((repository as unknown as { deleteSession: ReturnType<typeof vi.fn> }).deleteSession).not.toHaveBeenCalled();
+      releasePreparation();
+      await deletion;
+      await vi.waitFor(() => expect((repository as unknown as { deleteSession: ReturnType<typeof vi.fn> }).deleteSession).toHaveBeenCalledOnce());
+    } finally {
+      unregister();
+    }
   });
 });

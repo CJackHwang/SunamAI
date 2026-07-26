@@ -29,6 +29,8 @@ export class AgentEventEmitter {
     this.sequence = sequence;
   }
 
+  getSequence(): number { return this.sequence; }
+
   async start(run: AgentRun): Promise<void> {
     await this.emit('run_started', { run });
   }

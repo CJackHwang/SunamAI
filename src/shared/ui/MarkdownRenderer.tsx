@@ -20,7 +20,7 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
           return match ? (
             <div className="markdown-code-block">
               <Suspense fallback={<pre className="markdown-code-fallback"><code>{source}</code></pre>}>
-                <SyntaxCodeBlock language={match[1]}>{source}</SyntaxCodeBlock>
+                <SyntaxCodeBlock language={match[1]!}>{source}</SyntaxCodeBlock>
               </Suspense>
             </div>
           ) : (

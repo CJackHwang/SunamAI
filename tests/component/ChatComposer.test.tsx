@@ -32,7 +32,7 @@ describe('ChatComposer', () => {
   });
 
   it('allows sending attachments without requiring typed text', () => {
-    const { container } = render(<I18nProvider><ChatComposer input="" attachments={[{ name: 'notes.txt', size: 5, content: 'hello' }]} isRunning={false} isTerminalReady isAtBottom onInputChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()} onScrollToBottom={vi.fn()} /></I18nProvider>);
+    const { container } = render(<I18nProvider><ChatComposer input="" attachments={[{ name: 'notes.txt', size: 5, resourceId: 'res-1' }]} isRunning={false} isTerminalReady isAtBottom onInputChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()} onScrollToBottom={vi.fn()} /></I18nProvider>);
     const sendButton = container.querySelector('.glass-btn') as HTMLButtonElement;
     expect(sendButton).toBeEnabled();
   });
