@@ -48,6 +48,7 @@ export const zhCN = {
   'chat.retry': '重试',
   'chat.thinkingProcess': '思考过程',
   'chat.running': '执行中:',
+  'chat.completed': '已完成:',
   'chat.result': '结果',
   'chat.backToBottom': '回到底部',
   'chat.attachFiles': '添加聊天附件',

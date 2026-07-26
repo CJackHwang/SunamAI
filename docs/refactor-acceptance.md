@@ -94,6 +94,10 @@
 - [x] 5,000-event 会话首屏只读 250，DOM 固定为当前 250-message 窗口。
 - [x] tool result projection 使用一次性索引，为 O(n)。
 - [x] 1,000 个 SSE delta 最多 30 次/秒更新，最终文本完全一致；buffer 上限 1 MiB。
+- [x] OpenAI-compatible SSE 的 nullable content/reasoning 字段在边界规范化，思考过程不会因 `content: null` 被整帧丢弃。
+- [x] 聊天自动跟底使用无动画校正，只有用户显式“回到底部”才启用 smooth scroll；任务条和输入区高度变化不重启连续滚动动画。
+- [x] 思考过程使用紧凑的内部滚动区；普通工具调用默认折叠并保留运行/完成状态，`ask_user` 继续直接展示；工具 disclosure 使用固有宽高非线性动画、底部锚定、四边对称 padding 和 reduced-motion 回退。
+- [x] 全局 motion token 按反馈/空间/退场角色使用；移动菜单 presence 覆盖完整 sheet exit，模型选择器有退场动画，终端标签不再动画 font-size。
 - [x] 历史 Markdown 使用 `content-visibility`。
 - [x] 文件列表不读取全文求大小。
 - [x] workspace selector 和相同 status 写入短路有效。
@@ -122,9 +126,9 @@ Runtime：真实 WebContainer 进程/端口/服务面板、资源 materialize、
 ## 11. 当前工作区验证记录（2026-07-26）
 
 - 优化冻结状态：**通过**。最终代码状态下 `npm run check:all` 已连续两次完整通过；每次都包含 `npm run check`、E2E、visual、runtime 和 production audit。
-- 核心自动化：35 个测试文件、166 个测试，连续两次全绿。
-- 覆盖率：statements 91.23%、branches 82.95%、functions 90.39%、lines 94.97%。
-- 包体：初始 84.92 KiB gzip、总 JS 313.28 KiB gzip、dist 1.34 MiB。v3 数据层从首屏拆出并在 hydrate 时懒加载。
+- 核心自动化：36 个测试文件、175 个测试，连续两次全绿。
+- 覆盖率：statements 91.24%、branches 83.05%、functions 90.40%、lines 94.97%。
+- 包体：初始 84.94 KiB gzip、总 JS 314.09 KiB gzip、dist 1.34 MiB。v3 数据层从首屏拆出并在 hydrate 时懒加载。
 - Playwright 实际执行结果：E2E 7/7、visual 4/4、runtime 3/3；资源卡/子任务树的桌面与移动基线已经生成、人工检查，并在不更新截图的两次完整门禁中通过。
 - Runtime 证据包括：桌面切换到移动端后 Agent 后台进程和端口保持；资源 materialize 后 snapshot 仅保留源数据并排除 `node_modules`/dist；父取消会级联停止 verify 子任务进程。
 - `npm run check:audit` 在两次完整门禁中均返回 `found 0 vulnerabilities`。完整 development audit 仍有 8 个 high，全部属于 `vite-plugin-pwa@1.3.0` / `workbox-build@7.4.1` 构建链；不兼容 Vite 8 的 1.2.0 降级不作为修复，详见 [依赖策略](dependency-advisories.md)。

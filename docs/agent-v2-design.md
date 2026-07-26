@@ -149,8 +149,8 @@ v3 stores：workspace、runs、events、checkpoints、terminalHistory、snapshot
 
 ## 10. 当前实现基线
 
-2026-07-26 的最终工作区已连续两次通过完整 `npm run check:all`。核心自动化为 35 个测试文件、166 个测试；E2E 7/7、视觉 4/4、真实 WebContainer 3/3。真实 Runtime 已覆盖移动端切换后后台进程与端口继续存在、资源 materialize 后快照排除生成目录，以及父 Run 取消级联停止 verify 子进程。
+2026-07-26 的最终工作区已连续两次通过完整 `npm run check:all`。核心自动化为 36 个测试文件、175 个测试；E2E 7/7、视觉 4/4、真实 WebContainer 3/3。真实 Runtime 已覆盖移动端切换后后台进程和端口保持、资源 materialize 后快照排除生成目录，以及父 Run 取消级联停止 verify 子进程。
 
-当前覆盖率为 statements 91.23%、branches 82.95%、functions 90.39%、lines 94.97%；初始/总 JS 为 84.92/313.28 KiB gzip，生产 `dist` 1.34 MiB，生产依赖 high/critical 为零。该基线表示上下文、资源、v3 persistence 与普通 subagent 的第一版已经越过优化冻结门，后续功能仍需遵守本设计中的预算、revision、持久化和取消边界。
+当前覆盖率为 statements 91.24%、branches 83.05%、functions 90.40%、lines 94.97%；初始/总 JS 为 84.94/314.09 KiB gzip，生产 `dist` 1.34 MiB，生产依赖 high/critical 为零。该基线表示上下文、资源、v3 persistence 与普通 subagent 的第一版已经越过优化冻结门，后续功能仍需遵守本设计中的预算、revision、持久化和取消边界。
 
 自动化门槛和真实浏览器场景见 [发布与优化冻结验收](refactor-acceptance.md)，模块依赖见 [架构说明](architecture.md)。

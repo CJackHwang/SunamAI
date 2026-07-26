@@ -1,5 +1,5 @@
 import { createRef } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '@/shared/i18n';
 import { FileContextMenu } from '@/features/file-manager/FileContextMenu';
@@ -24,5 +24,24 @@ describe('desktop file actions', () => {
   it('portals the menu outside transformed terminal ancestors', () => {
     render(<div style={{ transform: 'translateY(0)', overflow: 'hidden' }}><I18nProvider><FileContextMenu menu={{ x: 640, y: 320, entry }} onClose={vi.fn()} onPreview={vi.fn()} onDownload={vi.fn()} onRename={vi.fn()} onDelete={vi.fn()} /></I18nProvider></div>);
     expect(screen.getByText('重命名').closest('.context-menu')?.parentElement).toBe(document.body);
+  });
+
+  it('keeps the context menu mounted for the full sheet exit duration', async () => {
+    vi.useFakeTimers();
+    const props = { onClose: vi.fn(), onPreview: vi.fn(), onDownload: vi.fn(), onRename: vi.fn(), onDelete: vi.fn() };
+    try {
+      const { rerender } = render(<I18nProvider><FileContextMenu menu={{ x: 640, y: 320, entry }} {...props} /></I18nProvider>);
+      rerender(<I18nProvider><FileContextMenu menu={null} {...props} /></I18nProvider>);
+      const exitingMenu = document.querySelector('.context-menu.is-exiting');
+      expect(exitingMenu).toBeInTheDocument();
+
+      await act(() => vi.advanceTimersByTimeAsync(239));
+      expect(exitingMenu).toBeInTheDocument();
+
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(exitingMenu).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -8,8 +8,8 @@
 .right-sidebar-btn:hover { background: var(--color-gray-200); }
 .terminal-icon-btn { display: flex; align-items: center; justify-content: center; padding: 6px; border-radius: var(--radius-medium); color: var(--color-text-secondary); transition: background-color var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-fast) var(--motion-snappy); }
 .terminal-icon-btn:hover { background: var(--color-gray-200); color: var(--color-black); }
-.terminal-tab-btn { display: flex; align-items: center; gap: 6px; padding: 8px 16px; border-bottom: 2px solid transparent; border-radius: var(--radius-medium); background: transparent; color: var(--color-text-secondary); font-size: 15px; font-weight: 500; white-space: nowrap; transition: color var(--motion-base) ease, background-color var(--motion-fast) ease, border-color var(--motion-base) ease, font-size var(--motion-base) var(--motion-ease); }
-.terminal-tab-btn.active { color: var(--color-black); font-size: 16px; font-weight: 600; }
+.terminal-tab-btn { display: flex; align-items: center; gap: 6px; padding: 8px 16px; border-bottom: 2px solid transparent; border-radius: var(--radius-medium); background: transparent; color: var(--color-text-secondary); font-size: 15px; font-weight: 500; white-space: nowrap; transition: color var(--motion-base) ease, background-color var(--motion-fast) ease, border-color var(--motion-base) ease, transform var(--motion-base) var(--motion-spring); }
+.terminal-tab-btn.active { color: var(--color-black); font-weight: 600; transform: translateY(-1px) scale(1.02); }
 .terminal-tab-btn:hover:not(.active) { background: var(--color-gray-200); color: var(--color-black); }
 
 @media (max-width: 900px) {

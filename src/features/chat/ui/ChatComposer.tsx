@@ -24,19 +24,22 @@ export function ChatComposer({ input, isRunning, isTerminalReady, isAtBottom, ta
   const { t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
+  const hasTaskList = Boolean(taskList);
+  const hasAttachments = attachments.length > 0;
+  const hasAttachmentError = Boolean(attachmentError);
   const resetHeight = (element: HTMLTextAreaElement | null) => { if (element) element.style.height = '44px'; };
   useEffect(() => {
     const shell = shellRef.current;
     if (!shell || !onHeightChange) return;
+    const rows = [
+      shell.querySelector<HTMLElement>('.chat-attachment-tray'),
+      shell.querySelector<HTMLElement>('.chat-attachment-error'),
+      shell.querySelector<HTMLElement>('.task-list-summary'),
+      shell.querySelector<HTMLElement>('.chat-input-row'),
+    ].filter((row): row is HTMLElement => Boolean(row));
     const report = () => {
       // Measure only explicit flow rows. Never derive this from the shell height:
       // the animated task body lives inside that box and must remain an overlay.
-      const rows = [
-        shell.querySelector<HTMLElement>('.chat-attachment-tray'),
-        shell.querySelector<HTMLElement>('.chat-attachment-error'),
-        shell.querySelector<HTMLElement>('.task-list-summary'),
-        shell.querySelector<HTMLElement>('.chat-input-row'),
-      ].filter((row): row is HTMLElement => Boolean(row));
       const style = getComputedStyle(shell);
       const padding = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
       const gap = Number.parseFloat(style.rowGap || style.gap) || 0;
@@ -45,9 +48,13 @@ export function ChatComposer({ input, isRunning, isTerminalReady, isAtBottom, ta
     };
     report();
     const observer = new ResizeObserver(report);
-    observer.observe(shell);
-    return () => observer.disconnect();
-  }, [onHeightChange]);
+    rows.forEach((row) => observer.observe(row));
+    window.addEventListener('resize', report);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', report);
+    };
+  }, [hasAttachmentError, hasAttachments, hasTaskList, onHeightChange]);
   return (
     <div ref={shellRef} className="chat-composer-shell">
       {!isAtBottom && <button onClick={onScrollToBottom} className="chat-scroll-bottom-btn glass-input motion-pop-in" title={t('chat.backToBottom')} aria-label={t('chat.backToBottom')}><ArrowDown size={16} /></button>}

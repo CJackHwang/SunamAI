@@ -26,6 +26,23 @@ Examples:
 - Avoid fixed delays for readiness. React to a concrete event, store update, or runtime state.
 - Keep dependency arrays honest. If callback identity is part of an external subscription, stabilize it with `useCallback` or a ref.
 
+## High-frequency scroll ownership
+
+Streaming chat updates must separate automatic following from user-requested animation:
+
+```ts
+// Automatic token/layout updates: correct before paint and do not queue animations.
+if (followsBottomRef.current) container.scrollTop = container.scrollHeight;
+
+// Explicit user action only: animation is intentional here.
+container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+```
+
+- Store the current follow intent in a ref updated synchronously by the scroll handler; React state may mirror it for button visibility.
+- Never start a new smooth scroll for every token, message delta, ResizeObserver callback, or composer-height update. Repeated animations fight each other and can flip the bottom detector during intermediate frames.
+- Do not animate reserved bottom padding independently from the correction owner. If scrollHeight changes across CSS transition frames, the hook cannot anchor each intermediate height without reintroducing churn.
+- Observe the explicit rows that contribute reserved height. Avoid observing an ancestor whose overlay/expanded body animates but is intentionally excluded from the reservation.
+
 ## External store state
 
 Subscribe through `useWorkspaceSelector`, selecting the smallest slice the component uses. The selector cache and equality function preserve identity for equal selections. Do not subscribe to the whole workspace snapshot for convenience.

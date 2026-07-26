@@ -50,6 +50,7 @@ export const enUS = {
   'chat.retry': 'Retry',
   'chat.thinkingProcess': 'Reasoning',
   'chat.running': 'Running:',
+  'chat.completed': 'Completed:',
   'chat.result': 'Result',
   'chat.backToBottom': 'Back to bottom',
   'chat.attachFiles': 'Add chat attachments',

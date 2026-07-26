@@ -50,6 +50,7 @@ export const jaJP = {
   'chat.retry': '再試行',
   'chat.thinkingProcess': '思考プロセス',
   'chat.running': '実行中:',
+  'chat.completed': '完了:',
   'chat.result': '結果',
   'chat.backToBottom': '下部へ戻る',
   'chat.attachFiles': 'チャット添付を追加',

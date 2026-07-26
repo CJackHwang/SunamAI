@@ -6,6 +6,7 @@
   --motion-snappy: cubic-bezier(0.2, 0.8, 0.2, 1);
   --motion-spring: cubic-bezier(0.22, 1, 0.36, 1);
   --motion-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  --motion-exit: cubic-bezier(0.4, 0, 1, 1);
 }
 
 @media (prefers-reduced-motion: no-preference) {

@@ -132,7 +132,10 @@ store 提供 selector 和无变化短路。相同 session status 不触发 Index
 ## 运行与渲染性能
 
 - SSE delta 最多 30 次/秒合并更新，结束强制 flush；未终止 buffer 上限 1 MiB，provider error 结构化上抛。
+- OpenAI-compatible nullable content/reasoning 在 SSE adapter 边界规范化；AgentEngine 保留最终消息的 reasoning，React 只负责投影。
 - Chat 投影一次建立 `tool_call_id → result` 索引，避免逐消息扫描造成 O(n²)。
+- Chat 位于底部时用即时校正跟随流式内容和 composer 保留高度；用户主动返回底部时才使用平滑滚动。工具详情默认折叠，用户触发展开时对固有宽高做非线性动画并在需要时保持底部锚定。
+- UI motion 按 fast feedback、spring direct manipulation、sheet layout 和 exit 四类共享 token；React presence 保留时间覆盖对应 CSS 退场时长，所有动效受全局 reduced-motion 约束。
 - 初始仅读最近 250 events；上滚自动分页；DOM 固定在当前 250-message 窗口。
 - 子 Agent transcript 在展开子任务时按 run 查询最近 250 events，默认只渲染摘要。
 - 历史 Markdown 使用 `content-visibility`。只有 5,000-event 基准仍无法满足帧预算时才引入动态高度虚拟列表。
@@ -154,4 +157,4 @@ store 提供 selector 和无变化短路。相同 session status 不触发 Index
 
 ## 当前架构基线
 
-2026-07-26，架构边界检查已作为 `npm run check` 的固定步骤连续通过两次完整门禁。当前生产构建初始 JS 为 84.92 KiB gzip、总 JS 为 313.28 KiB gzip、`dist` 为 1.34 MiB；核心自动化 35 文件/166 测试，E2E 7/7、视觉 4/4、真实 WebContainer 3/3。生产依赖审计为零，剩余 8 个 high 仅来自开发期 PWA/Workbox 链，并按 [依赖策略](dependency-advisories.md) 跟踪。
+2026-07-26，架构边界检查已作为 `npm run check` 的固定步骤连续通过两次完整门禁。当前生产构建初始 JS 为 84.94 KiB gzip、总 JS 为 314.09 KiB gzip、`dist` 为 1.34 MiB；核心自动化 36 文件/175 测试，E2E 7/7、视觉 4/4、真实 WebContainer 3/3。生产依赖审计为零，剩余 8 个 high 仅来自开发期 PWA/Workbox 链，并按 [依赖策略](dependency-advisories.md) 跟踪。

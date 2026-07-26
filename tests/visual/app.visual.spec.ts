@@ -56,6 +56,18 @@ async function openResourceSubagentWorkspace(page: import('@playwright/test').Pa
   await expect(page.locator('.task-list-subagent')).toHaveCount(1);
   const attachments = page.locator('.message-attachments');
   await expect(attachments).toContainText('requirements.txt');
+  const firstTool = page.locator('details.chat-tool').first();
+  await firstTool.locator('summary').click();
+  await expect(firstTool).toHaveAttribute('open', '');
+  await expect(firstTool).toHaveAttribute('data-animating', 'true');
+  await expect(firstTool).not.toHaveAttribute('data-animating', 'true');
+  await page.locator('.model-selector-btn').click();
+  const modelMenu = page.locator('.model-selector-menu');
+  await expect(modelMenu).toBeVisible();
+  await page.locator('.model-selector-overlay').click();
+  await expect(modelMenu).toHaveClass(/is-exiting/);
+  expect(await modelMenu.evaluate((element) => getComputedStyle(element).animationName)).toBe('model-selector-out');
+  await expect(modelMenu).toHaveCount(0);
   await page.locator('.chat-message-list').evaluate((element) => { element.scrollTop = 0; });
   await expect(attachments).toBeVisible();
 }

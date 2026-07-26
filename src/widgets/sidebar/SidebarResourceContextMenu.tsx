@@ -16,7 +16,7 @@ interface SidebarResourceContextMenuProps {
 }
 
 export function SidebarResourceContextMenu({ menu, resource, dimmed, labels, onClose, onRename, onGenerateTitle, onTogglePin, onDelete }: SidebarResourceContextMenuProps) {
-  const { presentValue: presentMenu, isExiting } = usePresence(menu);
+  const { presentValue: presentMenu, isExiting } = usePresence(menu, 240);
   const lastResource = useRef(resource);
   if (resource) lastResource.current = resource;
   if (!presentMenu) return null;
