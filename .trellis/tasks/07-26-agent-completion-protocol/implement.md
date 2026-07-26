@@ -29,10 +29,10 @@ Primary files:
 
 ## 3. Background process versus workspace mutation
 
-- [x] Change non-verification `shell_run` task updates so foreground commands remain conservative mutations while background service launches preserve the existing mutation flag.
+- [x] Make foreground `shell_run` record real exit evidence on the post-command revision while background service launches preserve the existing mutation flag.
 - [x] Invalidate earlier verification on background launch without forcing a pure runtime-only task into workspace verification.
 - [x] Ensure authoritative revision drift detected during completion becomes changed/unverified state.
-- [x] Add tool regressions for background process progress, foreground opaque mutation, earlier-pass invalidation, and drift blocking.
+- [x] Add tool regressions for background process progress, arbitrary foreground checks, failed-exit invalidation, earlier-pass invalidation, and drift blocking.
 - [x] Update the real WebContainer runtime smoke fixture to finish from one guarded no-tool answer while the server/processes remain alive.
 
 Primary files:
@@ -94,7 +94,16 @@ Primary files:
 
 ## Verification evidence
 
-- `npm run check:all` passed on 2026-07-26: 36 test files / 184 tests, 7 E2E tests, 4 visual tests, 3 real WebContainer runtime tests, production build, bundle limits, and production dependency audit.
-- Coverage: statements 91.39%, branches 83.18%, functions 90.44%, lines 95.15%.
+- `npm run check:all` passed on 2026-07-26: 36 test files / 185 tests, 7 E2E tests, 4 visual tests, 3 real WebContainer runtime tests, production build, bundle limits, and production dependency audit.
+- Coverage: statements 91.36%, branches 83.15%, functions 90.39%, lines 95.14%.
 - Mobile visual regression includes a browser assertion that `.chat-input` computes `scrollbar-width: none`; the baseline passed without an update.
 - The real WebContainer server-start smoke completes from one no-tool response and preserves the owned background processes.
+
+## 8. Verification ergonomics follow-up
+
+- [x] Remove runtime command-name, script-name, argument, port, and shell-syntax verification whitelists.
+- [x] Record every foreground shell exit status against the post-command authoritative revision.
+- [x] Keep background processes separate from verification evidence.
+- [x] Move relevance, failure propagation, and anti-fake-evidence requirements into the Agent prompt.
+- [x] Add/update executable specs and acceptance documentation.
+- [x] Run focused regressions and the final `npm run check:all` gate.

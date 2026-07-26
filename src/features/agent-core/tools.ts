@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { ToolCall } from '@/entities/message/types';
 import type { AgentToolCall, AgentToolResult } from './types';
-import { type RegisteredTool, type ToolExecutionContext, isVerificationCommand } from './tools/base';
+import { type RegisteredTool, type ToolExecutionContext } from './tools/base';
 import { workspaceTools } from './tools/workspaceTools';
 import { processTools } from './tools/processTools';
 import { controlTools } from './tools/controlTools';
@@ -10,8 +10,6 @@ import { subagentTools } from './tools/subagentTools';
 import { resolveContainerPath } from '@/shared/lib/containerPaths';
 
 export type { ToolExecutionContext } from './tools/base';
-export { isVerificationCommand };
-
 export type ParsedToolCall = AgentToolCall;
 
 export class AgentToolRegistry {
@@ -45,7 +43,7 @@ export class AgentToolRegistry {
     try {
       if (context.agentRole === 'verify' && call.name === 'shell_run') {
         const shell = parsed.data as { mode?: unknown; command?: unknown };
-        if (shell.mode !== 'foreground' || typeof shell.command !== 'string' || !isVerificationCommand(shell.command)) return { ok: false, content: 'Verify agents may run foreground verification commands only.' };
+        if (shell.mode !== 'foreground' || typeof shell.command !== 'string') return { ok: false, content: 'Verify agents may run foreground shell checks only.' };
       }
       if (context.writeScope?.length && (call.name === 'apply_patch' || call.name === 'materialize_resource')) {
         const paths = call.name === 'apply_patch'

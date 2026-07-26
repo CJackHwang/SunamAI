@@ -1,10 +1,10 @@
 import { z } from 'zod';
-import { defineTool, isVerificationCommand, type RegisteredTool } from './base';
+import { defineTool, type RegisteredTool } from './base';
 
 export const processTools: RegisteredTool[] = [
   defineTool({
     name: 'shell_run',
-    description: 'Run a command inside the active WebContainer. Run your verification scripts here (e.g. `npm test`) to prove your code works before completing the task. Use foreground for inspection/tests; use background only for servers.',
+    description: 'Run any project command inside the active WebContainer. Foreground commands record their real exit status as current-revision verification evidence; choose a truthful, relevant check and never mask failures. Use background only for servers.',
     schema: z.object({ command: z.string().min(1), mode: z.enum(['foreground', 'background']), timeout_ms: z.number().int().min(1_000).max(300_000).optional() }),
     readOnly: false,
     concurrencySafe: false,
@@ -16,7 +16,7 @@ export const processTools: RegisteredTool[] = [
       const process = result.process;
       const output = process.output || '(no output)';
       const content = `${result.timedOut ? 'Command still running after timeout.' : `Exit: ${process.exitCode ?? 'running'}`}\nPID: ${process.id}\n${output}`;
-      const verification = input.mode === 'foreground' && isVerificationCommand(input.command) ? { command: input.command, passed: !result.timedOut && process.exitCode === 0 } : undefined;
+      const verification = input.mode === 'foreground' ? { command: input.command, passed: !result.timedOut && process.exitCode === 0 } : undefined;
       const workspaceRevision = await context.runtime.getWorkspaceRevision(context.containerId);
       if (verification) context.updateTask((task) => ({
         ...task,
@@ -27,7 +27,7 @@ export const processTools: RegisteredTool[] = [
         verificationEvidence: [...task.verificationEvidence, { ...verification, workspaceRevision, createdAt: Date.now() }],
       }));
       else context.updateTask((task) => ({ ...task, changedWorkspace: task.changedWorkspace || input.mode === 'foreground', workspaceRevision, verified: false, verifiedRevision: -1 }));
-      return { ok: !result.timedOut && (process.exitCode ?? 0) === 0, content, data: process, ...(verification ? { verification } : input.mode === 'foreground' ? { changedWorkspace: true } : {}) };
+      return { ok: !result.timedOut && (process.exitCode ?? 0) === 0, content, data: process, ...(verification ? { verification } : {}) };
     },
   }),
   defineTool({

@@ -90,6 +90,18 @@ interface AgentWorkspaceRuntime {
 ```
 
 ```ts
+interface ShellRunRequest {
+  command: string;
+  containerId: string;
+  sessionId: string;
+  runId: string;
+  mode: 'foreground' | 'background';
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+```
+
+```ts
 type MessageContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_resource'; resourceId: string }
@@ -154,18 +166,19 @@ interface SubagentNotification {
 
 - All `apply_patch`, `materialize_resource`, and `shell_run` operations use the container mutation lease.
 - `TaskContract.workspaceRevision` is task progress metadata; `AgentWorkspaceRuntime.getWorkspaceRevision()` is the authoritative container state used for checkpoints, recovery drift, child notifications, and completion.
-- Shell completion forms an explicit runtime revision boundary because filesystem watch delivery may lag the process exit.
+- Shell process completion forms an explicit runtime revision boundary because filesystem watch delivery may lag the process exit.
 - Verification evidence binds to the post-command revision. Any later parent/child mutation or failed child verification invalidates the previous pass.
-- Foreground non-verification shell commands remain conservative workspace mutations. A background `shell_run` is runtime/process progress: it preserves the existing `changedWorkspace` flag but invalidates an earlier pass. Filesystem watch or shell-exit revision drift still converts the task to changed/unverified before completion.
+- Every foreground `shell_run` records pass/fail from its real exit status on the post-command authoritative revision. A background `shell_run` is runtime/process progress: it preserves the existing `changedWorkspace` flag but invalidates an earlier pass. Filesystem watch or shell-exit revision drift still converts the task to changed/unverified before completion.
 - `complete_task` is the preferred structured completion path and requires truthful evidence. A non-empty plain assistant response is also a completion attempt for every task type; it may finish only after the shared plan/revision/verification gate passes.
 - Immediately before explicit or plain-response completion, reread the authoritative runtime revision. If a plain response is rejected, do not project it as a durable final message; clear transient output, inject one actionable recovery instruction, and continue inside the existing budgets.
-- Missing/stale verification recovery must name `shell_run`, foreground mode, recognized non-mutating project checks, exit code 0, final-write ordering, and the completion retry action.
+- Missing/stale verification recovery must name `shell_run`, foreground mode, a truthful task-relevant check, exit code 0, final-write ordering, and the completion retry action.
+- Runtime code must not whitelist or parse command names, package scripts, arguments, ports, or shell composition to determine verification. The Agent prompt requires relevant evidence, unmasked failures, and re-verification after later mutation.
 
 #### Subagents and cancellation
 
 - Child Runs inherit only the compressed parent summary, Task Contract, resource manifest, authoritative revision, and explicit delegated goal. Never copy the parent transcript.
 - Depth is 1; at most 6 child Runs/root and 3 concurrent `explore` Runs. `implement` and `verify` are exclusive.
-- `explore` is read-only; `implement` may patch/materialize within `writeScope` but cannot shell; `verify` may run only recognized foreground verification commands and cannot patch.
+- `explore` is read-only; `implement` may patch/materialize within `writeScope` but cannot shell; `verify` may run foreground shell checks and cannot patch or start background processes.
 - Child Run budget is 20 model turns, 50 tool calls, 5 minutes. Root family budget is 90 turns, 225 calls, 15 minutes.
 - Persisted delegated-task IDs are internally unique. A repeated model `taskId` is a label, not a database key.
 - Parent cancellation cascades to children and owned processes and waits for terminal child/task persistence before the parent records cancellation.
@@ -197,6 +210,9 @@ interface SubagentNotification {
 | Path escapes active container or write scope | Reject before any write. |
 | Process ownership tuple mismatches | Observe returns `null`; input/stop returns `false`; no process side effect. |
 | Verification revision differs from current runtime revision | Mark unverified and require new verification. |
+| Foreground command uses a custom script, arbitrary arguments/port, redirects, or compound shell syntax | Do not parse or reject it; record its real exit status on the post-command revision. |
+| Foreground command exits non-zero or times out | Record failed verification and invalidate the previous pass. |
+| Model chooses forced success or an unrelated command as evidence | Treat as a prompt/evidence truthfulness violation; runtime still records the actual terminal result without a brittle command parser. |
 | Plain completion has an unfinished plan or missing current-revision verification | Withhold the draft from durable/UI messages, clear transient output, emit actionable recovery, and continue within the existing budget. |
 | Background server starts and the authoritative revision remains unchanged | Record process progress without creating a workspace mutation; allow guarded completion while the owned process remains alive. |
 | Resume checkpoint revision/tail differs from durable current state | Inject drift notice; rebuild as a new Run; treat old reads/verification as stale. |
@@ -208,6 +224,7 @@ interface SubagentNotification {
 
 - Good: A root delegates three read-only explorations, waits for structured notifications, serially applies one scoped implementation, runs foreground verification, rereads the container revision, and completes with revision-bound evidence.
 - Good runtime edge: A root starts an owned background server, completes any required plan, returns one plain final response, and finishes without stopping the process or demanding unrelated workspace verification.
+- Good development edge: A root runs a custom validator on the project's actual port, performs a foreground inspection, and completes from the latest successful exit evidence without a parser-specific wrapper script.
 - Base: A short text-only Run stays below budget, uses no resources/subagents, writes one Run/event stream/checkpoint, and completes without invoking compaction.
 - Good provider edge: A reasoning delta with `content: null` reaches `assistant_delta`, and the final durable assistant message retains the same accumulated `reasoning_content`.
 - Bad: A component stores an uploaded `File` in a message event, a provider branch is added inside `AgentEngine`, two writers mutate the same container outside the lease, or resume trusts `TaskContract.workspaceRevision` without reading runtime state.
@@ -221,7 +238,7 @@ interface SubagentNotification {
 | Model adapter | Exact outbound content parts; nullable content/reasoning delta normalization; final plain-message reasoning preservation; resource session ownership; usage mapping/estimation; successful vision caching; clear unsupported-vision retry; unrelated 400/422 does not retry. |
 | Resources | Count/size limits including existing IDs; atomic batch failure; same-session SHA dedupe; cross-session rejection; MIME spoof; invalid UTF-8; image 2048/1.5 MiB limits; Blob absent from ledger. |
 | Runtime/revision | Every mutation path advances authoritative revision; verification binds after shell exit; process ownership isolation; materialize; snapshot pre-export exclusions; `pagehide`/dispose/checkpoint flush. |
-| Completion | Explicit and plain responses share plan/revision/verification gates; actionable stale-verification guidance; rejected drafts are not projected; background server completion keeps the process alive. |
+| Completion | Explicit and plain responses share plan/revision/verification gates; actionable no-whitelist recovery guidance; arbitrary foreground checks/ports; failed-exit invalidation; rejected drafts are not projected; background server completion keeps the process alive. |
 | Persistence | One checkpoint/Run; stable 250-event session and Run pagination; deep quarantine; sanitizer; session/container transaction scope; shared-resource survival; snapshot cap keeps previous value; failed active snapshot still permits queued follow-up. |
 | Subagents | Depth/count/concurrency limits; global same-container mutation serialization; role/tool/write-scope rules; repeated task labels; family budgets; child failure/verification propagation; parent cancellation waits and stops owned processes. |
 | UI/E2E | No manual compact control; non-disruptive compact note; resource cards use IDs; child tree/transcript lazy load; resume drift; cancel; multimodal fallback; desktop/mobile visuals. |
@@ -266,6 +283,20 @@ if (task.verifiedRevision === task.workspaceRevision) finish();
 await runtime.flushWorkspace(containerId);
 const currentRevision = await runtime.getWorkspaceRevision(containerId);
 if (task.verifiedRevision !== currentRevision) requireVerification();
+```
+
+#### Wrong: hardcode project command semantics
+
+```ts
+if (!KNOWN_VERIFICATION_COMMANDS.some((pattern) => pattern.test(command))) reject();
+```
+
+#### Correct: bind foreground exit evidence and instruct truthfulness
+
+```ts
+const passed = !result.timedOut && result.process.exitCode === 0;
+recordVerification({ command, passed, workspaceRevision: currentRevision });
+// The system prompt requires a relevant check and forbids masked failures.
 ```
 
 #### Wrong: add provider behavior to the engine

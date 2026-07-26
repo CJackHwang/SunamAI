@@ -48,10 +48,10 @@ preparing → planning → acting → observing / verifying
 3. 计算完整请求预算：系统提示、工具 schema、媒体估算和 transcript；必要时自动 compact。
 4. 调用模型；网络、429 与 5xx 仅做有限退避。主请求 PTL 最多尝试三次，每次删除最旧 20% 的完整消息组；连续失败后写入确定性摘要并打开熔断。
 5. assistant tool call 与匹配 tool result 作为完整组进入 transcript。终止控制调用只能位于批次末尾，否则整批拒绝。
-6. 最多四路执行并发安全只读工具；`apply_patch`、`materialize_resource` 和 `shell_run` 使用容器级 mutation lease。前台非验证 shell 保守视为 workspace mutation；后台 shell 只记录进程进度并撤销旧 pass。shell 进程结束仍形成显式 revision 边界，实际文件 watch/revision 漂移会在完成前转为 changed/unverified，避免认证旧版本。
+6. 最多四路执行并发安全只读工具；`apply_patch`、`materialize_resource` 和 `shell_run` 使用容器级 mutation lease。所有前台 shell 都按真实 exit status 和命令结束后的 revision 记录验证，不解析命令名、脚本、参数、端口或 shell 组合；后台 shell 只记录进程进度并撤销旧 pass。shell 进程结束形成显式 revision 边界。
 7. 工具批次后 flush 工作区、更新任务、保存单一 checkpoint 和事件尾序号。
 8. 同一工具与参数连续第三次出现时只给一次 recovery guidance；第四次仍重复则立即失败，不把预算耗尽在无效兜底循环中。
-9. 计划和当前 workspace revision 验证满足后才能完成；缺少验证时恢复提示必须明确要求 `shell_run` foreground、可识别且不修改文件的项目检查、退出码 0、最后写入后执行以及完成重试动作。
+9. 计划和当前 workspace revision 验证满足后才能完成；验证相关性和真实性由系统 prompt 约束，要求选择适合任务的检查、保留失败退出码、禁止用无关成功命令伪造证据，并在后续写入后重新验证。
 
 ## 4. 自动上下文压缩
 
@@ -118,8 +118,9 @@ RunBoard 以树形摘要展示子任务；展开子任务时按 run 索引读取
 
 - 所有文件路径通过容器根目录解析并拒绝逃逸。
 - 进程所有权是 `(sessionId, runId, containerId)`；不匹配的观察、输入和停止失败。
-- verify shell 同时要求 foreground 和 `isVerificationCommand(command)`；普通前台 shell 不因角色名而获得权限。
+- verify shell 只要求 foreground；不使用通用命令解析器猜测项目验证语义，也不允许启动后台服务。
 - 后台 `shell_run` 用于服务等持续进程，不单独制造 workspace mutation；如果它实际写文件或退出，权威 revision 漂移仍会使完成门要求重新验证。
+- 验证后仍可继续读取或运行前台检查；前台命令会在新的 shell revision 上刷新真实 exit evidence，后续 workspace 写入仍要求再次检查。
 - Agent 只能读取有界用户终端缓冲，不能向用户交互 shell 写入；所有命令都必须通过 Agent-owned `shell_run` 执行并受进程所有权与 mutation lease 约束。
 - write scope 同时约束 `apply_patch` 与 `materialize_resource`。
 - `AgentToolResult.modelContent` 和 `resourceReferences` 可影响下一次模型内容，但不会把 Blob 放入 ledger。

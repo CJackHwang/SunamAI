@@ -53,16 +53,3 @@ export interface RegisteredTool {
 export function defineTool<TSchema extends z.ZodType>(definition: ToolDefinition<TSchema>): RegisteredTool {
   return { ...definition, execute: (input, context) => definition.execute(input as z.infer<TSchema>, context) };
 }
-
-export function isVerificationCommand(command: string): boolean {
-  if (/\|\||[;|<>`\r\n]|\$\(|(^|[^&])&([^&]|$)/.test(command)) return false;
-  const patterns = [
-    /^(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|check|lint|build|typecheck|verify)(?=\s|$|:)/i,
-    /^node\s+--test(?=\s|$)/i,
-    /^(?:npx\s+)?(?:pytest|vitest|jest|mocha|tsc)(?=\s|$)/i,
-    /^(?:cargo|go|mvn|gradle)\s+test(?=\s|$)/i,
-    /^(?:\.\/|[^\s]+\/)?(?:test|check|lint|build|typecheck|verify)(?:\.[a-z0-9]+)?(?=\s|$)/i,
-  ];
-  const segments = command.split('&&').map((segment) => segment.trim()).filter(Boolean);
-  return segments.length > 0 && segments.every((segment) => patterns.some((pattern) => pattern.test(segment)));
-}

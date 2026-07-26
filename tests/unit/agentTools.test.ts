@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AgentToolRegistry, isVerificationCommand, type ToolExecutionContext } from '@/features/agent-core/tools';
+import { AgentToolRegistry, type ToolExecutionContext } from '@/features/agent-core/tools';
 import type { TaskContract } from '@/features/agent-core/types';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 import { ContainerMutationLease } from '@/features/agent-core/agentFamily';
+import { buildAgentSystemPrompt, createChaosContract } from '@/features/agent-core/prompt';
 
 function createContext() {
   let task: TaskContract = { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: true, plan: [], evidence: [], changedWorkspace: false, workspaceRevision: 0, verified: false, verifiedRevision: -1, verificationEvidence: [] };
@@ -34,19 +35,28 @@ function createContext() {
 }
 
 describe('AgentToolRegistry', () => {
-  it('recognizes actual verification commands without trusting incidental substrings', () => {
-    expect(isVerificationCommand('npm run typecheck && vitest run')).toBe(true);
-    expect(isVerificationCommand('node --test')).toBe(true);
-    expect(isVerificationCommand('go test ./...')).toBe(true);
-    expect(isVerificationCommand('./scripts/check.sh')).toBe(true);
-    expect(isVerificationCommand('echo contest-ready')).toBe(false);
-    expect(isVerificationCommand('echo npm test')).toBe(false);
-    expect(isVerificationCommand('npm test || true')).toBe(false);
-    expect(isVerificationCommand('npm test; exit 0')).toBe(false);
-    expect(isVerificationCommand('touch src/changed.ts && npm test')).toBe(false);
-    expect(isVerificationCommand('npm test > test.log')).toBe(false);
-    expect(isVerificationCommand('npm test $(touch src/changed.ts)')).toBe(false);
-    expect(isVerificationCommand('npm install')).toBe(false);
+  it('does not hardcode verification command names, arguments, or ports', async () => {
+    const registry = new AgentToolRegistry();
+    const { context, getTask } = createContext();
+    await registry.execute({ id: 'patch', name: 'apply_patch', arguments: '{"changes":[{"path":"a.ts","content":"next"}]}' }, context);
+    for (const [index, command] of ['node --check a.ts', 'curl http://localhost:4173/health', 'custom-project-validator --port 9081', "npm test && echo 'passed'"].entries()) {
+      const result = await registry.execute({ id: `verify-${index}`, name: 'shell_run', arguments: JSON.stringify({ command, mode: 'foreground' }) }, context);
+      expect(result.verification).toMatchObject({ command, passed: true });
+    }
+    const inspection = await registry.execute({ id: 'inspect', name: 'shell_run', arguments: '{"command":"cat package.json && git status --short","mode":"foreground"}' }, context);
+    expect(inspection.verification?.passed).toBe(true);
+    expect(getTask()).toMatchObject({ changedWorkspace: true, verified: true });
+    await registry.execute({ id: 'plan', name: 'update_plan', arguments: '{"items":[{"id":"done","title":"Done","status":"completed"}]}' }, context);
+    expect((await registry.execute({ id: 'complete', name: 'complete_task', arguments: '{"summary":"done","evidence":["checked"]}' }, context)).stopRun).toBe('completed');
+  });
+
+  it('governs verification relevance and truthfulness through the system prompt', () => {
+    const { getTask } = createContext();
+    const prompt = buildAgentSystemPrompt({ containerId: 'c-1', task: getTask(), chaos: createChaosContract('Sunam 6.9 Pron'), summary: '' });
+    expect(prompt).toContain('truthful check that is relevant to the task');
+    expect(prompt).toContain('ports, and shell composition are not restricted');
+    expect(prompt).toContain('never use forced success or unrelated commands as fake evidence');
+    expect(prompt).toContain('later workspace mutation requires another foreground check');
   });
 
   it('executes workspace, shell, process, and control tools with truthful task updates', async () => {
@@ -94,8 +104,9 @@ describe('AgentToolRegistry', () => {
     expect(result.content).toContain('shell_run');
     expect(result.content).toContain('mode "foreground"');
     expect(result.content).toContain('exits 0');
-    expect(result.content).toContain('npm run check');
-    expect(result.content).toContain('final workspace change');
+    expect(result.content).toContain('does not restrict command names');
+    expect(result.content).toContain('ports');
+    expect(result.content).toContain('later workspace mutation');
     expect(result.content).toContain('retry complete_task');
     expect(getTask().verificationEvidence[0]?.passed).toBe(false);
   });
@@ -107,7 +118,7 @@ describe('AgentToolRegistry', () => {
     await runtime.materializeResource('s-1', 'c-1', 'res-1', 'external.txt');
     const result = await registry.execute({ id: 'complete-drift', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context);
     expect(result.ok).toBe(false);
-    expect(result.content).toContain('recognized verification');
+    expect(result.content).toContain('passed verification');
     expect(getTask()).toMatchObject({ changedWorkspace: true, workspaceRevision: 1, verified: false, verifiedRevision: -1 });
   });
 
@@ -153,6 +164,9 @@ describe('AgentToolRegistry', () => {
     expect((await registry.execute({ id: 'default-json', name: 'report_progress', arguments: '' }, context)).ok).toBe(false);
     expect((await registry.execute({ id: 'tree', name: 'workspace_tree', arguments: '{"max_depth":2}' }, context)).content).toBe('(workspace is empty)');
     expect((await registry.execute({ id: 'search', name: 'search_workspace', arguments: '{"query":"none"}' }, context)).content).toBe('(no matches)');
+    const timedOutForeground = await registry.execute({ id: 'foreground-timeout', name: 'shell_run', arguments: '{"command":"custom-validator","mode":"foreground"}' }, context);
+    expect(timedOutForeground.verification).toMatchObject({ command: 'custom-validator', passed: false });
+    expect(getTask()).toMatchObject({ verified: false, verifiedRevision: -1 });
     const timedOut = await registry.execute({ id: 'timeout', name: 'shell_run', arguments: '{"command":"serve","mode":"background"}' }, context);
     expect(timedOut.content).toContain('Command still running');
     expect(timedOut.verification).toBeUndefined();
@@ -168,7 +182,7 @@ describe('AgentToolRegistry', () => {
     expect((await registry.execute({ id: 'unfinished', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context)).content).toContain('unfinished or blocked steps');
     context.updateTask((task) => ({ ...task, plan: [{ id: 'blocked', title: 'Blocked', status: 'blocked' }] }));
     expect((await registry.execute({ id: 'blocked', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context)).content).toContain('unfinished or blocked steps');
-    expect(getTask().evidence).toEqual([]);
+    expect(getTask().evidence).toEqual(['Failed verification: custom-validator']);
   });
 
   it('enforces delegated role policies and exposes all subagent control tools', async () => {
@@ -190,12 +204,11 @@ describe('AgentToolRegistry', () => {
 
     context.agentRole = 'verify';
     expect((await registry.execute({ id: 'background', name: 'shell_run', arguments: '{"command":"npm test","mode":"background"}' }, context)).content).toContain('foreground');
-    expect((await registry.execute({ id: 'mutating-verify', name: 'shell_run', arguments: '{"command":"echo changed > file.txt","mode":"foreground"}' }, context)).content).toContain('verification commands only');
     context.updateTask((task) => ({ ...task, plan: [{ id: 'verify', title: 'Verify', status: 'completed' }] }));
     const unverified = await registry.execute({ id: 'unverified-complete', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context);
     expect(unverified.content).toContain('shell_run');
     expect(unverified.content).toContain('foreground');
-    await registry.execute({ id: 'verify-pass', name: 'shell_run', arguments: '{"command":"npm test","mode":"foreground"}' }, context);
+    await registry.execute({ id: 'verify-pass', name: 'shell_run', arguments: '{"command":"custom-project-validator --port 4173","mode":"foreground"}' }, context);
     expect((await registry.execute({ id: 'verified-complete', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context)).stopRun).toBe('completed');
     expect(runtime.runShell).not.toHaveBeenCalledWith(expect.objectContaining({ mode: 'background' }));
 

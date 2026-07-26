@@ -21,11 +21,11 @@ The user value is a predictable conversation: starting a server produces one fin
 
 - A completion rejection caused by missing or stale verification must explain the exact recovery sequence:
   1. use `shell_run` in `foreground` mode;
-  2. run a recognized, non-mutating verification command relevant to the project, with examples such as `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, or `npm run check`;
+  2. run a truthful foreground check relevant to the project and task;
   3. require exit code 0 on the current workspace revision;
   4. perform verification after the final workspace write because any later mutation invalidates it;
   5. retry completion after the gate is satisfied.
-- The guidance must not imply that arbitrary inspection commands, background commands, forced-success commands, redirected commands, or commands that mutate files count as verification.
+- The runtime must not hardcode command names, package scripts, arguments, ports, or shell syntax as a verification whitelist. Prompt instructions own the requirement to choose relevant evidence and not mask failures.
 - Verify-agent and root-agent rejection messages should share one authoritative guidance source so their instructions cannot drift.
 
 ### R2. Separate workspace mutation from runtime/process progress
@@ -63,9 +63,16 @@ The user value is a predictable conversation: starting a server produces one fin
 - The composer textarea remains vertically scrollable when content exceeds its maximum height, but its visible scrollbar is hidden across supported browsers.
 - Keyboard behavior must react correctly if the viewport crosses the existing mobile breakpoint without requiring a page reload.
 
+### R7. Prompt-governed development verification
+
+- Any foreground `shell_run` command records its real exit status as verification evidence on the post-command authoritative revision; no command-name, script-name, argument, port, or shell-composition whitelist is allowed.
+- Direct validators, custom project scripts, runtime probes, read-only inspection, and ordinary compound commands therefore work without package-script ceremony or parser exceptions.
+- Relevance and truthfulness are behavioral instructions in the Agent prompt: the model must choose a check appropriate to the task, must not mask failures, and must not cite an unrelated successful command as proof.
+- Background commands remain process progress rather than verification because they do not provide a terminal exit result for the current revision.
+
 ## Acceptance Criteria
 
-- [x] When a changed workspace has not passed current-revision verification, the rejection text names `shell_run`, `foreground`, recognized command examples, exit code 0, final-write ordering, and the retry action.
+- [x] When a changed workspace has not passed current-revision verification, the rejection text names `shell_run`, `foreground`, a truthful relevant check, exit code 0, final-write ordering, the absence of command/port whitelists, and the retry action.
 - [x] Verify-agent and root-agent stale-verification failures use consistent actionable guidance.
 - [x] Starting a background server does not automatically mark the task as a workspace mutation merely because `shell_run` was used.
 - [x] A short server-start scenario can start an owned background process, return one no-tool final response, finish the run as `completed`, and keep the process alive.
@@ -80,13 +87,16 @@ The user value is a predictable conversation: starting a server produces one fin
 - [x] On desktop, Enter continues to submit and Shift+Enter continues to add a newline.
 - [x] The composer textarea remains scrollable while Firefox/WebKit/Blink scrollbar chrome is visually hidden.
 - [x] Mobile composer behavior has focused component coverage and applicable mobile visual/E2E coverage.
+- [x] Foreground checks accept arbitrary project commands, arguments, ports, and shell composition without a runtime whitelist.
+- [x] A foreground read/inspection command can refresh current-revision verification without forcing another specially named test command.
+- [x] The prompt explicitly requires relevant checks, truthful evidence, non-zero failure propagation, and re-verification after later workspace mutation.
 
 ## Out of Scope
 
 - Redesigning the task classifier beyond changes necessary for the server-start regression.
 - Adding a new user-facing completion setting or manual stop/continue preference.
 - Changing provider wire protocols, model-specific behavior, or persona prompts unrelated to completion instructions.
-- Relaxing verification so arbitrary successful shell commands certify workspace correctness.
+- Adding another runtime command parser or project-specific verification allowlist.
 - Changing persistence database versions or migrating existing `sunam-v3` records unless implementation evidence proves it unavoidable.
 - Changing desktop Enter/Shift+Enter semantics or hiding scrollbars outside the composer textarea.
 

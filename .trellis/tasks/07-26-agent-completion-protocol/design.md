@@ -7,7 +7,7 @@ This change keeps the existing layer boundaries:
 - `AgentEngine` owns whether a model response may terminate a Run and whether a rejected draft is projected to the UI.
 - Agent control tooling owns explicit `complete_task` behavior and user/model-facing recovery text.
 - `AgentWorkspaceRuntime` remains the authority for workspace revisions and owned process state.
-- `shell_run` translates foreground verification, foreground opaque commands, and background service launches into task state without introducing provider-specific logic.
+- `shell_run` translates foreground exit evidence and background service launches into task state without introducing provider-specific or project-command parsing.
 - `ChatComposer` owns responsive keyboard behavior; CSS owns scrollbar presentation.
 
 No new persistence store, event kind, TaskContract field, or database migration is planned. Existing Run, tool-result, process, revision, and verification records are sufficient.
@@ -28,7 +28,7 @@ Checks, in order:
 2. No plan item is pending, in progress, or blocked.
 3. Read the authoritative current workspace revision.
 4. If the runtime revision differs from `task.workspaceRevision`, treat the task as changed/unverified and return actionable verification recovery.
-5. A verify-role run must have a passed recognized verification record bound to the current revision.
+5. A verify-role run must have a passed foreground shell record bound to the current revision.
 6. A root task with a changed workspace must have a passed verification record bound to the current revision.
 
 The evaluator returns the normalized task state together with either success or one failure message. Callers persist the normalized task before continuing.
@@ -41,12 +41,12 @@ Define one authoritative recovery message for missing/stale verification and reu
 
 - call `shell_run`;
 - use `mode: "foreground"`;
-- run a recognized non-mutating project verification such as `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, or `npm run check`;
+- run a truthful, task-relevant foreground check chosen by the model;
 - require exit code 0;
 - run it after the final workspace write because later mutation invalidates the pass;
 - then retry `complete_task` or provide the final no-tool response again.
 
-The message does not promise that every example exists in every workspace; the model must inspect project scripts and select the relevant recognized command.
+The message explicitly says the runtime does not restrict command names, scripts, arguments, ports, or normal shell composition. The prompt, rather than a parser, requires the model to preserve failure exit codes and choose relevant evidence.
 
 ## 4. Explicit and implicit completion flow
 
@@ -72,12 +72,11 @@ This makes completion state-based while keeping `complete_task` as the preferred
 
 ## 5. Shell/process state semantics
 
-`shell_run` behavior is split by mode and command class:
+`shell_run` behavior is split only by execution mode:
 
 | Shell operation | Task mutation state | Verification state | Result purpose |
 | --- | --- | --- | --- |
-| Recognized foreground verification | Preserve existing `changedWorkspace`; bind pass/fail to the post-command authoritative revision | Set from exit status | Certify current workspace |
-| Other foreground command | Set `changedWorkspace: true` conservatively | Invalidate | Opaque command may mutate before exit |
+| Any foreground command | Preserve existing `changedWorkspace`; bind pass/fail to the post-command authoritative revision | Set from real exit status | Record model-selected current-revision evidence without a command whitelist |
 | Background command | Preserve existing `changedWorkspace` | Invalidate any earlier pass, but do not create a new workspace-mutation claim | Record runtime/process progress |
 
 Background mode is already documented for servers. A pure server-start task therefore remains non-mutating and can finish from a guarded plain response while the owned process stays alive.
@@ -140,3 +139,9 @@ No message schema, persistence, or Workspace state change is required.
 - The completion evaluator can be reverted to explicit-tool-only callers without a data migration.
 - Background shell classification can be reverted independently because no durable field changes.
 - Composer keyboard/CSS changes are isolated to `ChatComposer`, `Chat.css`, and focused tests.
+
+## 9. Prompt-governed verification
+
+Agent Core does not parse foreground command text to decide whether a command is worthy. Every foreground shell result records the actual exit status and post-command authoritative revision. This avoids false restrictions on direct validators, custom scripts, ports, compound shell commands, redirects, and project-specific workflows.
+
+The Agent system prompt owns semantic correctness: choose a task-relevant check, let failures exit non-zero, never use forced success or unrelated commands as evidence, and verify again after any later workspace mutation. The completion gate still fails closed on missing evidence, non-zero foreground results, and revision drift; it simply stops pretending that a generic parser can understand every project's development workflow.

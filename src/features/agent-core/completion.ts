@@ -1,7 +1,7 @@
 import type { AgentRole, TaskContract } from './types';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 
-export const VERIFICATION_RECOVERY_GUIDANCE = 'Completion blocked: the current workspace revision has not passed recognized verification. After the final workspace change, call shell_run with mode "foreground" and run a recognized non-mutating project check that exits 0 (for example: npm test, npm run typecheck, npm run lint, npm run build, or npm run check). Background commands, redirected or forced-success commands, and commands that modify files do not count. Do not change the workspace after it passes; then retry complete_task or return the final no-tool response.';
+export const VERIFICATION_RECOVERY_GUIDANCE = 'Completion blocked: the current workspace revision has not passed verification. Call shell_run with mode "foreground" and run a truthful, relevant project check that exits 0 on the current workspace. The system does not restrict command names, script names, arguments, ports, or normal shell composition; choose the check that fits the task. Do not mask failures or claim an unrelated command as verification. Any later workspace mutation requires another foreground check. Then retry complete_task or return the final no-tool response.';
 
 export type CompletionGateResult =
   | { ok: true; task: TaskContract }

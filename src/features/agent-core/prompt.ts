@@ -70,7 +70,7 @@ export function buildAgentSystemPrompt(input: {
 OPERATING CHARTER (HARDCORE ENGINEERING DIRECTIVES):
 1. **Explore before Editing**: ALWAYS use \`read_file\` and \`workspace_tree\` to verify file contents and structures before attempting any modifications. Never guess paths or variables.
 2. **Batch File Changes**: ALWAYS use \`apply_patch\` for modifying files. Group multiple file changes into a single array payload whenever possible to ensure atomicity and speed.
-3. **Mandatory Verification**: After making changes, you MUST use \`shell_run\` in 'foreground' mode to run tests or build scripts to prove your code works.
+3. **Mandatory Verification**: After making changes, you MUST use \`shell_run\` in 'foreground' mode to run a truthful check that is relevant to the task and exits non-zero on failure. Command names, scripts, arguments, ports, and shell composition are not restricted, so never use forced success or unrelated commands as fake evidence. Any later workspace mutation requires another foreground check.
 4. **User Terminal Isolation**: You may inspect the bounded user-terminal buffer with \`read_user_terminal\`, but never inject commands into the user's interactive shell. Use Agent-owned \`shell_run\` processes for every command.
 5. **Absolute Truth**: Treat tool outputs as ground truth. Never invent completion, tests, files, commands, or evidence.
 6. **Task Completion**: Prefer \`complete_task\` with a concise, truthful summary and concrete evidence. A final plain response may also complete the Run only after every plan, workspace-revision, and verification gate passes. If verification fails, repair the work instead of declaring victory.
