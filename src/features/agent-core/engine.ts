@@ -19,9 +19,12 @@ import { ResourceProcessorRegistry } from './resourceProcessor';
 import { AgentFamilyBudget, ContainerMutationLease } from './agentFamily';
 import { canonicalizeMessage } from '@/shared/contracts/message';
 import { redactSecrets } from '@/shared/lib/errors';
+import { runBoundedOperation } from './boundedOperation';
 
 const DEFAULT_BUDGET: AgentBudget = { maxModelTurns: 60, maxToolCalls: 150, maxDurationMs: 15 * 60_000 };
 const MAX_READ_ONLY_CONCURRENCY = 4;
+const DEFAULT_CHECKPOINT_TIMEOUT_MS = 15_000;
+const MAX_FAILURE_PERSISTENCE_MS = 1_500;
 
 const redact = redactSecrets;
 
@@ -55,6 +58,7 @@ export interface AgentEngineOptions {
   lineage?: { rootRunId: string; parentRunId: string; role: Exclude<AgentRole, 'root'>; delegatedTaskId: string; depth: 1; writeScope?: string[] };
   familyBudget?: AgentFamilyBudget;
   mutationLease?: ContainerMutationLease;
+  checkpointTimeoutMs?: number;
 }
 
 const CHILD_COMMON_TOOLS = ['workspace_tree', 'read_file', 'search_workspace', 'list_resources', 'read_resource_text', 'read_resource_image', 'update_plan', 'report_progress', 'ask_user', 'complete_task'];
@@ -85,6 +89,7 @@ export class AgentEngine {
   private readonly mutationLease: ContainerMutationLease;
   private readonly recentFiles = new Map<string, string>();
   private subagentHost: SubagentHost | undefined;
+  private readonly checkpointTimeoutMs: number;
 
   constructor(options: AgentEngineOptions) {
     this.options = options;
@@ -98,6 +103,7 @@ export class AgentEngine {
     this.context = new ContextComposer([options.resume?.summary ?? options.inheritedSummary ?? '', driftRecord].filter(Boolean).join('\n\n'));
     this.familyBudget = options.familyBudget ?? new AgentFamilyBudget();
     this.mutationLease = options.mutationLease ?? new ContainerMutationLease();
+    this.checkpointTimeoutMs = Math.max(10, options.checkpointTimeoutMs ?? DEFAULT_CHECKPOINT_TIMEOUT_MS);
     const role: AgentRole = options.lineage?.role ?? 'root';
     const toolNames = toolsForRole(role);
     this.registry = new AgentToolRegistry(toolNames ? new Set(toolNames) : undefined);
@@ -150,6 +156,10 @@ export class AgentEngine {
     this.run.task = this.task;
     this.run.summary = this.context.getSummary();
     await this.options.store.saveRun(this.run);
+    this.projectRun();
+  }
+
+  private projectRun(): void {
     this.options.onRunChange({ ...this.run, task: { ...this.run.task, plan: [...this.run.task.plan], evidence: [...this.run.task.evidence] } });
   }
 
@@ -175,12 +185,33 @@ export class AgentEngine {
   }
 
   private async reflectTask(): Promise<void> {
+    this.run.phase = 'observing';
+    this.run.updatedAt = Date.now();
+    this.run.task = this.task;
+    this.projectRun();
+    await runBoundedOperation((signal) => this.persistCheckpoint(signal), {
+      label: 'Agent checkpoint synchronization',
+      timeoutMs: this.checkpointTimeoutMs,
+      signal: this.executionController.signal,
+    });
+  }
+
+  private async persistCheckpoint(signal: AbortSignal): Promise<void> {
+    await this.options.store.saveRun(this.run);
+    if (signal.aborted) throw signal.reason;
+    await this.emitter.emit('phase_changed', { phase: 'observing', detail: 'Synchronizing workspace snapshot and checkpoint before the next model turn.' });
+    if (signal.aborted) throw signal.reason;
     await this.options.runtime.flushWorkspace(this.run.containerId);
+    if (signal.aborted) throw signal.reason;
     const workspaceRevision = await this.options.runtime.getWorkspaceRevision(this.run.containerId);
+    if (signal.aborted) throw signal.reason;
     await this.updateRun();
+    if (signal.aborted) throw signal.reason;
     await this.emitter.emit('plan_updated', { task: this.task });
+    if (signal.aborted) throw signal.reason;
     const summary = this.context.getSummary() || this.task.evidence.join('\n') || 'Run checkpoint recorded.';
     await this.emitter.emit('checkpoint', { summary });
+    if (signal.aborted) throw signal.reason;
     const estimate = this.options.client.estimateTokens?.bind(this.options.client) ?? ((value: string) => Math.ceil(value.length / 4));
     const profile = this.options.client.getContextProfile?.() ?? { contextWindowTokens: 32_768, defaultOutputTokens: 4_096, summaryReserveTokens: 4_096, safetyBufferTokens: 2_048 };
     const tailBudget = Math.max(2_048, Math.floor(profile.contextWindowTokens * 0.2));
@@ -206,6 +237,62 @@ export class AgentEngine {
       workspaceRevision,
       resourceIds: [...new Set(this.transcript.flatMap((message) => message.resourceIds ?? []))],
     });
+  }
+
+  private async failRun(message: string): Promise<void> {
+    this.run.error = message;
+    this.run.phase = 'failed';
+    this.run.updatedAt = Date.now();
+    this.run.task = this.task;
+    this.projectRun();
+    this.options.runtime.stopRun({ sessionId: this.run.sessionId, runId: this.run.id, containerId: this.run.containerId });
+    try {
+      await runBoundedOperation(async (signal) => {
+        await this.options.store.saveRun(this.run);
+        if (signal.aborted) throw signal.reason;
+        await this.emitter.emit('phase_changed', { phase: 'failed', detail: message });
+        if (signal.aborted) throw signal.reason;
+        await this.emitter.emit('run_failed', { error: message, recoverable: true });
+      }, {
+        label: 'Agent failure persistence',
+        timeoutMs: Math.min(this.checkpointTimeoutMs, MAX_FAILURE_PERSISTENCE_MS),
+      });
+    } catch {
+      // The failed state was already projected. Persistence remains best-effort
+      // so a broken repository cannot leave the UI showing an active Run.
+    }
+  }
+
+  private async cancelRun(): Promise<void> {
+    this.run.phase = 'cancelling';
+    this.run.updatedAt = Date.now();
+    this.projectRun();
+    try {
+      await runBoundedOperation(async (signal) => {
+        await this.emitter.emit('phase_changed', { phase: 'cancelling', detail: 'Stopping Agent-owned processes.' });
+        if (signal.aborted) throw signal.reason;
+      }, {
+        label: 'Agent cancellation status persistence',
+        timeoutMs: Math.min(this.checkpointTimeoutMs, MAX_FAILURE_PERSISTENCE_MS),
+      });
+    } catch { /* The cancelling state was already projected to the UI. */ }
+    await this.subagentHost?.stopAll();
+    this.options.runtime.stopRun({ sessionId: this.run.sessionId, runId: this.run.id, containerId: this.run.containerId });
+    this.run.phase = 'cancelled';
+    this.run.updatedAt = Date.now();
+    this.projectRun();
+    try {
+      await runBoundedOperation(async (signal) => {
+        await this.options.store.saveRun(this.run);
+        if (signal.aborted) throw signal.reason;
+        await this.emitter.emit('phase_changed', { phase: 'cancelled', detail: 'Stopped by user.' });
+        if (signal.aborted) throw signal.reason;
+        await this.emitter.emit('run_finished', { summary: 'Agent stopped by user.' });
+      }, {
+        label: 'Agent cancellation persistence',
+        timeoutMs: Math.min(this.checkpointTimeoutMs, MAX_FAILURE_PERSISTENCE_MS),
+      });
+    } catch { /* The cancelled state was already projected to the UI. */ }
   }
 
   private assertBudget(): void {
@@ -486,18 +573,11 @@ export class AgentEngine {
       }
     } catch (error) {
       if (this.options.signal.aborted && isAbortError(error)) {
-        await this.phase('cancelling', 'Stopping Agent-owned processes.');
-        await this.subagentHost?.stopAll();
-        this.options.runtime.stopRun({ sessionId: this.run.sessionId, runId: this.run.id, containerId: this.run.containerId });
-        await this.phase('cancelled', 'Stopped by user.');
-        await this.emitter.emit('run_finished', { summary: 'Agent stopped by user.' });
+        await this.cancelRun();
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
-      this.run.error = message;
-      this.options.runtime.stopRun({ sessionId: this.run.sessionId, runId: this.run.id, containerId: this.run.containerId });
-      await this.phase('failed', message);
-      await this.emitter.emit('run_failed', { error: message, recoverable: true });
+      await this.failRun(message);
     } finally {
       clearTimeout(this.deadlineTimer);
       this.options.signal.removeEventListener('abort', this.forwardCancellation);

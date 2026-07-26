@@ -3,7 +3,7 @@ import type { AgentWorkspaceRuntime, ProcessStatus, RuntimeProcessEvent, ShellRu
 import { AgentEngine } from '@/features/agent-core/engine';
 import { AgentEventStore } from '@/features/agent-core/eventStore';
 import type { AgentModelClient } from '@/features/agent-core/modelClient';
-import type { AgentEvent, AgentModelResponse, TaskContract } from '@/features/agent-core/types';
+import type { AgentEvent, AgentModelResponse, AgentRun, TaskContract } from '@/features/agent-core/types';
 import { LLMError } from '@/shared/api/llmError';
 
 function tool(id: string, name: string, args: Record<string, unknown>): AgentModelResponse {
@@ -114,6 +114,30 @@ class BackgroundServerRuntime extends FakeRuntime {
 
   override stopRun(): void { this.stopRunCalls += 1; }
   override getProcesses(): ProcessStatus[] { return [this.process]; }
+}
+
+class HangingCheckpointRuntime extends FakeRuntime {
+  override async flushWorkspace(): Promise<void> {
+    return new Promise(() => undefined);
+  }
+}
+
+class ToggleHangingRunStore extends AgentEventStore {
+  hangRunWrites = false;
+
+  override async saveRun(run: AgentRun): Promise<void> {
+    if (this.hangRunWrites) return new Promise(() => undefined);
+    return super.saveRun(run);
+  }
+}
+
+class TrackingCheckpointStore extends AgentEventStore {
+  savedCheckpointCount = 0;
+
+  override async saveCheckpoint(checkpoint: Parameters<AgentEventStore['saveCheckpoint']>[0]): Promise<void> {
+    this.savedCheckpointCount += 1;
+    return super.saveCheckpoint(checkpoint);
+  }
 }
 
 describe('Agent Core v2', () => {
@@ -384,6 +408,52 @@ describe('Agent Core v2', () => {
     const engine = new AgentEngine({ sessionId: 's-deadline', containerId: 'c-deadline', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Inspect.', initialMessages: [], client: new AbortAwareHangingClient(), runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: () => undefined, onRunChange: () => undefined, budget: { maxDurationMs: 25 } });
     await engine.execute();
     expect(engine.getRun()).toMatchObject({ phase: 'failed', error: 'Agent run exceeded its time budget.' });
+  });
+
+  it('fails visibly when post-tool checkpoint synchronization hangs', async () => {
+    const runChanges: AgentRun[] = [];
+    const store = new TrackingCheckpointStore();
+    const engine = new AgentEngine({
+      sessionId: 's-checkpoint-timeout', containerId: 'c-checkpoint-timeout', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Inspect.', initialMessages: [],
+      client: new ScriptedClient([tool('inspect', 'workspace_tree', { max_depth: 1 })]), runtime: new HangingCheckpointRuntime(), store,
+      signal: new AbortController().signal, onEvent: () => undefined, onRunChange: (run) => runChanges.push(run), checkpointTimeoutMs: 20,
+    });
+
+    await engine.execute();
+
+    expect(engine.getRun()).toMatchObject({ phase: 'failed', error: expect.stringContaining('checkpoint synchronization timed out') });
+    expect(runChanges.at(-1)).toMatchObject({ phase: 'failed', error: expect.stringContaining('last successful checkpoint was preserved') });
+    expect(store.savedCheckpointCount).toBe(0);
+  });
+
+  it('projects a failed terminal state before a hanging Run persistence write can finish', async () => {
+    const store = new ToggleHangingRunStore();
+    const runChanges: AgentRun[] = [];
+    const engine = new AgentEngine({
+      sessionId: 's-run-write-timeout', containerId: 'c-run-write-timeout', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Inspect.', initialMessages: [],
+      client: new ScriptedClient([tool('inspect', 'workspace_tree', { max_depth: 1 })]), runtime: new FakeRuntime(), store,
+      signal: new AbortController().signal,
+      onEvent: (event) => { if (event.kind === 'tool_finished') store.hangRunWrites = true; },
+      onRunChange: (run) => runChanges.push(run), checkpointTimeoutMs: 20,
+    });
+
+    await engine.execute();
+
+    expect(runChanges.at(-1)).toMatchObject({ phase: 'failed', error: expect.stringContaining('checkpoint synchronization timed out') });
+    expect(engine.getRun().phase).toBe('failed');
+  });
+
+  it('cancels a Run while checkpoint synchronization is hanging', async () => {
+    const controller = new AbortController();
+    const engine = new AgentEngine({
+      sessionId: 's-checkpoint-cancel', containerId: 'c-checkpoint-cancel', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Inspect.', initialMessages: [],
+      client: new ScriptedClient([tool('inspect', 'workspace_tree', { max_depth: 1 })]), runtime: new HangingCheckpointRuntime(), store: new AgentEventStore(),
+      signal: controller.signal, onEvent: (event) => { if (event.kind === 'tool_finished') setTimeout(() => controller.abort(), 0); }, onRunChange: () => undefined, checkpointTimeoutMs: 200,
+    });
+
+    await engine.execute();
+
+    expect(engine.getRun().phase).toBe('cancelled');
   });
 
   it('rejects a terminal control call that appears before a side effect in the same batch', async () => {
