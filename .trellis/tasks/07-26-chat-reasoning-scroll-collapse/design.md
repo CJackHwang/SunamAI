@@ -52,7 +52,7 @@ stream/message/composer height changes
 
 ## Thinking Process Layout
 
-- `.thinking-process` padding 从 16px 缩小到约 10px 12px，margin-bottom 缩小。
+- `.thinking-process` padding 从 16px 缩小到四边 10px，margin-bottom 缩小。
 - `.thinking-content` 最大高度从 120px 降到 72px。
 - 保留内部 `overflow-y: auto` 和 `ThinkingProcess` 自身的流式 scrollTop 跟随。
 
@@ -78,7 +78,7 @@ stream/message/composer height changes
 - RunBoard 的 grid-row、内容 opacity/transform 和箭头统一采用 sheet/spring；它属于用户触发的 overlay 展开，不参与 composer 保留高度。
 - 终端标签保持 15px 稳定字号，选中态用字重和轻微 transform，避免 font-size transition 触发布局重排。
 - 文件管理器与侧栏的 120/150ms 零散反馈改用共享 fast/snappy token；spinner/shimmer 保持适合其语义的 linear/ease-in-out。
-- 工具消息仅在含 tool calls 时将外层 padding 设为四边 16px；内部 disclosure 四边为 8px，不改变普通文本和用户气泡。
+- 所有消息气泡的 padding 统一为四边 16px，思考块为四边 10px，内部 disclosure 为四边 8px；外层消息与内部 disclosure 都不绘制描边。
 
 ## Compatibility and Rollback
 

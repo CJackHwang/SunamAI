@@ -32,7 +32,14 @@ Nested rounded surfaces follow:
 
 Use the smaller/dominant padding axis when padding differs. Avoid visually unrelated large inner radii that break concentric wrapping.
 
-For nested tool surfaces, use symmetric padding by default so the horizontal inset does not look heavier than the vertical inset. The current tool message uses 16px on all four outer sides and 8px on all four disclosure sides; arguments/results then use their own symmetric 12px content padding.
+For chat and nested tool surfaces, use symmetric padding so the horizontal inset does not look heavier than the vertical inset. The current message bubble uses 16px on all four sides, the thinking surface uses 10px, the tool disclosure uses 8px, and arguments/results use 12px. Chat message bubbles and nested tool disclosures do not draw borders; preserve hierarchy with the surface/background tokens, spacing, and concentric radii.
+
+```css
+.chat-message { padding: 16px; border: 0; }
+.thinking-process { padding: 10px; }
+.chat-tool { padding: 8px; }
+.chat-tool-arguments, .chat-tool-result-content { padding: 12px; }
+```
 
 ## Motion roles and presence
 

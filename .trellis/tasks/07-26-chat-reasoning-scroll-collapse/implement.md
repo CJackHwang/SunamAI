@@ -23,6 +23,7 @@
 - [x] Style disclosure summary/body, chevron, focus and overflow states.
 - [x] Match the tool container to `var(--color-bg)` and animate intrinsic disclosure width/height with nonlinear easing, bottom anchoring, interruption, and reduced-motion fallback.
 - [x] Audit global motion roles, align menu presence with responsive exit durations, add model-menu exit motion, remove font-size layout animation, and normalize tool-message padding.
+- [x] Remove the outer message border and make message/thinking horizontal padding match their vertical padding.
 - [x] Extend `ChatMessageList` component tests for default closed state, expand interaction, status text, and `ask_user` behavior.
 
 ## 4. Verification

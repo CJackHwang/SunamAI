@@ -96,7 +96,7 @@
 - [x] 1,000 个 SSE delta 最多 30 次/秒更新，最终文本完全一致；buffer 上限 1 MiB。
 - [x] OpenAI-compatible SSE 的 nullable content/reasoning 字段在边界规范化，思考过程不会因 `content: null` 被整帧丢弃。
 - [x] 聊天自动跟底使用无动画校正，只有用户显式“回到底部”才启用 smooth scroll；任务条和输入区高度变化不重启连续滚动动画。
-- [x] 思考过程使用紧凑的内部滚动区；普通工具调用默认折叠并保留运行/完成状态，`ask_user` 继续直接展示；工具 disclosure 使用固有宽高非线性动画、底部锚定、四边对称 padding 和 reduced-motion 回退。
+- [x] 思考过程使用紧凑的内部滚动区；普通工具调用默认折叠并保留运行/完成状态，`ask_user` 继续直接展示；消息气泡与工具 disclosure 不绘制描边，并使用四边对称 padding、固有宽高非线性动画、底部锚定和 reduced-motion 回退。
 - [x] 全局 motion token 按反馈/空间/退场角色使用；移动菜单 presence 覆盖完整 sheet exit，模型选择器有退场动画，终端标签不再动画 font-size。
 - [x] 历史 Markdown 使用 `content-visibility`。
 - [x] 文件列表不读取全文求大小。
