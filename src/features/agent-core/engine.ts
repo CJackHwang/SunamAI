@@ -461,7 +461,11 @@ export class AgentEngine {
           continue;
         }
         if (response.message.content.trim()) {
-          await this.emitMessage({ role: 'assistant', content: response.message.content });
+          await this.emitMessage({
+            role: 'assistant',
+            content: response.message.content,
+            ...(response.message.reasoning_content ? { reasoning_content: response.message.reasoning_content } : {}),
+          });
           if (this.task.requiresPlan || (this.task.changedWorkspace && !this.task.verified)) {
             this.transcript.push({ role: 'system', content: 'Recovery required: do not end this non-trivial run in plain text. Maintain the plan, verify any changes, and use complete_task with factual evidence.' });
             await this.phase('planning', 'Model attempted an unstructured completion.');

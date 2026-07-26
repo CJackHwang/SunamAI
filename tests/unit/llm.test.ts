@@ -32,7 +32,7 @@ describe('LLM protocol', () => {
     const updates: string[] = [];
     const reasoningUpdates: string[] = [];
     const message = await consumeChatStream(stream([
-      'data: {"choices":[{"delta":{"reasoning_content":"First inspect"}}]}\n',
+      'data: {"choices":[{"delta":{"content":null,"reasoning_content":"First inspect"}}]}\n',
       'data: {"choices":[{"delta":{"content":"Hel',
       'lo"}}]}\n',
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"arguments":"{\\"message\\":\\"A"}}]}}]}\n',
@@ -44,7 +44,12 @@ describe('LLM protocol', () => {
     ]), (partial) => { updates.push(partial.content); reasoningUpdates.push(partial.reasoning_content ?? ''); });
     expect(updates).toContain('Hello');
     expect(reasoningUpdates).toContain('First inspect');
-    expect(message).toMatchObject({ role: 'assistant', content: 'Hello', tool_calls: [{ id: 'call-1', function: { name: 'report_progress', arguments: '{"message":"AB"}' } }] });
+    expect(message).toMatchObject({ role: 'assistant', content: 'Hello', reasoning_content: 'First inspect', tool_calls: [{ id: 'call-1', function: { name: 'report_progress', arguments: '{"message":"AB"}' } }] });
+  });
+
+  it('accepts nullable reasoning fields in non-streaming provider responses', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'ok', reasoning_content: null } }] }), { status: 200 })));
+    await expect(callLLM([{ role: 'user', content: 'hello' }], { apiKey: 'key', baseUrl: 'https://example.test/v1' })).resolves.toEqual({ role: 'assistant', content: 'ok' });
   });
 
   it('coalesces a 1,000-delta burst and force-flushes the exact final content', async () => {

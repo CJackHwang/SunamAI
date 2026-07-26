@@ -62,7 +62,7 @@ export async function callLLM(messages: LLMRequestMessage[], config: LLMConfig):
     const schema = z.object({ choices: z.array(z.object({ message: z.object({
       role: z.enum(['assistant', 'system', 'user', 'tool']),
       content: z.string().nullable().optional(),
-      reasoning_content: z.string().optional(),
+      reasoning_content: z.string().nullable().optional(),
       tool_calls: z.array(z.object({ id: z.string(), type: z.literal('function'), function: z.object({ name: z.string(), arguments: z.string() }) })).optional(),
     }) })).min(1), usage: z.object({ prompt_tokens: z.number().int().nonnegative(), completion_tokens: z.number().int().nonnegative(), total_tokens: z.number().int().nonnegative() }).optional() });
     let payload: unknown;

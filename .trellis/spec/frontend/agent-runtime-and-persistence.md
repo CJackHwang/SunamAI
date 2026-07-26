@@ -132,6 +132,8 @@ interface SubagentNotification {
 #### Context and model requests
 
 - Effective input budget is `contextWindow - defaultOutput - summaryReserve - safetyBuffer`, then includes system prompt, tool schemas, transcript, and media estimates.
+- OpenAI-compatible wire adapters accept `string | null | undefined` for optional `content` / `reasoning_content` fields. Normalize `null` to an absent delta before accumulation; do not reject an otherwise valid reasoning frame because `content` is null, and do not accept other field types.
+- Streaming reasoning accumulated by the model adapter must survive both tool-call rounds and final plain assistant messages. UI projection is not responsible for reconstructing lost reasoning.
 - Assistant tool calls and all matching tool results are one indivisible group. Any trim/retry removes complete groups.
 - Automatic compaction triggers before the effective window is exhausted. It has no user setting, button, or confirmation path.
 - Semantic compaction uses `tools: []`. Images, Blob/File bodies, data URLs, long Base64, and materializable document bodies are replaced by durable ID markers.
@@ -181,6 +183,8 @@ interface SubagentNotification {
 | Condition | Required behavior |
 | --- | --- |
 | Unknown model | Use conservative 32k profile; do not assume Claude/GPT constants. |
+| SSE delta has `content: null` and string `reasoning_content` | Accept the frame, normalize null content to no-op, and accumulate/persist the reasoning string. |
+| Optional provider content/reasoning field is non-null and non-string | Reject or ignore the malformed frame at the validated adapter boundary; never cast it into `Message`. |
 | Context still exceeds effective window after semantic attempts | Deterministic clipped summary, bounded recent groups, `fallbackReason`, no fourth model call. |
 | Abort during compaction/model/tool/subagent wait | Propagate the cancellation domain; do not convert it to a retryable failure. |
 | Tool-call group lacks a matching result | Remove the invalid group from provider history or retain safe plain assistant text only. |
@@ -199,14 +203,16 @@ interface SubagentNotification {
 
 - Good: A root delegates three read-only explorations, waits for structured notifications, serially applies one scoped implementation, runs foreground verification, rereads the container revision, and completes with revision-bound evidence.
 - Base: A short text-only Run stays below budget, uses no resources/subagents, writes one Run/event stream/checkpoint, and completes without invoking compaction.
+- Good provider edge: A reasoning delta with `content: null` reaches `assistant_delta`, and the final durable assistant message retains the same accumulated `reasoning_content`.
 - Bad: A component stores an uploaded `File` in a message event, a provider branch is added inside `AgentEngine`, two writers mutate the same container outside the lease, or resume trusts `TaskContract.workspaceRevision` without reading runtime state.
+- Bad provider edge: A strict string-only object schema silently drops an entire valid reasoning delta because an optional sibling field is null.
 
 ### 6. Tests Required
 
 | Change area | Minimum tests and assertion points |
 | --- | --- |
 | Context/profile/token logic | Complete tool grouping; media stripping; micro-compaction safety; PTL three-attempt bound; abort; deterministic circuit; one oversized round ends inside effective window; task/resource/file/subagent rehydration. |
-| Model adapter | Exact outbound content parts; resource session ownership; usage mapping/estimation; successful vision caching; clear unsupported-vision retry; unrelated 400/422 does not retry. |
+| Model adapter | Exact outbound content parts; nullable content/reasoning delta normalization; final plain-message reasoning preservation; resource session ownership; usage mapping/estimation; successful vision caching; clear unsupported-vision retry; unrelated 400/422 does not retry. |
 | Resources | Count/size limits including existing IDs; atomic batch failure; same-session SHA dedupe; cross-session rejection; MIME spoof; invalid UTF-8; image 2048/1.5 MiB limits; Blob absent from ledger. |
 | Runtime/revision | Every mutation path advances authoritative revision; verification binds after shell exit; process ownership isolation; materialize; snapshot pre-export exclusions; `pagehide`/dispose/checkpoint flush. |
 | Persistence | One checkpoint/Run; stable 250-event session and Run pagination; deep quarantine; sanitizer; session/container transaction scope; shared-resource survival; snapshot cap keeps previous value; failed active snapshot still permits queued follow-up. |
@@ -265,6 +271,27 @@ if (model.includes('claude')) maxTokens = 200_000;
 
 ```ts
 const profile = client.getContextProfile?.() ?? profileForModel('unknown');
+```
+
+#### Wrong: reject a valid reasoning frame because optional content is null
+
+```ts
+const deltaSchema = z.object({
+  content: z.string().optional(),
+  reasoning_content: z.string().optional(),
+});
+```
+
+#### Correct: normalize nullable optional text at the wire boundary
+
+```ts
+const nullableDeltaText = z.string().nullable().optional()
+  .transform((value) => value ?? undefined);
+
+const deltaSchema = z.object({
+  content: nullableDeltaText,
+  reasoning_content: nullableDeltaText,
+});
 ```
 
 ## Persistent design decisions

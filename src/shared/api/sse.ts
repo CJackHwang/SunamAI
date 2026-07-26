@@ -4,6 +4,7 @@ import { LLMError } from './llmError';
 
 const MAX_SSE_BUFFER_BYTES = 1024 * 1024;
 const FRAME_INTERVAL_MS = 1000 / 30;
+const nullableDeltaText = z.string().nullable().optional().transform((value) => value ?? undefined);
 
 type StreamingDelta = {
   content?: string | undefined;
@@ -12,8 +13,8 @@ type StreamingDelta = {
 };
 
 const deltaSchema = z.object({
-  content: z.string().optional(),
-  reasoning_content: z.string().optional(),
+  content: nullableDeltaText,
+  reasoning_content: nullableDeltaText,
   tool_calls: z.array(z.object({
     id: z.string().optional(),
     index: z.number().int().nonnegative(),
