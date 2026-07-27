@@ -1,6 +1,6 @@
 # Sunam Agent Cross-Layer Checklist
 
-Use this short checklist before changing Agent Core, model adapters, resources, WebContainer runtime, subagents, recovery, or `sunam-v3`. The executable contract is [Agent Runtime and Persistence](../frontend/agent-runtime-and-persistence.md).
+Use this short checklist before changing Agent Core, model adapters, resources, WebContainer runtime, subagents, recovery, or `sunam-v3`. Select the exact executable leaves from the [Agent Spec Index](../frontend/agent/index.md); task manifests reference those leaves, never the index or this guide.
 
 ## Before coding
 
@@ -26,5 +26,5 @@ Use this short checklist before changing Agent Core, model adapters, resources, 
 - [ ] Prove one checkpoint/Run and stable 250-record pagination when durable records change.
 - [ ] Prove current runtime revision, not task-local counters, gates verification/completion.
 - [ ] Prove resources are session-scoped and ledger records contain IDs only.
-- [ ] Run `npm run check`; use `npm run check:all` for any release-significant cross-layer change.
-- [ ] Update this code-spec, architecture/design docs, acceptance evidence, and visual baselines when public behavior changes.
+- [ ] Run the final command required by [Validation Gates](../frontend/quality/validation-gates.md); release-significant cross-layer changes use `npm run check:all`.
+- [ ] Update the owning Agent leaf, architecture/design docs, acceptance evidence, and visual baselines when public behavior changes.

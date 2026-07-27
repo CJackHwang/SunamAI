@@ -1,31 +1,19 @@
-# SunamAI Engineering Guidelines
+# Frontend Spec Index
 
-- [context-curation.md](context-curation.md)
+## Scope
 
-This directory is the project-specific engineering source of truth for future Trellis tasks. The rules describe the current React 19, WebContainer, Agent Core, and IndexedDB v3 implementation. They are intentionally stricter than generic frontend guidance because a UI change can cross runtime, persistence, and recovery boundaries.
+Use this router for SunamAI production code, tests, and executable frontend contracts. Task context manifests reference exact leaves selected below, never this index.
 
-## Guide index
+## Routes
 
-| Guide | Use it for |
+| Change area | Read |
 | --- | --- |
-| [Directory structure](./directory-structure.md) | File placement, naming, and public module boundaries |
-| [Architecture and boundaries](./architecture-and-boundaries.md) | The enforced dependency graph and cross-feature composition |
-| [Component guidelines](./component-guidelines.md) | React components, props, styling, accessibility, and lazy boundaries |
-| [Hook guidelines](./hook-guidelines.md) | Custom hooks, effects, async work, and cleanup |
-| [State management](./state-management.md) | Local UI state, workspace state, runtime state, and persistence |
-| [Type safety](./type-safety.md) | Strict TypeScript, contracts, validation, and canonicalization |
-| [Agent runtime and persistence](./agent-runtime-and-persistence.md) | Agent execution, resources, subagents, revision gates, and sunam-v3 |
-| [Quality guidelines](./quality-guidelines.md) | Required checks, testing, documentation, and forbidden shortcuts |
+| Dependency graph, source placement, public boundaries, or TypeScript validation | [Foundation](./foundation/index.md) |
+| React components, hooks, styling, motion, interaction, accessibility, disclosures, or action menus | [React](./react/index.md) |
+| Workspace state, persistence-facing store behavior, localized defaults, or paged projections | [State](./state/index.md) |
+| Agent Core, model context, resources, WebContainer runtime, completion, processes, subagents, or v3 durability | [Agent](./agent/index.md) |
+| Validation gates, test placement, failure policy, or final review | [Quality](./quality/index.md) |
 
-## Project invariants
+## Validation Entry Point
 
-- Production dependencies flow only through `shared → entities → features → widgets → pages → app`.
-- Feature modules do not import another feature's internal implementation. Cross-feature composition belongs in a widget or uses a shared contract/public entry.
-- Production workspace data uses `sunam-v3`. The application must not open, migrate, delete, or silently fall back to `sunam-v2`.
-- External and persisted data is untrusted until it passes Zod or project guard validation.
-- Agent Core, WebContainer runtime, persistence, and React projection remain separate responsibilities.
-- Workspace mutations participate in the real container revision and mutation lease; completion and verification bind to that revision.
-- `npm run check` is mandatory after source changes. Use `npm run check:all` for release-significant runtime, persistence, Agent, visual, or workflow changes.
-- Architecture, persistence, public behavior, dependencies, assets, gates, and supported workflows must be documented in the same change.
-
-Primary evidence: `docs/architecture.md`, `docs/agent-v2-design.md`, `docs/refactor-acceptance.md`, `scripts/check-architecture.mjs`, and `package.json`.
+Select the implementation leaf first, then select the applicable leaf from [Quality](./quality/index.md).

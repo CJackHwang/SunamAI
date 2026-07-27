@@ -1,6 +1,12 @@
 # Architecture and Boundaries
 
-## Enforced graph
+## Applicability
+
+Read this leaf when changing imports, layer ownership, runtime/provider/persistence boundaries, or cross-feature composition.
+
+## Required Behavior
+
+### Enforced graph
 
 `shared → entities → features → widgets → pages → app` is a build rule, not a diagram-only preference.
 
@@ -12,7 +18,7 @@
 
 Run `npm run check:architecture` when moving files or changing imports. Never “fix” a violation by adding an allow-list exception without documenting a real architectural reason.
 
-## Runtime boundaries
+### Runtime boundaries
 
 `AgentWorkspaceRuntime` in `src/shared/contracts/agentRuntime.ts` is the only boundary between Agent Core and WebContainer behavior. Agent Core must not import `@webcontainer/api`, terminal components, or concrete runtime classes.
 
@@ -20,13 +26,13 @@ Run `npm run check:architecture` when moving files or changing imports. Never �
 
 `V3PersistenceRepository` owns durable records. React components and Agent tools do not open IndexedDB directly.
 
-## Cross-cutting changes
+### Cross-cutting changes
 
 When adding a model provider, implement/extend an adapter rather than branching inside the engine. When adding a resource type, implement a processor rather than teaching the engine MIME details. When adding a cross-feature interaction, introduce a small shared contract or compose it in a widget.
 
 Workspace file writes are a security and correctness boundary. Every path goes through `getContainerRoot` / `resolveContainerPath`; every Agent mutation goes through the container mutation lease and advances the real workspace revision.
 
-## Anti-patterns
+## Forbidden Behavior
 
 - Importing `src/features/<other-feature>/internal-file` from a feature.
 - Moving runtime behavior into terminal UI because the terminal happens to display it.
@@ -35,4 +41,13 @@ Workspace file writes are a security and correctness boundary. Every path goes t
 - Constructing container paths with string concatenation outside path helpers.
 - Adding “temporary” architecture exceptions that are not tested or documented.
 
-Evidence: `docs/architecture.md`, `scripts/check-architecture.mjs`, `src/features/agent-core/engine.ts`, `src/shared/contracts/agentRuntime.ts`, and `src/widgets/workspace/Workspace.tsx`.
+## Required Validation
+
+- Run `npm run check:architecture` through the final gate selected by [Validation gates](../quality/validation-gates.md).
+- Search reverse imports and public-entry bypasses when moving files or contracts.
+
+## Related Contracts
+
+- [Directory structure](./directory-structure.md)
+- [Type safety](./type-safety.md)
+- Evidence: `docs/architecture.md`, `scripts/check-architecture.mjs`, `src/features/agent-core/engine.ts`, `src/shared/contracts/agentRuntime.ts`, and `src/widgets/workspace/Workspace.tsx`.
