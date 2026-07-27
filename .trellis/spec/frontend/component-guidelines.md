@@ -104,8 +104,19 @@ not jump or clip at the edge.
 Context menus rendered from inside a transformed sidebar must portal to
 `document.body`; otherwise `position: fixed` is resolved against the sidebar
 containing block and desktop menus stretch or clip at the sidebar edge. Reuse
-the shared `context-overlay`, `context-menu`, and responsive bottom-sheet
-classes after portalling.
+the shared `context-overlay`, `context-menu`, and item styles after portalling.
+Ordinary multi-action resource menus use the responsive mobile bottom sheet.
+The child Agent's delete-only menu is an intentional exception: it keeps an
+anchored, viewport-clamped popover on mobile and uses the normal context-menu
+entrance and exit animations instead of the sheet motion.
+
+```tsx
+<div className="context-menu context-menu-positioned subagent-context-menu">
+```
+
+Browser coverage for this exception asserts the `body` portal, viewport-safe
+geometry, non-full-width mobile size, popover animation names, and unchanged
+bottom-sheet geometry for the ordinary multi-action resource menu.
 
 When a disclosure summary also navigates from a selected child back to its
 root view, that first activation prevents the native toggle and preserves the

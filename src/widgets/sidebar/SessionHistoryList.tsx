@@ -32,7 +32,7 @@ function SubagentContextMenu({ menu, deleteLabel, onClose, onDelete }: { menu: C
   if (menu) lastMenu.current = menu;
   if (!presentValue || !lastMenu.current) return null;
   const position = { '--context-menu-x': `${presentValue.x}px`, '--context-menu-y': `${presentValue.y}px` } as CSSProperties;
-  return createPortal(<><div className={`context-overlay subagent-context-overlay ${isExiting ? 'is-exiting' : ''}`} onClick={onClose} /><div className={`context-menu context-menu-positioned sidebar-context-menu ${isExiting ? 'is-exiting' : ''}`} style={position}><button className="context-item danger" onClick={() => onDelete(lastMenu.current!)}><Trash2 size={16} className="context-item-icon" />{deleteLabel}</button></div></>, document.body);
+  return createPortal(<><div className={`context-overlay subagent-context-overlay ${isExiting ? 'is-exiting' : ''}`} onClick={onClose} /><div className={`context-menu context-menu-positioned sidebar-context-menu subagent-context-menu ${isExiting ? 'is-exiting' : ''}`} style={position}><button className="context-item danger" onClick={() => onDelete(lastMenu.current!)}><Trash2 size={16} className="context-item-icon" />{deleteLabel}</button></div></>, document.body);
 }
 
 function SessionHistoryGroup({ session, activeSessionId, conversationView, childRuns, generatingId, editing, editInputRef, onSelectSession, onConversationViewChange, onOpenSessionContext, onEditChange, onEditSubmit, onOpenChildMenu }: Omit<SessionHistoryListProps, 'sessions' | 'agent' | 'deleteLabel' | 'emptyLabel'> & { session: Session; childRuns: AgentRun[]; onOpenChildMenu: (event: MouseEvent, run: AgentRun, sessionId: string) => void }) {

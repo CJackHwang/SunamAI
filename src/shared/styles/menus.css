@@ -123,6 +123,23 @@
 
   .context-menu.is-exiting { animation: context-sheet-down var(--motion-base) var(--motion-exit) both; }
 
+  .context-menu.subagent-context-menu {
+    inset: auto;
+    left: clamp(8px, calc(var(--context-menu-x) - 180px), calc(100vw - 188px));
+    top: clamp(8px, calc(var(--context-menu-y) + 8px), calc(100dvh - 72px));
+    width: 180px;
+    min-width: 0;
+    max-width: calc(100vw - 16px);
+    padding: 8px;
+    border-radius: var(--radius-medium);
+    transform-origin: top right;
+    animation: context-menu-in var(--motion-base) var(--motion-spring);
+  }
+
+  .context-menu.subagent-context-menu.is-exiting {
+    animation: context-menu-out 160ms var(--motion-exit) both;
+  }
+
   @keyframes context-sheet-up {
     from {
       transform: translateY(100%);

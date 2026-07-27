@@ -86,6 +86,8 @@ describe('SessionHistoryList', () => {
     expect(rendered.container.querySelector('.context-menu')).not.toBeInTheDocument();
     const menu = document.body.querySelectorAll<HTMLElement>('.sidebar-context-menu').item(document.body.querySelectorAll('.sidebar-context-menu').length - 1);
     expect(menu).toBeInTheDocument();
+    expect(menu).toHaveClass('subagent-context-menu');
+    expect(menu.parentElement).toBe(document.body);
     expect(within(menu).getByRole('button', { name: 'Delete' })).toBeInTheDocument();
     expect(within(menu).queryByText(/Rename|Pin|Generate/)).not.toBeInTheDocument();
     await user.click(within(menu).getByRole('button', { name: 'Delete' }));

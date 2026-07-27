@@ -82,12 +82,40 @@ async function openResourceSubagentWorkspace(page: import('@playwright/test').Pa
   const childAction = childSession.locator('.sidebar-subagent-row .item-action');
   if (viewport.width > 900) await childSession.locator('.sidebar-subagent-row').hover();
   await expect(childAction).toBeVisible();
+  const childActionBox = await childAction.boundingBox();
   await childAction.click();
-  await expect(page.locator('body > .sidebar-context-menu')).toBeVisible();
+  const childMenu = page.locator('body > .sidebar-context-menu.subagent-context-menu');
+  await expect(childMenu).toBeVisible();
+  const childMenuBox = await childMenu.boundingBox();
+  expect(childActionBox).not.toBeNull();
+  expect(childMenuBox).not.toBeNull();
+  expect(childMenuBox!.x).toBeGreaterThanOrEqual(8);
+  expect(childMenuBox!.x + childMenuBox!.width).toBeLessThanOrEqual(viewport.width - 8);
+  expect(childMenuBox!.y).toBeGreaterThanOrEqual(8);
+  expect(childMenuBox!.y + childMenuBox!.height).toBeLessThanOrEqual(viewport.height - 8);
+  expect(Math.abs(childMenuBox!.y - childActionBox!.y)).toBeLessThan(100);
+  if (viewport.width <= 900) {
+    expect(childMenuBox!.width).toBeLessThan(viewport.width - 16);
+    expect(viewport.height - childMenuBox!.y - childMenuBox!.height).toBeGreaterThanOrEqual(8);
+    expect(await childMenu.evaluate((element) => getComputedStyle(element).animationName)).toBe('context-menu-in');
+  }
   await expect(page).toHaveScreenshot(viewport.width <= 900 ? 'subagent-menu-mobile.png' : 'subagent-menu-desktop.png', { maxDiffPixelRatio: 0.002 });
   await page.locator('body > .subagent-context-overlay').click({ position: { x: 2, y: 2 } });
-  await expect(page.locator('body > .sidebar-context-menu')).toHaveCount(0);
+  await expect(childMenu).toHaveClass(/is-exiting/);
+  expect(await childMenu.evaluate((element) => getComputedStyle(element).animationName)).toBe('context-menu-out');
+  await expect(childMenu).toHaveCount(0);
   await childSession.locator('.sidebar-session-summary').click({ button: 'right' });
+  const resourceMenu = page.locator('.sidebar-context-menu:not(.subagent-context-menu)');
+  await expect(resourceMenu).toBeVisible();
+  if (viewport.width <= 900) {
+    await resourceMenu.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+    const resourceMenuBox = await resourceMenu.boundingBox();
+    expect(resourceMenuBox).not.toBeNull();
+    expect(resourceMenuBox!.x).toBe(0);
+    expect(resourceMenuBox!.width).toBe(viewport.width);
+    expect(resourceMenuBox!.y + resourceMenuBox!.height).toBe(viewport.height);
+    expect(await resourceMenu.evaluate((element) => getComputedStyle(element).animationName)).toBe('context-sheet-up');
+  }
   await page.getByRole('button', { name: '置顶' }).click();
   await expect(childSession.locator('.sidebar-session-summary > .lucide-pin')).toHaveCount(1);
   await expect(childSession.locator('.sidebar-session-summary > .lucide-history')).toHaveCount(0);
