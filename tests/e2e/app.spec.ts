@@ -21,6 +21,19 @@ test('first visit preserves the API configuration gate', async ({ page }) => {
   await expect(page.getByText('请先配置 API Key 以开始使用。')).toBeVisible();
 });
 
+test('leaving the application requests browser confirmation', async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto('/');
+  await page.getByRole('heading', { name: '配置' }).click();
+
+  const dialogPromise = page.waitForEvent('dialog');
+  const reloadPromise = page.reload();
+  const dialog = await dialogPromise;
+  expect(dialog.type()).toBe('beforeunload');
+  await dialog.accept();
+  await reloadPromise;
+});
+
 test('settings and session/container CRUD remain durable and isolated', async ({ page }) => {
   test.setTimeout(120_000);
   await configure(page);
@@ -28,13 +41,13 @@ test('settings and session/container CRUD remain durable and isolated', async ({
   const containers = page.locator('.sidebar-section').filter({ hasText: '容器' });
   const firstSession = history.locator('.sidebar-session-group').filter({ has: page.locator('.sidebar-session-summary', { hasText: '新对话' }) });
   await firstSession.locator('.sidebar-session-summary').click({ button: 'right' });
-  await page.getByRole('button', { name: '重命名' }).click();
+  await page.getByRole('menuitem', { name: '重命名' }).click();
   await history.locator('.sidebar-item-input').fill('已命名会话');
   await history.locator('.sidebar-item-input').press('Enter');
   await expect(history).toContainText('已命名会话');
   const renamedSession = history.locator('.sidebar-session-group').filter({ hasText: '已命名会话' });
   await renamedSession.locator('.sidebar-session-summary').click({ button: 'right' });
-  await page.getByRole('button', { name: '置顶' }).click();
+  await page.getByRole('menuitem', { name: '置顶' }).click();
   await expect(renamedSession.locator('.sidebar-session-summary > .lucide-pin')).toHaveCount(1);
   await expect(renamedSession.locator('.sidebar-session-summary > .lucide-history')).toHaveCount(0);
 
@@ -46,13 +59,13 @@ test('settings and session/container CRUD remain durable and isolated', async ({
 
   const newSession = history.locator('.sidebar-session-group').filter({ has: page.locator('.sidebar-session-summary', { hasText: '新对话' }) });
   await newSession.locator('.sidebar-session-summary').click({ button: 'right' });
-  await page.getByRole('button', { name: '删除' }).click();
+  await page.getByRole('menuitem', { name: '删除' }).click();
   await expect(history.locator('.sidebar-item')).toHaveCount(1);
 
   const newContainer = containers.locator('.sidebar-item').filter({ hasText: '新容器1' });
   await newContainer.locator('.item-action').click();
   page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: '删除' }).click();
+  await page.getByRole('menuitem', { name: '删除' }).click();
   await expect(containers.locator('.sidebar-item')).toHaveCount(1);
   await page.reload();
   await expect(history).toContainText('已命名会话');

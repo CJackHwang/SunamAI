@@ -363,38 +363,47 @@
 .sidebar-session-summary {
   position: relative;
   width: 100%;
-  padding-right: 74px;
-}
-
-.sidebar-session-static {
   padding-right: 54px;
 }
 
-.sidebar-session-chevron {
+.sidebar-session-disclosure > .sidebar-session-summary {
+  padding-right: 74px;
+}
+
+.sidebar-session-summary.is-editing,
+.sidebar-session-disclosure > .sidebar-session-summary.is-editing {
+  padding-right: 12px;
+}
+
+.sidebar-session-trailing {
   position: absolute;
   top: 50%;
-  right: 54px;
+  right: 34px;
+  display: flex;
+  height: 16px;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.sidebar-session-chevron {
   flex: 0 0 auto;
   color: var(--color-text-secondary);
-  transform: translateY(-50%);
+  transform: rotate(0);
   transition: transform var(--motion-slow) var(--motion-spring);
 }
 
 .sidebar-session-disclosure[data-expanded="true"] .sidebar-session-chevron {
-  transform: translateY(-50%) rotate(180deg);
+  transform: rotate(180deg);
 }
 
 .sidebar-session-status {
-  position: absolute;
-  top: 50%;
-  right: 34px;
   display: flex;
   width: 16px;
   height: 16px;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
-  transform: translateY(-50%);
 }
 
 .sidebar-session-status .sidebar-status-dot {

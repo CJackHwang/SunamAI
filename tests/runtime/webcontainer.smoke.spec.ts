@@ -1,4 +1,20 @@
 import { expect, test } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+
+function readZipEntryNames(archive: Uint8Array): string[] {
+  const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
+  const decoder = new TextDecoder();
+  const names: string[] = [];
+  for (let offset = 0; offset <= archive.byteLength - 46;) {
+    if (view.getUint32(offset, true) !== 0x02014b50) { offset += 1; continue; }
+    const nameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    names.push(decoder.decode(archive.subarray(offset + 46, offset + 46 + nameLength)));
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  return names;
+}
 
 function streamResponse(delta: object): string {
   return `data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`;
@@ -91,11 +107,11 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(page.locator('.terminal-environment-dot')).toHaveCount(0);
   const terminalRows = page.locator('.xterm-rows').nth(1);
   await expect(terminalRows).not.toContainText(/\.sunam\/workspaces\/c-/);
-  await expect(page.locator('.terminal-environment-path')).toContainText(/\/home\/workspace\/c-[a-z0-9_-]+/);
+  await expect(page.locator('.terminal-environment-path')).toHaveText('/');
 
   const terminalInput = page.locator('.terminal-panel[data-active="true"] .xterm-helper-textarea');
   await terminalInput.focus();
-  await terminalInput.pressSequentially('mkdir -p user-created/from-terminal && echo terminal > user-created/from-terminal/proof.txt && pwd && ls user-created/from-terminal');
+  await terminalInput.pressSequentially("mkdir -p user-created/from-terminal node_modules/pkg dist && echo terminal > user-created/from-terminal/proof.txt && echo hidden > .hidden-export && echo dependency > node_modules/pkg/export.txt && echo build > dist/export.js && pwd && ls user-created/from-terminal");
   await terminalInput.press('Enter');
   await expect(terminalRows).toContainText(/\/home\/workspace\/c-[a-z0-9_-]+/);
   await expect(terminalRows).toContainText('proof.txt');
@@ -112,21 +128,40 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(terminalRows).toContainText('shared-agent-file');
 
   await page.locator('.dual-terminal-tabs').getByRole('button', { name: '文件' }).click();
-  await expect(page.locator('.fm-breadcrumb')).toContainText(/\/home\/workspace\/c-[a-z0-9_-]+/);
+  await expect(page.locator('.fm-breadcrumb')).toHaveText('/');
   await expect(page.locator('.fm-item-name').filter({ hasText: /^user-created$/ })).toBeVisible();
   await expect(page.locator('.fm-item-name').filter({ hasText: /^\.jshrc$/ })).toHaveCount(0);
+  await expect(page.locator('.fm-toolbar .fm-toolbar-btn')).toHaveCount(2);
+  await page.locator('.fm-item').filter({ has: page.locator('.fm-item-name', { hasText: /^user-created$/ }) }).dblclick();
+  const agentFile = page.locator('.fm-item').filter({ has: page.locator('.fm-item-name', { hasText: /^from-agent\.txt$/ }) });
+  await expect(agentFile.locator('.fm-item-size')).toHaveText('17 B');
+  await page.getByRole('button', { name: '更多文件操作' }).click();
+  const toolsMenu = page.getByRole('menu', { name: '更多文件操作' });
+  await expect(toolsMenu.getByRole('menuitem')).toHaveCount(4);
+  const downloadPromise = page.waitForEvent('download');
+  await toolsMenu.getByRole('menuitem', { name: '导出完整工作区' }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^c-[a-z0-9_-]+\.zip$/);
+  const archivePath = await download.path();
+  expect(archivePath).not.toBeNull();
+  const zipEntries = readZipEntryNames(await readFile(archivePath!));
+  expect(zipEntries.some((name) => name.endsWith('.hidden-export'))).toBe(true);
+  expect(zipEntries.some((name) => name.endsWith('node_modules/pkg/export.txt'))).toBe(true);
+  expect(zipEntries.some((name) => name.endsWith('dist/export.js'))).toBe(true);
+  expect(zipEntries.some((name) => name.endsWith('user-created/from-terminal/proof.txt'))).toBe(true);
+  await page.locator('.fm-parent-item').dblclick();
+  await expect(page.locator('.fm-breadcrumb')).toHaveText('/');
 
-  const canonicalPath = (await page.locator('.terminal-environment-path').textContent())?.trim() ?? '';
   await page.getByTitle('Expand Sidebar').click();
   const containers = page.locator('.sidebar-section').filter({ hasText: '容器' });
   const activeContainer = containers.locator('.sidebar-item.active');
   await activeContainer.locator('.item-action').click();
-  await page.getByRole('button', { name: '重命名' }).click();
+  await page.getByRole('menuitem', { name: '重命名' }).click();
   await containers.locator('.sidebar-item-input').fill('Runtime renamed container');
   await containers.locator('.sidebar-item-input').press('Enter');
   await expect(activeContainer).toContainText('Runtime renamed container');
-  await expect(page.locator('.terminal-environment-path')).toHaveText(canonicalPath);
-  await expect(page.locator('.fm-breadcrumb')).toContainText(canonicalPath);
+  await expect(page.locator('.terminal-environment-path')).toHaveText('/');
+  await expect(page.locator('.fm-breadcrumb')).toHaveText('/');
   await expect(page.locator('.fm-item-name').filter({ hasText: /^user-created$/ })).toBeVisible();
 
   await page.locator('.dual-terminal-tabs').getByRole('button', { name: '服务' }).click();

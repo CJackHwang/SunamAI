@@ -40,8 +40,8 @@ describe('useFileSystem', () => {
     const { fixture, nodes } = createWebContainerFixture();
     const { result } = renderHook(() => useFileSystem(fixture, '/c'));
     await waitFor(() => expect(result.current.entries.map((entry) => entry.name)).toEqual(['target', 'existing.txt']));
-    expect(fixture.fs.readFile).not.toHaveBeenCalled();
-    expect(result.current.entries.find((entry) => entry.name === 'existing.txt')?.size).toBeNull();
+    expect(fixture.fs.readFile).toHaveBeenCalledWith('/c/existing.txt');
+    expect(result.current.entries.find((entry) => entry.name === 'existing.txt')?.size).toBe(3);
     await act(async () => { await result.current.readFileRaw('existing.txt'); });
     expect(result.current.entries.find((entry) => entry.name === 'existing.txt')?.size).toBe(3);
     await act(async () => { await result.current.createFile('new.txt', 'new'); });
@@ -84,5 +84,69 @@ describe('useFileSystem', () => {
 
     expect(result.current.currentPath).toBe('/new');
     expect(result.current.entries.map((entry) => entry.name)).toEqual(['current.txt']);
+  });
+
+  it('limits concurrent size reads and preserves unknown size for one unreadable file', async () => {
+    let activeReads = 0;
+    let peakReads = 0;
+    const files = Array.from({ length: 12 }, (_, index) => ({ name: `file-${index}.txt`, isDirectory: () => false }));
+    const fixture = {
+      fs: {
+        readdir: vi.fn(async () => files),
+        readFile: vi.fn(async (path: string) => {
+          activeReads += 1;
+          peakReads = Math.max(peakReads, activeReads);
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          activeReads -= 1;
+          if (path.endsWith('file-11.txt')) throw new Error('EACCES');
+          return new Uint8Array([1, 2, 3, 4]);
+        }),
+        watch: () => ({ close: () => undefined }),
+      },
+    } as unknown as WebContainer;
+
+    const { result } = renderHook(() => useFileSystem(fixture, '/c'));
+    await waitFor(() => expect(result.current.entries).toHaveLength(12));
+    expect(peakReads).toBeLessThanOrEqual(8);
+    expect(peakReads).toBeGreaterThan(1);
+    expect(result.current.entries.find((entry) => entry.name === 'file-0.txt')?.size).toBe(4);
+    expect(result.current.entries.find((entry) => entry.name === 'file-11.txt')?.size).toBeNull();
+  });
+
+  it('ignores stale file sizes when a newer directory navigation finishes first', async () => {
+    let resolveSlowRead!: (content: Uint8Array) => void;
+    let markSlowReadStarted!: () => void;
+    const slowReadStarted = new Promise<void>((resolve) => { markSlowReadStarted = resolve; });
+    const fixture = {
+      fs: {
+        readdir: vi.fn(async (path: string) => path === '/c'
+          ? []
+          : [{ name: path.endsWith('/slow') ? 'stale.txt' : 'current.txt', isDirectory: () => false }]),
+        readFile: vi.fn((path: string) => {
+          if (path.endsWith('/stale.txt')) {
+            markSlowReadStarted();
+            return new Promise<Uint8Array>((resolve) => { resolveSlowRead = resolve; });
+          }
+          return Promise.resolve(new Uint8Array([1, 2, 3]));
+        }),
+        watch: () => ({ close: () => undefined }),
+      },
+    } as unknown as WebContainer;
+    const { result } = renderHook(() => useFileSystem(fixture, '/c'));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let slowNavigation!: Promise<void>;
+    act(() => { slowNavigation = result.current.navigateTo('/c/slow'); });
+    await slowReadStarted;
+    await act(async () => { await result.current.navigateTo('/c/current'); });
+    expect(result.current.currentPath).toBe('/c/current');
+    expect(result.current.entries).toEqual([{ name: 'current.txt', isDirectory: false, size: 3 }]);
+
+    await act(async () => {
+      resolveSlowRead(new Uint8Array([1, 2, 3, 4, 5]));
+      await slowNavigation;
+    });
+    expect(result.current.currentPath).toBe('/c/current');
+    expect(result.current.entries).toEqual([{ name: 'current.txt', isDirectory: false, size: 3 }]);
   });
 });

@@ -248,7 +248,7 @@ test('the root agent delegates, waits, and renders a structured child run', asyn
   expect(viewport).not.toBeNull();
   expect(menuBox!.x).toBeGreaterThanOrEqual(0);
   expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewport!.width);
-  await childMenu.getByRole('button', { name: '删除' }).click();
+  await childMenu.getByRole('menuitem', { name: '删除' }).click();
   await expect(childRow).toHaveCount(0);
   await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph').filter({ hasText: /^Delegation complete\.$/ })).toBeVisible();
 });
@@ -387,7 +387,7 @@ test('a new root family prunes terminal children from the previous round', async
   });
   if (!sessionId) throw new Error('Parent-session deletion fixture could not find the session ID.');
   await page.locator('.sidebar-session-summary').click({ button: 'right' });
-  await page.getByRole('button', { name: '删除' }).click();
+  await page.getByRole('menuitem', { name: '删除' }).click();
   await expect(page.locator('.sidebar-session-group')).toHaveCount(0);
   await expect.poll(async () => page.evaluate(async (deletedSessionId) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {

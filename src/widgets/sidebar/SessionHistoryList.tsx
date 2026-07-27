@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type RefObject } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from 'react';
 import { Bot, ChevronDown, History, Loader2, MoreHorizontal, Pin, Trash2 } from 'lucide-react';
 import type { AgentController, AgentConversationView } from '@/features/agent-core/useAgentV2';
 import { isActiveAgentPhase, normalizeSubagentRole, type AgentRun } from '@/features/agent-core/types';
 import type { Session } from '@/entities/workspace/types';
 import { useIntrinsicDisclosure } from '@/shared/ui/useIntrinsicDisclosure';
-import { usePresence } from '@/shared/ui/usePresence';
+import { ActionMenu } from '@/shared/ui/ActionMenu';
 
 interface SessionHistoryListProps {
   sessions: Session[];
@@ -25,15 +24,6 @@ interface SessionHistoryListProps {
 }
 
 interface ChildMenu { run: AgentRun; sessionId: string; x: number; y: number; }
-
-function SubagentContextMenu({ menu, deleteLabel, onClose, onDelete }: { menu: ChildMenu | null; deleteLabel: string; onClose: () => void; onDelete: (menu: ChildMenu) => void }) {
-  const { presentValue, isExiting } = usePresence(menu, 240);
-  const lastMenu = useRef(menu);
-  if (menu) lastMenu.current = menu;
-  if (!presentValue || !lastMenu.current) return null;
-  const position = { '--context-menu-x': `${presentValue.x}px`, '--context-menu-y': `${presentValue.y}px` } as CSSProperties;
-  return createPortal(<><div className={`context-overlay subagent-context-overlay ${isExiting ? 'is-exiting' : ''}`} onClick={onClose} /><div className={`context-menu context-menu-positioned sidebar-context-menu subagent-context-menu ${isExiting ? 'is-exiting' : ''}`} style={position}><button className="context-item danger" onClick={() => onDelete(lastMenu.current!)}><Trash2 size={16} className="context-item-icon" />{deleteLabel}</button></div></>, document.body);
-}
 
 function SessionHistoryGroup({ session, activeSessionId, conversationView, childRuns, generatingId, editing, editInputRef, onSelectSession, onConversationViewChange, onOpenSessionContext, onEditChange, onEditSubmit, onOpenChildMenu }: Omit<SessionHistoryListProps, 'sessions' | 'agent' | 'deleteLabel' | 'emptyLabel'> & { session: Session; childRuns: AgentRun[]; onOpenChildMenu: (event: MouseEvent, run: AgentRun, sessionId: string) => void }) {
   const { disclosureRef, toggleDisclosure } = useIntrinsicDisclosure({ contentSelector: '.sidebar-session-children' });
@@ -64,12 +54,15 @@ function SessionHistoryGroup({ session, activeSessionId, conversationView, child
   const rowContent = <>
     {session.pinned ? <Pin size={16} fill="currentColor" className="sidebar-resource-icon" /> : <History size={16} className="sidebar-resource-icon" />}
     {isEditing ? <input ref={editInputRef} className="item-text sidebar-item-input" value={editing.text} onChange={(event) => onEditChange(session.id, event.target.value)} onBlur={onEditSubmit} onKeyDown={(event) => event.key === 'Enter' && onEditSubmit()} onClick={(event) => event.stopPropagation()} /> : <span className="item-text">{session.title}</span>}
-    {statusIndicator && <span className="sidebar-session-status">{statusIndicator}</span>}
   </>;
+  const trailing = !isEditing && (statusIndicator || hasChildren) ? <span className="sidebar-session-trailing">
+    {statusIndicator && <span className="sidebar-session-status">{statusIndicator}</span>}
+    {hasChildren && <ChevronDown size={14} className="sidebar-session-chevron" />}
+  </span> : null;
   return <div className={`sidebar-session-group ${isActive ? 'active' : ''}`}>
     {hasChildren ? <details ref={disclosureRef} className="sidebar-session-disclosure" data-expanded="false">
-      <summary className="sidebar-item list-row sidebar-session-summary" onClick={selectRootOrToggle} onContextMenu={(event) => onOpenSessionContext(event, session.id)}>
-        {rowContent}<ChevronDown size={14} className="sidebar-session-chevron" />
+      <summary className={`sidebar-item list-row sidebar-session-summary ${isEditing ? 'is-editing' : ''}`} onClick={selectRootOrToggle} onContextMenu={(event) => onOpenSessionContext(event, session.id)}>
+        {rowContent}{trailing}
       </summary>
       <div className="sidebar-session-children">{childRuns.map((run) => {
         const id = run.delegatedTaskId ?? run.id;
@@ -81,8 +74,8 @@ function SessionHistoryGroup({ session, activeSessionId, conversationView, child
           <button className="item-action" onClick={(event) => { event.stopPropagation(); onOpenChildMenu(event, run, session.id); }} aria-label={id}><MoreHorizontal size={14} /></button>
         </div>;
       })}</div>
-    </details> : <div className="sidebar-item list-row sidebar-session-summary sidebar-session-static" role="button" tabIndex={0} onClick={selectRoot} onKeyDown={selectRootFromKeyboard} onContextMenu={(event) => onOpenSessionContext(event, session.id)}>{rowContent}</div>}
-    <button className="item-action sidebar-session-action" onClick={(event) => { event.stopPropagation(); onOpenSessionContext(event, session.id); }} aria-label={session.title}><MoreHorizontal size={14} /></button>
+    </details> : <div className={`sidebar-item list-row sidebar-session-summary sidebar-session-static ${isEditing ? 'is-editing' : ''}`} role="button" tabIndex={0} onClick={selectRoot} onKeyDown={selectRootFromKeyboard} onContextMenu={(event) => onOpenSessionContext(event, session.id)}>{rowContent}{trailing}</div>}
+    {!isEditing && <button className="item-action sidebar-session-action" onClick={(event) => { event.stopPropagation(); onOpenSessionContext(event, session.id); }} aria-label={session.title}><MoreHorizontal size={14} /></button>}
   </div>;
 }
 
@@ -99,5 +92,5 @@ export function SessionHistoryList(props: SessionHistoryListProps) {
     }
     for (const sessionId of loadedSessionIdsRef.current) if (!visibleSessionIds.has(sessionId)) loadedSessionIdsRef.current.delete(sessionId);
   }, [loadSessionSubagents, props.sessions]);
-  return <><div className="sidebar-list">{props.sessions.length === 0 ? <div className="sidebar-empty">{props.emptyLabel}</div> : props.sessions.map((session) => <SessionHistoryGroup key={session.id} {...props} session={session} childRuns={props.agent.childRunsBySession[session.id] ?? []} onOpenChildMenu={(event, run, sessionId) => { event.preventDefault(); event.stopPropagation(); setChildMenu({ run, sessionId, x: event.clientX, y: event.clientY }); }} />)}</div><SubagentContextMenu menu={childMenu} deleteLabel={props.deleteLabel} onClose={() => setChildMenu(null)} onDelete={(target) => { setChildMenu(null); void props.agent.deleteSubagent(target.sessionId, target.run.id).then((deleted) => { if (deleted && props.conversationView.kind === 'subagent' && props.conversationView.runId === target.run.id) props.onConversationViewChange({ kind: 'root' }); }); }} /></>;
+  return <><div className="sidebar-list">{props.sessions.length === 0 ? <div className="sidebar-empty">{props.emptyLabel}</div> : props.sessions.map((session) => <SessionHistoryGroup key={session.id} {...props} session={session} childRuns={props.agent.childRunsBySession[session.id] ?? []} onOpenChildMenu={(event, run, sessionId) => { event.preventDefault(); event.stopPropagation(); setChildMenu({ run, sessionId, x: event.clientX, y: event.clientY }); }} />)}</div><ActionMenu menu={childMenu} ariaLabel={props.deleteLabel} className="sidebar-context-menu subagent-context-menu" onClose={() => setChildMenu(null)} items={(target) => [{ id: 'delete', label: props.deleteLabel, icon: Trash2, danger: true, onSelect: () => { void props.agent.deleteSubagent(target.sessionId, target.run.id).then((deleted) => { if (deleted && props.conversationView.kind === 'subagent' && props.conversationView.runId === target.run.id) props.onConversationViewChange({ kind: 'root' }); }); } }]} /></>;
 }

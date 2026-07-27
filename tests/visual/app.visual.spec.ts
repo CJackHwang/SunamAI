@@ -86,23 +86,26 @@ async function openResourceSubagentWorkspace(page: import('@playwright/test').Pa
   await childAction.click();
   const childMenu = page.locator('body > .sidebar-context-menu.subagent-context-menu');
   await expect(childMenu).toBeVisible();
+  if (viewport.width <= 900) await childMenu.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
   const childMenuBox = await childMenu.boundingBox();
   expect(childActionBox).not.toBeNull();
   expect(childMenuBox).not.toBeNull();
-  expect(childMenuBox!.x).toBeGreaterThanOrEqual(8);
-  expect(childMenuBox!.x + childMenuBox!.width).toBeLessThanOrEqual(viewport.width - 8);
-  expect(childMenuBox!.y).toBeGreaterThanOrEqual(8);
-  expect(childMenuBox!.y + childMenuBox!.height).toBeLessThanOrEqual(viewport.height - 8);
-  expect(Math.abs(childMenuBox!.y - childActionBox!.y)).toBeLessThan(100);
   if (viewport.width <= 900) {
-    expect(childMenuBox!.width).toBeLessThan(viewport.width - 16);
-    expect(viewport.height - childMenuBox!.y - childMenuBox!.height).toBeGreaterThanOrEqual(8);
-    expect(await childMenu.evaluate((element) => getComputedStyle(element).animationName)).toBe('context-menu-in');
+    expect(childMenuBox!.x).toBe(0);
+    expect(childMenuBox!.width).toBe(viewport.width);
+    expect(childMenuBox!.y + childMenuBox!.height).toBe(viewport.height);
+    expect(await childMenu.evaluate((element) => getComputedStyle(element).animationName)).toBe('context-sheet-up');
+  } else {
+    expect(childMenuBox!.x).toBeGreaterThanOrEqual(8);
+    expect(childMenuBox!.x + childMenuBox!.width).toBeLessThanOrEqual(viewport.width - 8);
+    expect(childMenuBox!.y).toBeGreaterThanOrEqual(8);
+    expect(childMenuBox!.y + childMenuBox!.height).toBeLessThanOrEqual(viewport.height - 8);
+    expect(Math.abs(childMenuBox!.y - childActionBox!.y)).toBeLessThan(100);
   }
   await expect(page).toHaveScreenshot(viewport.width <= 900 ? 'subagent-menu-mobile.png' : 'subagent-menu-desktop.png', { maxDiffPixelRatio: 0.002 });
-  await page.locator('body > .subagent-context-overlay').click({ position: { x: 2, y: 2 } });
+  await page.locator('body > .action-menu-overlay').click({ position: { x: 2, y: 2 } });
   await expect(childMenu).toHaveClass(/is-exiting/);
-  expect(await childMenu.evaluate((element) => getComputedStyle(element).animationName)).toBe('context-menu-out');
+  expect(await childMenu.evaluate((element) => getComputedStyle(element).animationName)).toBe(viewport.width <= 900 ? 'context-sheet-down' : 'context-menu-out');
   await expect(childMenu).toHaveCount(0);
   await childSession.locator('.sidebar-session-summary').click({ button: 'right' });
   const resourceMenu = page.locator('.sidebar-context-menu:not(.subagent-context-menu)');
@@ -116,11 +119,24 @@ async function openResourceSubagentWorkspace(page: import('@playwright/test').Pa
     expect(resourceMenuBox!.y + resourceMenuBox!.height).toBe(viewport.height);
     expect(await resourceMenu.evaluate((element) => getComputedStyle(element).animationName)).toBe('context-sheet-up');
   }
-  await page.getByRole('button', { name: '置顶' }).click();
+  await page.getByRole('menuitem', { name: '置顶' }).click();
   await expect(childSession.locator('.sidebar-session-summary > .lucide-pin')).toHaveCount(1);
   await expect(childSession.locator('.sidebar-session-summary > .lucide-history')).toHaveCount(0);
   const actionOffsets = await page.locator('.sidebar-session-action').evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().right));
   expect(Math.max(...actionOffsets) - Math.min(...actionOffsets)).toBeLessThan(1);
+  await childSession.locator('.sidebar-session-summary').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: '重命名' }).click();
+  const editingSummary = childSession.locator('.sidebar-session-summary.is-editing');
+  await expect(editingSummary.locator('.sidebar-session-trailing')).toHaveCount(0);
+  await expect(childSession.locator('.sidebar-session-action')).toHaveCount(0);
+  const editGeometry = await editingSummary.evaluate((summary) => {
+    const row = summary.getBoundingClientRect();
+    const input = summary.querySelector('input')!.getBoundingClientRect();
+    return { contained: input.right <= row.right && input.left >= row.left, width: input.width };
+  });
+  expect(editGeometry.contained).toBe(true);
+  expect(editGeometry.width).toBeGreaterThan(100);
+  await editingSummary.locator('input').press('Enter');
   await expect(page.locator('.sidebar')).toHaveScreenshot(viewport.width <= 900 ? 'history-mixed-mobile.png' : 'history-mixed-desktop.png', { maxDiffPixelRatio: 0.002 });
   await childSession.locator('.sidebar-session-summary').click();
   if (!await childSession.locator('details').getAttribute('open')) await childSession.locator('.sidebar-session-summary').click();

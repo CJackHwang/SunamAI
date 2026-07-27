@@ -5,6 +5,16 @@ import { isSafeEntryName } from './fileUtils';
 
 export type { FileEntry } from '@/entities/file/types';
 
+const SIZE_READ_CONCURRENCY = 8;
+
+async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, mapper: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = [];
+  for (let offset = 0; offset < items.length; offset += limit) {
+    results.push(...await Promise.all(items.slice(offset, offset + limit).map(mapper)));
+  }
+  return results;
+}
+
 function joinPath(base: string, name: string): string {
   return base === '/' ? `/${name}` : `${base}/${name}`;
 }
@@ -48,11 +58,17 @@ export function useFileSystem(wc: WebContainer | null, rootDir = '/') {
     setError(null);
     try {
       const rawEntries = await wc.fs.readdir(directory, { withFileTypes: true });
-      const listed = rawEntries.map((entry): FileEntry => {
+      const listed = await mapWithConcurrency(rawEntries, SIZE_READ_CONCURRENCY, async (entry): Promise<FileEntry> => {
         const path = joinPath(directory, entry.name);
         if (entry.isDirectory()) return { name: entry.name, isDirectory: true, size: 0 };
-        const cachedSize = sizeCacheRef.current.get(path);
-        return { name: entry.name, isDirectory: false, size: cachedSize ?? null };
+        try {
+          const size = (await wc.fs.readFile(path)).byteLength;
+          sizeCacheRef.current.set(path, size);
+          return { name: entry.name, isDirectory: false, size };
+        } catch {
+          sizeCacheRef.current.delete(path);
+          return { name: entry.name, isDirectory: false, size: null };
+        }
       });
       listed.sort((left, right) => left.isDirectory !== right.isDirectory ? (left.isDirectory ? -1 : 1) : left.name.localeCompare(right.name));
       if (generation !== navigationGenerationRef.current || rootDirRef.current !== requestRoot) return;

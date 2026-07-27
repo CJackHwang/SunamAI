@@ -93,9 +93,11 @@ Workspace store 在 hydrate 前接收当前 locale 的非持久化创建默认�
 
 ### 规范工作区路径
 
-WebContainer 使用真实 workdir `/home/workspace`，每个 Sunam 容器的项目根固定为 `/home/workspace/<containerId>`。`containerId` 是不可变所有权边界，容器名称只是标签；重命名不会迁移目录。文件 API 使用相对 workdir 的 `<containerId>`，Agent 提示词、终端环境栏和文件管理器展示可直接执行的规范绝对路径，不再维护 `/containers/<名称>` 一类显示别名。
+WebContainer 使用真实 workdir `/home/workspace`，每个 Sunam 容器的项目根固定为 `/home/workspace/<containerId>`。`containerId` 是不可变所有权边界，容器名称只是标签；重命名不会迁移目录。文件 API 使用相对 workdir 的 `<containerId>`，Agent 提示词和 shell 环境保留可直接执行的规范绝对路径；终端环境栏与文件管理器面包屑只把当前容器项目根显示为 `/`，不会暴露或伪造另一套可执行路径。
 
 主 Agent、任务型子 Agent和用户终端均以 `<containerId>` 为 `cwd`，并共享 `SUNAM_WORKSPACE=/home/workspace/<containerId>`、`SUNAM_CONTAINER_ID=<containerId>`。它们的 `HOME` 统一为 `/home/workspace`，故 `jsh` 的 `.jshrc` 等运行时文件位于项目根之外。文件工具只接受相对路径或当前规范绝对路径，并在写入前拒绝 `/home/user`、旧 `.sunam/workspaces`、伪 `/containers`、其他/重复 container root 和 traversal。快照仍是按 `containerId` 保存的无根内容树，无需数据库迁移。
+
+文件管理器的“导出完整工作区”直接调用 WebContainer ZIP export，并始终以当前容器根为目标，即使用户正在浏览子目录。该用户下载不传快照 exclusions，因此包含隐藏文件、依赖与构建输出；持久化快照仍按恢复策略排除这些生成内容。两种导出不共享范围策略，完整 ZIP 下载也不改变 workspace revision。
 
 ### 服务与端口生命周期
 

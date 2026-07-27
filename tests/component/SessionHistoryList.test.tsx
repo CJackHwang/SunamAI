@@ -88,9 +88,9 @@ describe('SessionHistoryList', () => {
     expect(menu).toBeInTheDocument();
     expect(menu).toHaveClass('subagent-context-menu');
     expect(menu.parentElement).toBe(document.body);
-    expect(within(menu).getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
     expect(within(menu).queryByText(/Rename|Pin|Generate/)).not.toBeInTheDocument();
-    await user.click(within(menu).getByRole('button', { name: 'Delete' }));
+    await user.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
     expect(deleteSubagent).toHaveBeenCalledWith('session', 'child-run');
     rendered.unmount();
   });
@@ -104,7 +104,7 @@ describe('SessionHistoryList', () => {
 
     await user.click(view.getByRole('button', { name: 'task-child-fixed-id' }));
     const menu = document.body.querySelectorAll<HTMLElement>('.sidebar-context-menu').item(document.body.querySelectorAll('.sidebar-context-menu').length - 1);
-    await user.click(within(menu).getByRole('button', { name: 'Delete' }));
+    await user.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
 
     expect(deleteSubagent).toHaveBeenCalledWith('session', 'child-run');
     expect(view.getByText('task-child-fixed-id')).toBeInTheDocument();
@@ -141,5 +141,20 @@ describe('SessionHistoryList', () => {
     expect(rendered.container.querySelector('.sidebar-session-summary > .lucide-history')).not.toBeInTheDocument();
     expect(screen.getByText('task')).toBeInTheDocument();
     expect(screen.queryByText('implement')).not.toBeInTheDocument();
+  });
+
+  it('hides trailing controls while renaming and groups status with disclosure otherwise', () => {
+    const rendered = render(<SessionHistoryList sessions={[{ id: 'session', title: 'Parent', updatedAt: 1, status: 'completed_unread' }]} activeSessionId="session" conversationView={{ kind: 'root' }} agent={controller()} generatingId={null} editing={{ id: 'session', text: 'Editing' }} editInputRef={createRef()} emptyLabel="Empty" deleteLabel="Delete" onSelectSession={vi.fn()} onConversationViewChange={vi.fn()} onOpenSessionContext={vi.fn()} onEditChange={vi.fn()} onEditSubmit={vi.fn()} />);
+
+    const summary = rendered.container.querySelector('.sidebar-session-summary')!;
+    expect(summary).toHaveClass('is-editing');
+    expect(summary.querySelector('.sidebar-session-trailing')).not.toBeInTheDocument();
+    expect(rendered.container.querySelector('.sidebar-session-action')).not.toBeInTheDocument();
+
+    rendered.rerender(<SessionHistoryList sessions={[{ id: 'session', title: 'Parent', updatedAt: 1, status: 'completed_unread' }]} activeSessionId="session" conversationView={{ kind: 'root' }} agent={controller()} generatingId={null} editing={null} editInputRef={createRef()} emptyLabel="Empty" deleteLabel="Delete" onSelectSession={vi.fn()} onConversationViewChange={vi.fn()} onOpenSessionContext={vi.fn()} onEditChange={vi.fn()} onEditSubmit={vi.fn()} />);
+    const trailing = rendered.container.querySelector('.sidebar-session-trailing')!;
+    expect(trailing.querySelector('.sidebar-session-status > .sidebar-status-dot.success')).toBeInTheDocument();
+    expect(trailing.querySelector('.sidebar-session-chevron')).toBeInTheDocument();
+    expect(rendered.container.querySelector('.sidebar-session-action')).toBeInTheDocument();
   });
 });

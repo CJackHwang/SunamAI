@@ -65,6 +65,15 @@ When `usePresence(value, exitDuration)` retains a component for CSS exit motion,
 - Async failures must become visible state such as `role="alert"`; do not silently replace a failed user action with an unverified fallback.
 - Loading regions use an appropriate status indication and must not leave controls active when the operation is unsafe.
 
+## Application exit guard
+
+The root application mounts `BeforeUnloadGuard` for its full lifetime. The
+guard calls `preventDefault()` and assigns `BeforeUnloadEvent.returnValue` so
+browser back, reload, tab close, and window close request confirmation when the
+browser permits it. The browser owns the confirmation wording. The component
+must unregister its listener on unmount and must not attempt a custom in-app
+replacement for document-level navigation.
+
 ## Chat composer keyboard contract
 
 `ChatComposer` follows the workspace's existing `900px` responsive boundary. At widths of `900px` or less, plain Enter keeps the textarea's native newline behavior and the visible send button is the submission control. Above `900px`, plain Enter submits and Shift+Enter inserts a newline. Enter during IME composition never submits on either side of the breakpoint.
@@ -101,22 +110,34 @@ with and without disclosures reserve the same fixed trailing action slot;
 hover/focus visibility must restore both opacity and transform so the menu does
 not jump or clip at the edge.
 
-Context menus rendered from inside a transformed sidebar must portal to
-`document.body`; otherwise `position: fixed` is resolved against the sidebar
-containing block and desktop menus stretch or clip at the sidebar edge. Reuse
-the shared `context-overlay`, `context-menu`, and item styles after portalling.
-Ordinary multi-action resource menus use the responsive mobile bottom sheet.
-The child Agent's delete-only menu is an intentional exception: it keeps an
-anchored, viewport-clamped popover on mobile and uses the normal context-menu
-entrance and exit animations instead of the sheet motion.
+All resource/action menus use `shared/ui/ActionMenu`; feature and widget code
+only supplies typed action items and business callbacks. The component owns the
+`document.body` portal, overlay, 240ms presence lifetime, viewport clamping,
+menu semantics, danger state, separators, and close-after-action behavior.
+This prevents transformed sidebars and terminal panels from becoming fixed
+position containing blocks and keeps responsive behavior identical everywhere.
+
+Desktop menus are viewport-clamped popovers at the trigger coordinates. At
+`900px` or less every action menu, including the child Agent's delete-only
+menu, is a full-width bottom sheet with the shared safe-area padding and sheet
+entrance/exit animation. Do not add caller-specific mobile positioning rules.
 
 ```tsx
-<div className="context-menu context-menu-positioned subagent-context-menu">
+<ActionMenu
+  menu={menu}
+  ariaLabel="File actions"
+  onClose={closeMenu}
+  items={(target) => [
+    { id: 'rename', label: 'Rename', icon: Pencil, onSelect: () => rename(target) },
+    { id: 'delete', label: 'Delete', icon: Trash2, danger: true, separatorBefore: true, onSelect: () => remove(target) },
+  ]}
+/>
 ```
 
-Browser coverage for this exception asserts the `body` portal, viewport-safe
-geometry, non-full-width mobile size, popover animation names, and unchanged
-bottom-sheet geometry for the ordinary multi-action resource menu.
+Component tests assert the portal, retained payload through exit, menu roles,
+Escape/overlay/action closing, and disabled actions. Browser tests assert a
+viewport-contained desktop popover and a bottom-aligned full-width mobile
+sheet for both single- and multi-action callers.
 
 When a disclosure summary also navigates from a selected child back to its
 root view, that first activation prevents the native toggle and preserves the
@@ -125,11 +146,12 @@ normal disclosure toggle. A pinned history/resource row replaces its leading
 resource glyph with the Pin glyph; never insert a second icon beside it.
 
 Session title generation, running, completed-unread, and failed-unread states
-share one mutually exclusive fixed status slot. The status slot stays before
-the optional disclosure chevron and the reserved action slot; indicators must
-not participate in the title flex flow or overlap the hover action. Component
-tests cover state selection, and browser tests compare the status/action
 bounding boxes for a real failed Run.
+
+The status slot and optional chevron live in one `sidebar-session-trailing`
+flex group with one positioning owner. While a session is being renamed, do
+not render that trailing group or the outer action button; apply the editing
+summary spacing so the input receives the full remaining row width.
 
 ```tsx
 const start = details.getBoundingClientRect();

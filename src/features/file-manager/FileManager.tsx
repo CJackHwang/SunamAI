@@ -11,11 +11,12 @@ import { FileEntryList } from './FileEntryList';
 import { FileContextMenu, type FileContextMenuState } from './FileContextMenu';
 import { useFileManagerDragDrop } from './useFileManagerDragDrop';
 import { useFileManagerTouch } from './useFileManagerTouch';
+import { downloadWorkspaceArchive } from './workspaceExport';
 import './FileManager.css';
 
-interface FileManagerProps { wc: WebContainer | null; rootDir?: string; rootLabel?: string; }
+interface FileManagerProps { wc: WebContainer | null; rootDir?: string; }
 
-export default function FileManager({ wc, rootDir = '/', rootLabel }: FileManagerProps) {
+export default function FileManager({ wc, rootDir = '/' }: FileManagerProps) {
   const { t, format } = useI18n();
   const fs = useFileSystem(wc, rootDir);
   const [contextMenu, setContextMenu] = useState<FileContextMenuState | null>(null);
@@ -25,6 +26,7 @@ export default function FileManager({ wc, rootDir = '/', rootLabel }: FileManage
   const [newItemType, setNewItemType] = useState<'file' | 'folder' | null>(null);
   const [newItemName, setNewItemName] = useState('');
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
   
   const listRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -96,6 +98,18 @@ export default function FileManager({ wc, rootDir = '/', rootLabel }: FileManage
     setNewItemName('');
   }, [fs, newItemName, newItemType]);
   const cancelNewItem = () => { setNewItemType(null); setNewItemName(''); };
+  const handleExport = useCallback(async () => {
+    if (!wc || isExporting) return;
+    setIsExporting(true);
+    setOperationError(null);
+    try {
+      await downloadWorkspaceArchive(wc, rootDir);
+    } catch (error) {
+      setOperationError(format('files.exportFailed', { message: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setIsExporting(false);
+    }
+  }, [format, isExporting, rootDir, wc]);
   
   const handleItemClick = (event: MouseEvent, entry: FileEntry) => {
     event.stopPropagation();
@@ -115,7 +129,7 @@ export default function FileManager({ wc, rootDir = '/', rootLabel }: FileManage
 
   return <div className={`fm-container ${isDragOver ? 'fm-drop-active' : ''} ${touchDrag ? 'fm-touch-dragging' : ''}`} onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
     <input ref={fileInputRef} type="file" multiple className="fm-hidden-input" onChange={handleFileInputChange} />
-    <FileManagerToolbar rootDir={rootDir} {...(rootLabel ? { rootLabel } : {})} currentPath={fs.currentPath} onNavigate={(path) => { void fs.navigateTo(path); }} onRefresh={fs.refresh} onCreateFile={() => { setNewItemType('file'); setNewItemName(''); }} onCreateFolder={() => { setNewItemType('folder'); setNewItemName(''); }} onUpload={() => fileInputRef.current?.click()} />
+    <FileManagerToolbar rootDir={rootDir} currentPath={fs.currentPath} onNavigate={(path) => { void fs.navigateTo(path); }} onRefresh={fs.refresh} onCreateFile={() => { setNewItemType('file'); setNewItemName(''); }} onCreateFolder={() => { setNewItemType('folder'); setNewItemName(''); }} onUpload={() => fileInputRef.current?.click()} onExport={handleExport} isExporting={isExporting} />
     {(fs.error || operationError) && <div className="fm-error motion-notice-in"><AlertCircle size={14} />{fs.error || operationError}<button className="fm-error-dismiss" onClick={() => { fs.clearError(); setOperationError(null); }}><X size={14} /></button></div>}
     {isDragOver && <div className="fm-drop-label motion-pop-in"><Upload size={24} className="fm-drop-icon" />{t('files.dropToUpload')}</div>}
     <FileEntryList entries={fs.entries} isLoading={fs.isLoading} selectedItem={selectedItem} dragOverFolder={dragOverFolder} renamingEntry={renamingEntry} renameValue={renameValue} newItemType={newItemType} newItemName={newItemName} showParentEntry={Boolean(fs.parentPath)} isParentDragOver={dragOverFolder === '..'} listRef={listRef} renameInputRef={renameInputRef} newItemInputRef={newItemInputRef} onClearSelection={() => setSelectedItem(null)} onGoUp={fs.goUp} onParentDragOver={(event) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setDragOverFolder('..'); }} onParentDrop={(event) => { void handleParentDrop(event); }} onItemClick={handleItemClick} onItemDoubleClick={handleItemDoubleClick} onOpenContextMenu={openContextMenu} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchCancel} onDragStart={(event, entry) => { event.dataTransfer.setData('text/plain', entry.name); event.dataTransfer.effectAllowed = 'move'; }} onFolderDragOver={(event, name) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setDragOverFolder(name); }} onFolderDragLeave={() => setDragOverFolder(null)} onFolderDrop={handleFolderDrop} onRenameChange={setRenameValue} onRenameConfirm={() => { void confirmRename(); }} onRenameCancel={cancelRename} onNewNameChange={setNewItemName} onNewConfirm={() => { void confirmNewItem(); }} onNewCancel={cancelNewItem} />
