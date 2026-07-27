@@ -1,5 +1,7 @@
 # Thinking Guides
 
+- [context-curation.md](context-curation.md)
+
 > **Purpose**: Expand your thinking to catch things you might not have considered.
 
 ---

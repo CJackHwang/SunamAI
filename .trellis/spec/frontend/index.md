@@ -1,5 +1,7 @@
 # SunamAI Engineering Guidelines
 
+- [context-curation.md](context-curation.md)
+
 This directory is the project-specific engineering source of truth for future Trellis tasks. The rules describe the current React 19, WebContainer, Agent Core, and IndexedDB v3 implementation. They are intentionally stricter than generic frontend guidance because a UI change can cross runtime, persistence, and recovery boundaries.
 
 ## Guide index
