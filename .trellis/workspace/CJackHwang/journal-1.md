@@ -191,3 +191,24 @@ Unified responsive action menus, restored file sizes, added complete workspace Z
 ### Status
 
 [OK] **Completed**
+
+
+## Session 9: Restructure Trellis specs for scoped context
+
+**Date**: 2026-07-28
+**Task**: Restructure Trellis specs for scoped context
+**Branch**: `main`
+
+### Summary
+
+Added hierarchical router-only indexes, split aggregate frontend and guide specs into independently applicable leaves, removed duplicated and project-external template guidance, and completed one concentrated documentation validation pass.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dbe1bab` | (see git log) |
+
+### Status
+
+[OK] **Completed**
