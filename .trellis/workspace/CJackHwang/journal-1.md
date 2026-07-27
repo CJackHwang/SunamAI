@@ -106,3 +106,24 @@ Fixed stale file navigation, localized workspace defaults, runtime-owned service
 ### Status
 
 [OK] **Completed**
+
+
+## Session 5: Isolate subagent conversations
+
+**Date**: 2026-07-27
+**Task**: Isolate subagent conversations
+**Branch**: `main`
+
+### Summary
+
+Separated root and child Agent conversations, added temporary child navigation and controls, isolated child plans and completion notifications, aligned child budgets with root Runs, and passed the full release gate.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9b3b16e` | (see git log) |
+
+### Status
+
+[OK] **Completed**

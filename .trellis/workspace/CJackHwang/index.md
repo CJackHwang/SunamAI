@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 4
+- **Total Sessions**: 5
 - **Last Active**: 2026-07-27
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~108 | Active |
+| `journal-1.md` | ~129 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 5 | 2026-07-27 | Isolate subagent conversations | `9b3b16e` | `main` |
 | 4 | 2026-07-27 | Fix workspace runtime and Agent lifecycle bugs | `7d1edbe`, `6848e04`, `1357a4a`, `04227b7` | `main` |
 | 3 | 2026-07-27 | Refine Agent completion and process lifecycle | `f152e48`, `9d21bed`, `868ea64` | `main` |
 | 2 | 2026-07-26 | 修复聊天推理、滚动与全局动效 | `1b675cc`, `c4d650c`, `8ecc8f6` | `main` |
