@@ -106,6 +106,10 @@
 }
 
 @media (max-width: 900px) {
+  .subagent-context-overlay {
+    background-color: rgba(0, 0, 0, 0.4);
+  }
+
   .context-menu {
     /* Bottom sheet style on mobile */
     inset: auto 0 0;

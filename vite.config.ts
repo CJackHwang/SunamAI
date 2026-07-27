@@ -74,6 +74,10 @@ export default defineConfig({
   },
   build: {
     target: 'es2023',
+    minify: 'terser',
+    terserOptions: {
+      compress: { passes: 4 },
+    },
     // Lightning CSS currently collapses the source declaration pair to a WebKit-only
     // declaration. Esbuild preserves both the standard property used by
     // Chromium/Firefox and the Safari-compatible prefixed declaration.

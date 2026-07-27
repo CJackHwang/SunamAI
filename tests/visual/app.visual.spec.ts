@@ -15,12 +15,19 @@ async function openResourceSubagentWorkspace(page: import('@playwright/test').Pa
   let rootTurn = 0;
   await page.route('https://visual.invalid/v1/chat/completions', async (route) => {
     const request = route.request().postDataJSON() as { stream?: boolean; tools?: unknown[]; messages?: Array<{ role: string; content: unknown }> };
-    if (!request.stream || !request.tools?.length) {
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Resource review' } }] }) });
-      return;
-    }
     const lastUser = [...(request.messages ?? [])].reverse().find((message) => message.role === 'user');
     const lastUserText = typeof lastUser?.content === 'string' ? lastUser.content : JSON.stringify(lastUser?.content ?? '');
+    if (!request.stream || !request.tools?.length) {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: lastUserText.includes('Keep this session plain.') ? 'Plain conversation' : 'Resource review' } }] }) });
+      return;
+    }
+    if (lastUserText.includes('Keep this session plain.')) {
+      await route.fulfill({ contentType: 'text/event-stream', body: streamToolCalls([
+        { id: 'plain-plan', name: 'update_plan', arguments: { items: [{ id: 'plain', title: 'Complete without delegation', status: 'completed' }] } },
+        { id: 'plain-complete', name: 'complete_task', arguments: { summary: 'Plain session complete.', evidence: ['No child Agent created.'] } },
+      ]) });
+      return;
+    }
     if (lastUserText.includes('Inspect attached resource metadata only.')) {
       await route.fulfill({ contentType: 'text/event-stream', body: streamToolCalls([{ id: 'child-complete', name: 'complete_task', arguments: { summary: 'Attachment metadata inspected.', evidence: ['Resource manifest received by delegated explorer.'] } }]) });
       return;
@@ -52,6 +59,46 @@ async function openResourceSubagentWorkspace(page: import('@playwright/test').Pa
   await composer.fill('Please delegate an explorer to review the attached resource and report structured evidence for this visual baseline.');
   await page.locator('.chat-submit').click();
   await expect(page.locator('.task-list-phase')).toHaveText('completed', { timeout: 60_000 });
+  if (viewport.width <= 900) {
+    await page.locator('.mobile-sidebar-toggle').click();
+  }
+  await page.locator('.sidebar-session-summary').click();
+  await expect(page.locator('.sidebar-subagent-row')).toHaveCount(1);
+  await page.getByRole('button', { name: '新建任务' }).click();
+  await expect(page.locator('.sidebar-session-group')).toHaveCount(2);
+  const plainSession = page.locator('.sidebar-session-group').filter({ hasNot: page.locator('.sidebar-subagent-row') });
+  const childSession = page.locator('.sidebar-session-group').filter({ has: page.locator('.sidebar-subagent-row') });
+  await expect(plainSession).toHaveClass(/active/);
+  if (viewport.width <= 900) await page.locator('.mobile-sidebar-close').click();
+  await composer.fill('Keep this session plain.');
+  await page.locator('.chat-submit').click();
+  await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph').filter({ hasText: /^Plain session complete\.$/ })).toBeVisible({ timeout: 60_000 });
+  if (viewport.width <= 900) await page.locator('.mobile-sidebar-toggle').click();
+  await expect(page.locator('.sidebar-session-group')).toHaveCount(2);
+  await expect(plainSession).toContainText('Plain conversation');
+  await expect(page.locator('.chat-message[data-role="user"]').first()).toHaveCSS('background-color', 'rgb(58, 58, 58)');
+  await expect(plainSession.locator('.sidebar-session-chevron')).toHaveCount(0);
+  await expect(childSession.locator('.sidebar-session-chevron')).toHaveCount(1);
+  const childAction = childSession.locator('.sidebar-subagent-row .item-action');
+  if (viewport.width > 900) await childSession.locator('.sidebar-subagent-row').hover();
+  await expect(childAction).toBeVisible();
+  await childAction.click();
+  await expect(page.locator('body > .sidebar-context-menu')).toBeVisible();
+  await expect(page).toHaveScreenshot(viewport.width <= 900 ? 'subagent-menu-mobile.png' : 'subagent-menu-desktop.png', { maxDiffPixelRatio: 0.002 });
+  await page.locator('body > .subagent-context-overlay').click({ position: { x: 2, y: 2 } });
+  await expect(page.locator('body > .sidebar-context-menu')).toHaveCount(0);
+  await childSession.locator('.sidebar-session-summary').click({ button: 'right' });
+  await page.getByRole('button', { name: '置顶' }).click();
+  await expect(childSession.locator('.sidebar-session-summary > .lucide-pin')).toHaveCount(1);
+  await expect(childSession.locator('.sidebar-session-summary > .lucide-history')).toHaveCount(0);
+  const actionOffsets = await page.locator('.sidebar-session-action').evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().right));
+  expect(Math.max(...actionOffsets) - Math.min(...actionOffsets)).toBeLessThan(1);
+  await expect(page.locator('.sidebar')).toHaveScreenshot(viewport.width <= 900 ? 'history-mixed-mobile.png' : 'history-mixed-desktop.png', { maxDiffPixelRatio: 0.002 });
+  await childSession.locator('.sidebar-session-summary').click();
+  if (!await childSession.locator('details').getAttribute('open')) await childSession.locator('.sidebar-session-summary').click();
+  if (viewport.width <= 900) {
+    await page.locator('.mobile-sidebar-close').click();
+  }
   await page.locator('.task-list-summary').click();
   await expect(page.locator('.task-list-subagent')).toHaveCount(1);
   const attachments = page.locator('.message-attachments');

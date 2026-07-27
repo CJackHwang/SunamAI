@@ -27,6 +27,20 @@ describe('RunBoard', () => {
     expect(onResume).toHaveBeenCalledOnce();
   });
 
+  it('keeps checkpoint content collapsed until its disclosure is opened', async () => {
+    const user = userEvent.setup();
+    const events = [{ id: 'checkpoint', kind: 'checkpoint' as const, sessionId: 's-1', runId: interruptedRun.id, sequence: 1, createdAt: 1, summary: 'Long checkpoint detail' }];
+    const rendered = render(<I18nProvider><RunBoard run={interruptedRun} events={events} /></I18nProvider>);
+    const view = within(rendered.container);
+    await user.click(view.getByRole('button', { name: /任务列表/ }));
+    const checkpoint = view.getByText('断点').closest('details');
+    expect(checkpoint).not.toHaveAttribute('open');
+    expect(view.getByText('Long checkpoint detail')).not.toBeVisible();
+    await user.click(view.getByText('断点'));
+    expect(checkpoint).toHaveAttribute('open');
+    expect(view.getByText('Long checkpoint detail')).toBeVisible();
+  });
+
   it('does not display stale verification as passed after a later workspace revision', async () => {
     const user = userEvent.setup();
     const run: AgentRun = {
@@ -39,7 +53,7 @@ describe('RunBoard', () => {
     const rendered = render(<I18nProvider><RunBoard run={run} events={events} /></I18nProvider>);
     const view = within(rendered.container);
     await user.click(view.getByRole('button', { name: /任务列表/ }));
-    expect(view.getByText('未验收')).toBeInTheDocument();
+    expect(view.queryByText('未验收')).not.toBeInTheDocument();
     expect(view.queryByText('已验收')).not.toBeInTheDocument();
   });
 

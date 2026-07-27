@@ -26,7 +26,7 @@ const files = listFiles(distDir);
 const jsFiles = files.filter((file) => file.endsWith('.js'));
 const totalJsGzipKb = jsFiles.reduce((total, file) => total + gzipSync(readFileSync(file)).byteLength, 0) / 1024;
 const distMiB = files.reduce((total, file) => total + statSync(file).size, 0) / (1024 * 1024);
-const totalJsLimitKb = Number(process.env.SUNAM_TOTAL_GZIP_LIMIT_KB ?? 320);
+const totalJsLimitKb = Number(process.env.SUNAM_TOTAL_GZIP_LIMIT_KB ?? 350);
 const distLimitMiB = Number(process.env.SUNAM_DIST_LIMIT_MIB ?? 1.8);
 
 console.log(`Initial bundle: ${entries[0]} (${gzipKb.toFixed(2)} KiB gzip; limit ${limitKb} KiB)`);

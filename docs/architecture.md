@@ -42,7 +42,7 @@ shared → entities → features → widgets → pages → app
   → React 投影（Chat、RunBoard、Terminal、Services）
 ```
 
-`AgentEngine` 不依赖 React 或供应商分支。`AgentModelClient` 负责 capabilities、context profile、token estimator、usage 和 content-part 映射。`AgentToolResult` 可以返回 `modelContent` 与 `resourceReferences`，但持久化 sanitizer 不允许 Blob/Base64 进入 ledger。
+`AgentEngine` 不依赖 React 或供应商分支。`AgentModelClient` 负责 capabilities、context profile、token estimator、usage 和 content-part 映射。`AgentToolResult` 可以返回 `modelContent` 与 `resourceReferences`，但持久化 sanitizer 不允许 Blob/Base64 进入 ledger。懒加载的 `ConfiguredPage` 页面壳持有 Sidebar 与 Workspace 共用的 Agent controller；临时的 root/child view selection 只存在于 React，不写入 workspace metadata。每个 child 使用独立 Engine/Run/TaskContract，因此它的可选 plan 只投影到自己的只读页面；完成通知逐个返回 root，不共享或改写 sibling task 状态。
 
 首屏 workspace store 通过类型化代理懒加载 v3 数据层；hydrate、事务和错误语义不变，但完整 IndexedDB validator/repository 不进入初始脚本。
 
@@ -65,14 +65,14 @@ File selection
 ```text
 Root AgentEngine
   → AgentFamilyCoordinator
-  ├─ explore child × up to 3
-  ├─ implement child (exclusive)
-  └─ verify child (exclusive)
+  ├─ explore child (read-only)
+  ├─ task child (complete tools, no delegation)
+  └─ up to 3 mixed-role lifecycles concurrently
        ↓ structured notification
 Root synthesis → current container revision gate
 ```
 
-父子 Run 共享 root-family 预算和 container mutation lease，但事件、上下文、取消域和 checkpoint 独立。Container lease 使用进程内全局队列，因此不同 root family 操作同一容器也会串行。
+父子 Run 共享 root-family 预算和 container mutation lease，但事件、上下文、取消域和 checkpoint 独立。最多三个 `explore | task` 子 Run 可同时推理和读取；apply/materialize/shell 等实际 mutation 通过进程内全局 container lease 逐次执行，因此不同 root family 操作同一容器也会串行。root Chat 与状态只投影 depth-zero Run；Sidebar 预读可见 session 的轻量 child Run 摘要，只有实际存在 child 的历史行才提供折叠入口，选中后 Workspace 才按需读取并投影该 `runId` 的只读 transcript。停止一个 child 只作用于它自己的取消域。旧持久化 `implement | verify` 记录继续读取，但统一显示为 `task`。
 
 ### 启动与恢复
 
@@ -128,6 +128,7 @@ Agent Core 与 WebContainer 的唯一边界：
 - event append-only；按稳定 session timeline 和单 Run 分别提供最多 250 条的页面查询，并有 run latest sequence 查询。
 - checkpoint 主键是 runId，每 Run 覆盖同一条。
 - delegated task 使用内部唯一 ID，模型 taskId 是普通标签。
+- child 删除在单事务中移除其 Run/event/checkpoint/delegated task，保留父记录和 session-scoped resources；新 root 第一次 spawn 前只裁剪旧 family 的终态 child。
 - session/container 删除前取消并等待命中范围的活动父/子 Run；随后在单事务内同步 workspace 元数据和关联数据，防止删除后数据复活。
 - session 删除清理该 session 的 Run/event/checkpoint/resource/task 与 terminal history；container 删除清理该 container 的 Run 侧链、资源归属和 snapshot，不宣称删除无法按 container 定位的 session terminal history。
 - Run/Event/Checkpoint/Message/Resource/AgentTask 的嵌套字段都经过 schema guard；malformed record 被隔离，资源 Blob 只存 resources。
@@ -145,10 +146,10 @@ Agent 工具批次后的 snapshot/Run/event/checkpoint 同步有独立 watchdog�
 - SSE delta 最多 30 次/秒合并更新，结束强制 flush；未终止 buffer 上限 1 MiB，provider error 结构化上抛。
 - OpenAI-compatible nullable content/reasoning 在 SSE adapter 边界规范化；AgentEngine 保留最终消息的 reasoning，React 只负责投影。
 - Chat 投影一次建立 `tool_call_id → result` 索引，避免逐消息扫描造成 O(n²)。
-- Chat 位于底部时用即时校正跟随流式内容和 composer 保留高度；用户主动返回底部时才使用平滑滚动。工具详情默认折叠，用户触发展开时对固有宽高做非线性动画并在需要时保持底部锚定。
+- Chat 位于底部时用即时校正跟随流式内容和 composer 保留高度；用户主动返回底部时才使用平滑滚动。工具详情以及 RunBoard 的断点/子任务详情默认折叠，用户触发展开时通过共享 hook 对固有宽高做非线性动画并在需要时保持底部锚定。
 - UI motion 按 fast feedback、spring direct manipulation、sheet layout 和 exit 四类共享 token；React presence 保留时间覆盖对应 CSS 退场时长，所有动效受全局 reduced-motion 约束。
 - 初始仅读最近 250 events；上滚自动分页；DOM 固定在当前 250-message 窗口。
-- 子 Agent transcript 在展开子任务时按 run 查询最近 250 events，默认只渲染摘要。
+- 子 Agent transcript 仅在 Sidebar 选择对应二级入口后按 run 查询最近 250 events；root 页面不加载或渲染 child 消息。
 - 历史 Markdown 使用 `content-visibility`。只有 5,000-event 基准仍无法满足帧预算时才引入动态高度虚拟列表。
 - 文件列表不读取每个文件全文计算大小；打开、下载或显式读取后再缓存真实大小。
 - 快照导出前排除依赖、构建产物、coverage、Playwright 输出和缓存；10,000 文件/100 MiB 超限保留最后成功版本。
@@ -168,4 +169,4 @@ Agent 工具批次后的 snapshot/Run/event/checkpoint 同步有独立 watchdog�
 
 ## 当前架构基线
 
-2026-07-26，架构边界检查已作为 `npm run check` 的固定步骤连续通过两次完整门禁。当前生产构建初始 JS 为 84.94 KiB gzip、总 JS 为 314.09 KiB gzip、`dist` 为 1.34 MiB；核心自动化 36 文件/175 测试，E2E 7/7、视觉 4/4、真实 WebContainer 3/3。生产依赖审计为零，剩余 8 个 high 仅来自开发期 PWA/Workbox 链，并按 [依赖策略](dependency-advisories.md) 跟踪。
+2026-07-27，架构边界检查已随本轮完整门禁通过。当前生产构建初始 JS 为 87.39 KiB gzip、总 JS 为 320.85 KiB gzip、`dist` 为 1.38 MiB；核心自动化 42 文件/224 测试，E2E 11/11、视觉 4/4、真实 WebContainer 3/3。生产依赖审计为零，剩余 8 个 high 仅来自开发期 PWA/Workbox 链，并按 [依赖策略](dependency-advisories.md) 跟踪。本轮不声明连续两次完整门禁要求的优化冻结复验。

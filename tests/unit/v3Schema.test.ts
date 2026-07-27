@@ -33,10 +33,12 @@ describe('v3 persistence schema guards', () => {
   it('accepts complete workspace, run, checkpoint, resource, task, and stored envelopes', () => {
     expect(isWorkspace({ sessions: [{ id: 's-1', title: 'One', updatedAt: 1, pinned: true, status: 'running' }], containers: [{ id: 'c-1', name: 'One', updatedAt: 1, pinned: false }], activeSessionId: 's-1', activeContainerId: 'c-1' })).toBe(true);
     expect(isRun(run)).toBe(true);
+    expect(isRun({ ...run, agentRole: 'task', toolPolicy: { role: 'task', allowedTools: ['read_file', 'apply_patch', 'shell_run'] } })).toBe(true);
     expect(isCheckpoint({ id: 'r-1', runId: 'r-1', sessionId: 's-1', containerId: 'c-1', summary: 'summary', messages: [message], createdAt: 1, eventTailSequence: 2, workspaceRevision: 2, resourceIds: ['res-1'] })).toBe(true);
     expect(isResource({ id: 'res-1', sessionId: 's-1', originatingRunId: 'r-1', name: 'a.txt', kind: 'text', mimeType: 'text/plain', size: 1, sha256: 'hash', createdAt: 1, blob: new Blob(['a']) })).toBe(true);
     const delegated: DelegatedAgentTask = { id: 'internal', taskId: 'label', sessionId: 's-1', rootRunId: 'r-1', parentRunId: 'r-1', runId: 'r-child', role: 'verify', prompt: 'verify', status: 'blocked', createdAt: 1, updatedAt: 2, summary: 'blocked', evidence: ['e'], changedPaths: ['a.ts'], verificationRecords: task.verificationEvidence, usage: { modelTurns: 1, toolCalls: 2, durationMs: 3, estimatedTokens: 4 }, blockedReason: 'input' };
     expect(isAgentTask(delegated)).toBe(true);
+    expect(isAgentTask({ ...delegated, role: 'task' })).toBe(true);
     expect(isStoredValue({ id: 'r-1', formatVersion: V3_PERSISTENCE_VERSION, updatedAt: 1, payload: run })).toBe(true);
   });
 

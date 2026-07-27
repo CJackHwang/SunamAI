@@ -52,13 +52,21 @@ describe('AgentToolRegistry', () => {
 
   it('governs verification relevance and truthfulness through the system prompt', () => {
     const { getTask } = createContext();
-    const prompt = buildAgentSystemPrompt({ containerId: 'c-1', task: getTask(), chaos: createChaosContract('Sunam 6.9 Pron'), summary: '' });
+    const prompt = buildAgentSystemPrompt({ containerId: 'c-1', task: getTask(), chaos: createChaosContract('Sunam 6.9 Pron'), summary: '', agentRole: 'root' });
     expect(prompt).toContain('truthful check that is relevant to the task');
     expect(prompt).toContain('ports, and shell composition are not restricted');
     expect(prompt).toContain('never use forced success or unrelated commands as fake evidence');
     expect(prompt).toContain('later workspace mutation requires another foreground check');
     expect(prompt).toContain('Before managing a previously started service, call `process_list`');
     expect(prompt).toContain('Do not guess OS PIDs or kill by port');
+    expect(prompt).toContain('Use `explore` for independent read-only investigation and `task` for work that may edit files');
+    expect(prompt).toContain('issue every `spawn_subagent` call before `wait_subagents`');
+    expect(prompt).toContain('Each `wait_subagents` call returns one completed child report');
+
+    const childPrompt = buildAgentSystemPrompt({ containerId: 'c-1', task: getTask(), chaos: createChaosContract('Sunam 6.9 Pron'), summary: '', agentRole: 'task' });
+    expect(childPrompt).toContain('Verification does not gate child completion');
+    expect(childPrompt).toContain('child-local plan');
+    expect(childPrompt).not.toContain('After making changes, you MUST use `shell_run`');
   });
 
   it('executes workspace, shell, process, and control tools with truthful task updates', async () => {
@@ -263,9 +271,9 @@ describe('AgentToolRegistry', () => {
     expect(getTask().evidence).toEqual(['Failed verification: custom-validator']);
   });
 
-  it('enforces delegated role policies and exposes all subagent control tools', async () => {
+  it('enforces the two delegated role contract and exposes all parent control tools', async () => {
     const registry = new AgentToolRegistry();
-    const { context, runtime } = createContext();
+    const { context, runtime, getTask } = createContext();
     const notification = { runId: 'child-1', taskId: 'task-1', role: 'explore' as const, status: 'completed' as const, summary: 'done', evidence: ['read'], changedPaths: [], verificationRecords: [], workspaceRevision: 0, usage: { modelTurns: 1, toolCalls: 2, durationMs: 3 } };
     context.subagents = {
       spawn: vi.fn(async () => ({ runId: 'child-1', taskId: 'task-1', status: 'queued' })),
@@ -276,21 +284,30 @@ describe('AgentToolRegistry', () => {
       snapshot: vi.fn(() => []),
     };
     expect((await registry.execute({ id: 'spawn', name: 'spawn_subagent', arguments: '{"task_id":"task-1","role":"explore","prompt":"inspect"}' }, context)).data).toMatchObject({ runId: 'child-1' });
+    expect((await registry.execute({ id: 'spawn-task', name: 'spawn_subagent', arguments: '{"task_id":"task-2","role":"task","prompt":"implement and verify","write_scope":["src"]}' }, context)).ok).toBe(true);
+    expect((await registry.execute({ id: 'legacy-implement', name: 'spawn_subagent', arguments: '{"task_id":"legacy","role":"implement","prompt":"legacy"}' }, context)).content).toContain('input validation failed');
+    expect((await registry.execute({ id: 'legacy-verify', name: 'spawn_subagent', arguments: '{"task_id":"legacy","role":"verify","prompt":"legacy"}' }, context)).content).toContain('input validation failed');
+    expect((await registry.execute({ id: 'explore-scope', name: 'spawn_subagent', arguments: '{"task_id":"read","role":"explore","prompt":"read","write_scope":["src"]}' }, context)).content).toContain('input validation failed');
     expect((await registry.execute({ id: 'wait', name: 'wait_subagents', arguments: '{"run_ids":["child-1"]}' }, context)).data).toEqual([notification]);
     expect((await registry.execute({ id: 'message', name: 'message_subagent', arguments: '{"run_id":"child-1","message":"focus"}' }, context)).ok).toBe(true);
     expect((await registry.execute({ id: 'stop', name: 'stop_subagent', arguments: '{"run_id":"child-1"}' }, context)).ok).toBe(true);
 
-    context.agentRole = 'verify';
-    expect((await registry.execute({ id: 'background', name: 'shell_run', arguments: '{"command":"npm test","mode":"background"}' }, context)).content).toContain('foreground');
-    context.updateTask((task) => ({ ...task, plan: [{ id: 'verify', title: 'Verify', status: 'completed' }] }));
+    context.agentRole = 'task';
+    expect((await registry.execute({ id: 'background', name: 'shell_run', arguments: '{"command":"npm run dev","mode":"background"}' }, context)).ok).toBe(true);
+    context.updateTask((task) => ({ ...task, changedWorkspace: true, plan: [{ id: 'verify', title: 'Verify', status: 'completed' }] }));
     const unverified = await registry.execute({ id: 'unverified-complete', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context);
-    expect(unverified.content).toContain('shell_run');
-    expect(unverified.content).toContain('foreground');
+    expect(unverified.stopRun).toBe('completed');
+    expect(getTask()).toMatchObject({ changedWorkspace: true, verified: false });
+
+    context.agentRole = 'root';
+    const rootUnverified = await registry.execute({ id: 'root-unverified-complete', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context);
+    expect(rootUnverified.content).toContain('shell_run');
+    expect(rootUnverified.content).toContain('foreground');
     await registry.execute({ id: 'verify-pass', name: 'shell_run', arguments: '{"command":"custom-project-validator --port 4173","mode":"foreground"}' }, context);
     expect((await registry.execute({ id: 'verified-complete', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context)).stopRun).toBe('completed');
-    expect(runtime.runShell).not.toHaveBeenCalledWith(expect.objectContaining({ mode: 'background' }));
+    expect(runtime.runShell).toHaveBeenCalledWith(expect.objectContaining({ mode: 'background' }));
 
-    context.agentRole = 'implement';
+    context.agentRole = 'task';
     context.writeScope = ['src/allowed'];
     expect((await registry.execute({ id: 'outside', name: 'apply_patch', arguments: '{"changes":[{"path":"src/other/a.ts","content":"x"}]}' }, context)).content).toContain('outside');
     expect((await registry.execute({ id: 'scope-traversal', name: 'apply_patch', arguments: '{"changes":[{"path":"src/allowed/../other.ts","content":"x"}]}' }, context)).content).toContain('escapes');
@@ -301,7 +318,15 @@ describe('AgentToolRegistry', () => {
   it('supports role-specific registries and converts thrown tool errors into results', async () => {
     const limited = new AgentToolRegistry(new Set(['spawn_subagent']));
     const { context } = createContext();
-    expect(limited.getApiDefinitions().map((tool) => tool.function.name)).toEqual(['spawn_subagent']);
+    const definitions = limited.getApiDefinitions();
+    expect(definitions.map((tool) => tool.function.name)).toEqual(['spawn_subagent']);
+    expect(definitions[0]?.function.parameters).toMatchObject({
+      type: 'object',
+      properties: { role: { type: 'string', enum: ['explore', 'task'] } },
+      required: ['task_id', 'role', 'prompt'],
+      additionalProperties: false,
+    });
+    expect(definitions[0]?.function.parameters).not.toHaveProperty('anyOf');
     expect((await limited.execute({ id: 'missing', name: 'workspace_tree', arguments: '{}' }, context)).ok).toBe(false);
     context.subagents = {
       spawn: vi.fn(async () => { throw new Error('delegation unavailable'); }),
@@ -318,8 +343,8 @@ describe('AgentToolRegistry', () => {
     const registry = new AgentToolRegistry();
     const { context, runtime, getTask } = createContext();
     runtime.getWorkspaceRevision = vi.fn(async () => 3);
-    const implementation = { runId: 'implement', taskId: 'write', role: 'implement' as const, status: 'completed' as const, summary: 'wrote file', evidence: ['file'], changedPaths: ['src/a.ts'], verificationRecords: [], workspaceRevision: 3, usage: { modelTurns: 1, toolCalls: 1, durationMs: 1 } };
-    const verification = { runId: 'verify', taskId: 'verify', role: 'verify' as const, status: 'completed' as const, summary: 'tests pass', evidence: ['tests'], changedPaths: [], verificationRecords: [{ command: 'npm test', passed: true, workspaceRevision: 3, createdAt: 1 }], workspaceRevision: 3, usage: { modelTurns: 1, toolCalls: 1, durationMs: 1 } };
+    const implementation = { runId: 'implement', taskId: 'write', role: 'task' as const, status: 'completed' as const, summary: 'wrote file', evidence: ['file'], changedPaths: ['src/a.ts'], verificationRecords: [], workspaceRevision: 3, usage: { modelTurns: 1, toolCalls: 1, durationMs: 1 } };
+    const verification = { runId: 'verify', taskId: 'verify', role: 'task' as const, status: 'completed' as const, summary: 'tests pass', evidence: ['tests'], changedPaths: [], verificationRecords: [{ command: 'npm test', passed: true, workspaceRevision: 3, createdAt: 1 }], workspaceRevision: 3, usage: { modelTurns: 1, toolCalls: 1, durationMs: 1 } };
     context.subagents = { spawn: vi.fn(), wait: vi.fn().mockResolvedValueOnce([implementation]).mockResolvedValueOnce([verification]), message: vi.fn(), stop: vi.fn(), stopAll: vi.fn(), snapshot: vi.fn(() => []) };
     const writeResult = await registry.execute({ id: 'wait-write', name: 'wait_subagents', arguments: '{"run_ids":["implement"]}' }, context);
     expect(writeResult.changedWorkspace).toBe(true);
@@ -336,7 +361,7 @@ describe('AgentToolRegistry', () => {
     const { context, runtime, getTask } = createContext();
     runtime.getWorkspaceRevision = vi.fn(async () => 4);
     context.updateTask((task) => ({ ...task, changedWorkspace: true, workspaceRevision: 4, verified: true, verifiedRevision: 4 }));
-    const failed = { runId: 'verify-failed', taskId: 'verify-failed', role: 'verify' as const, status: 'failed' as const, summary: 'tests failed', evidence: [], changedPaths: [], verificationRecords: [{ command: 'npm test', passed: false, workspaceRevision: 4, createdAt: 1 }], workspaceRevision: 4, usage: { modelTurns: 1, toolCalls: 1, durationMs: 1 }, blockedReason: 'tests failed' };
+    const failed = { runId: 'verify-failed', taskId: 'verify-failed', role: 'task' as const, status: 'failed' as const, summary: 'tests failed', evidence: [], changedPaths: [], verificationRecords: [{ command: 'npm test', passed: false, workspaceRevision: 4, createdAt: 1 }], workspaceRevision: 4, usage: { modelTurns: 1, toolCalls: 1, durationMs: 1 }, blockedReason: 'tests failed' };
     context.subagents = { spawn: vi.fn(), wait: vi.fn(async () => [failed]), message: vi.fn(), stop: vi.fn(), stopAll: vi.fn(), snapshot: vi.fn(() => []) };
     await registry.execute({ id: 'wait-failed', name: 'wait_subagents', arguments: '{"run_ids":["verify-failed"]}' }, context);
     expect(getTask()).toMatchObject({ verified: false, verifiedRevision: -1, workspaceRevision: 4 });

@@ -32,7 +32,7 @@ function isOptionalBoolean(value: unknown): boolean { return value === undefined
 function isOptionalNonNegativeInteger(value: unknown): boolean { return value === undefined || Number.isInteger(value) && Number(value) >= 0; }
 
 const AGENT_PHASES = new Set(['preparing', 'planning', 'acting', 'observing', 'verifying', 'awaiting_user', 'cancelling', 'cancelled', 'completed', 'failed', 'interrupted']);
-const AGENT_ROLES = new Set(['root', 'explore', 'implement', 'verify']);
+const AGENT_ROLES = new Set(['root', 'explore', 'task', 'implement', 'verify']);
 const TASK_STATUSES = new Set(['queued', 'running', 'completed', 'failed', 'cancelled', 'blocked', 'interrupted']);
 
 function isToolCall(value: unknown): value is ToolCall {
@@ -174,7 +174,7 @@ function isBlobLike(value: unknown): value is Blob {
 
 export function isAgentTask(value: unknown): value is DelegatedAgentTask {
   return isRecord(value) && typeof value.id === 'string' && typeof value.taskId === 'string' && typeof value.sessionId === 'string' && typeof value.rootRunId === 'string'
-    && typeof value.parentRunId === 'string' && ['explore', 'implement', 'verify'].includes(String(value.role)) && typeof value.prompt === 'string'
+    && typeof value.parentRunId === 'string' && ['explore', 'task', 'implement', 'verify'].includes(String(value.role)) && typeof value.prompt === 'string'
     && TASK_STATUSES.has(String(value.status)) && Number.isFinite(value.createdAt) && Number.isFinite(value.updatedAt)
     && isStringArray(value.evidence) && isStringArray(value.changedPaths) && Array.isArray(value.verificationRecords) && value.verificationRecords.every(isVerificationEvidence)
     && isOptionalString(value.runId) && isOptionalString(value.summary) && isOptionalString(value.blockedReason)

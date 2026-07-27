@@ -34,6 +34,10 @@ Use the smaller/dominant padding axis when padding differs. Avoid visually unrel
 
 For chat and nested tool surfaces, use symmetric padding so the horizontal inset does not look heavier than the vertical inset. The current message bubble uses 16px on all four sides, the thinking surface uses 10px, the tool disclosure uses 8px, and arguments/results use 12px. Chat message bubbles and nested tool disclosures do not draw borders; preserve hierarchy with the surface/background tokens, spacing, and concentric radii.
 
+User message bubbles use `--color-gray-700` (`#3a3a3a`). Do not substitute
+`--color-black` or the near-black `--color-gray-800`; the visual contract is a
+clearly distinguishable dark gray, not merely a token whose name contains gray.
+
 ```css
 .chat-message { padding: 16px; border: 0; }
 .thinking-process { padding: 10px; }
@@ -80,6 +84,42 @@ The disclosure contract is:
 - if the nearest scroll owner was already at the bottom, use direct `scrollTop = scrollHeight` correction during the user-triggered animation; wheel or touch input stops that correction;
 - cancel animations, animation frames, and temporary listeners on rapid reversal and unmount.
 
+A closed `<details>` hides every descendant except its first `<summary>`. Controls that must remain available while collapsed, such as a session row's context-menu button, belong in an outer positioned wrapper rather than as a sibling of `summary` inside `details`:
+
+```tsx
+<div className="session-group">
+  <details><summary>Session</summary><div>Children</div></details>
+  <button aria-label="Session actions" />
+</div>
+```
+
+Render a disclosure only when expandable content actually exists. If child
+presence is durable but the expensive transcript is lazy, preload only the
+lightweight child summaries and keep a plain history row until at least one
+child exists. Do not render speculative chevrons on empty rows. Parent rows
+with and without disclosures reserve the same fixed trailing action slot;
+hover/focus visibility must restore both opacity and transform so the menu does
+not jump or clip at the edge.
+
+Context menus rendered from inside a transformed sidebar must portal to
+`document.body`; otherwise `position: fixed` is resolved against the sidebar
+containing block and desktop menus stretch or clip at the sidebar edge. Reuse
+the shared `context-overlay`, `context-menu`, and responsive bottom-sheet
+classes after portalling.
+
+When a disclosure summary also navigates from a selected child back to its
+root view, that first activation prevents the native toggle and preserves the
+open child list. Once root is already selected, later activations use the
+normal disclosure toggle. A pinned history/resource row replaces its leading
+resource glyph with the Pin glyph; never insert a second icon beside it.
+
+Session title generation, running, completed-unread, and failed-unread states
+share one mutually exclusive fixed status slot. The status slot stays before
+the optional disclosure chevron and the reserved action slot; indicators must
+not participate in the title flex flow or overlap the hover action. Component
+tests cover state selection, and browser tests compare the status/action
+bounding boxes for a real failed Run.
+
 ```tsx
 const start = details.getBoundingClientRect();
 details.open = shouldOpen;
@@ -93,6 +133,6 @@ details.animate([
 ], { duration: 420, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' });
 ```
 
-Do not replace semantic disclosure with a clickable `div`, animate to guessed `max-height` values, or start smooth scrolling on every animation frame. Component tests cover default state, toggle behavior, and reduced motion; a browser test must prove that the intrinsic-size animation actually starts and settles.
+Do not replace semantic disclosure with a clickable `div`, put always-available controls in the hidden body of a closed `details`, animate to guessed `max-height` values, or start smooth scrolling on every animation frame. Component tests cover default state, collapsed action availability, toggle behavior, and reduced motion; a browser test must prove that the intrinsic-size animation actually starts and settles.
 
 References: `src/features/terminal-session/ServicePreviewOverlay.tsx`, `src/widgets/settings/SettingsModal.tsx`, `src/shared/ui/Modal.tsx`, and component tests under `tests/component`.

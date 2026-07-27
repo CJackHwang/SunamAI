@@ -12,6 +12,40 @@
   z-index: 5;
 }
 
+.subagent-footer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: flex-end;
+  min-height: 68px;
+  padding: 12px 24px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.subagent-task-list-slot {
+  width: calc(100% - 56px);
+  min-width: 0;
+  pointer-events: auto;
+}
+
+.subagent-action {
+  position: absolute;
+  right: 24px;
+  bottom: 12px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  pointer-events: auto;
+  border-radius: 50%;
+}
+
+.subagent-footer .chat-scroll-bottom-btn {
+  bottom: 68px;
+}
+
 .chat-composer-upper-row {
   display: flex;
   align-items: flex-end;
@@ -256,9 +290,44 @@
 }
 
 .task-list-note {
-  padding: 8px;
-  border-left: 2px solid var(--color-text);
+  overflow: clip;
+  border-radius: var(--radius-small);
   background: var(--color-bg);
+}
+
+.task-list-note summary,
+.task-list-subagent summary {
+  list-style: none;
+}
+
+.task-list-note summary::-webkit-details-marker,
+.task-list-subagent summary::-webkit-details-marker {
+  display: none;
+}
+
+.task-list-note summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.task-list-note p {
+  margin: 0;
+  padding: 0 10px 10px;
+  white-space: pre-wrap;
+}
+
+.task-list-disclosure-chevron {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--color-text-secondary);
+  transition: transform var(--motion-slow) var(--motion-spring);
+}
+
+[data-expanded="true"] > summary .task-list-disclosure-chevron {
+  transform: rotate(180deg);
 }
 
 .task-list-compaction {
@@ -282,14 +351,14 @@
 
 .task-list-subagent {
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
-  border-radius: 4px;
+  border: 0;
+  border-radius: var(--radius-small);
   background: color-mix(in srgb, var(--color-surface) 74%, transparent);
 }
 
 .task-list-subagent summary {
   display: grid;
-  grid-template-columns: auto auto auto minmax(0, 1fr);
+  grid-template-columns: auto auto auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   padding: 7px 8px;
@@ -309,7 +378,11 @@
   white-space: nowrap;
 }
 
-.task-list-subagent > div {
+.task-list-subagent summary .task-list-disclosure-chevron {
+  margin-left: 0;
+}
+
+.task-list-subagent > .task-list-disclosure-body {
   padding: 0 8px 8px 28px;
 }
 

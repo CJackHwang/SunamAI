@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AgentWorkspaceRuntime, ProcessOwnership, ProcessStatus, RuntimeProcessEvent, ShellRunRequest, ShellRunResult, WorkspaceTreeEntry } from '@/shared/contracts/agentRuntime';
 import type { AgentModelClient } from '@/features/agent-core/modelClient';
 import type { AgentModelResponse, AgentRun } from '@/features/agent-core/types';
-import { AgentFamilyBudget, ContainerMutationLease } from '@/features/agent-core/agentFamily';
+import { ContainerMutationLease } from '@/features/agent-core/agentFamily';
 import { AgentFamilyCoordinator } from '@/features/agent-core/subagentCoordinator';
 import { AgentEventStore } from '@/features/agent-core/eventStore';
 
@@ -87,15 +87,14 @@ function rootRun(): AgentRun {
   };
 }
 
-function coordinator(clients: AgentModelClient[], signal = new AbortController().signal, run = rootRun()) {
-  const budget = new AgentFamilyBudget();
+function coordinator(clients: AgentModelClient[], signal = new AbortController().signal, run = rootRun(), store = new AgentEventStore(), onRunChange: (run: AgentRun) => void = () => undefined) {
   const lease = new ContainerMutationLease();
   return new AgentFamilyCoordinator({
-    root: { getRun: () => run, getFamilyBudget: () => budget, getMutationLease: () => lease },
+    root: { getRun: () => run, getMutationLease: () => lease },
     persona: run.persona,
     model: run.model,
     runtime: new RuntimeStub(),
-    store: new AgentEventStore(),
+    store,
     signal,
     createClient: () => {
       const next = clients.shift();
@@ -103,11 +102,27 @@ function coordinator(clients: AgentModelClient[], signal = new AbortController()
       return next;
     },
     onEvent: () => undefined,
-    onRunChange: () => undefined,
+    onRunChange,
   });
 }
 
 describe('AgentFamilyCoordinator', () => {
+  it('fails closed before creating a child when first-spawn cleanup fails', async () => {
+    const cleanupError = new Error('cleanup transaction failed');
+    const store = {
+      pruneTerminalChildRuns: vi.fn(async () => { throw cleanupError; }),
+      saveAgentTask: vi.fn(),
+    } as unknown as AgentEventStore;
+    const family = coordinator([new DeferredClient()], new AbortController().signal, rootRun(), store);
+
+    await expect(family.spawn({ taskId: 'blocked-by-cleanup', role: 'explore', prompt: 'must not start' })).rejects.toThrow(cleanupError);
+    await expect(family.spawn({ taskId: 'still-blocked', role: 'explore', prompt: 'must still not start' })).rejects.toThrow(cleanupError);
+
+    expect(store.pruneTerminalChildRuns).toHaveBeenCalledOnce();
+    expect(store.saveAgentTask).not.toHaveBeenCalled();
+    expect(family.snapshot()).toEqual([]);
+  });
+
   it('runs up to three explore children concurrently', async () => {
     let active = 0;
     let maximum = 0;
@@ -118,32 +133,59 @@ describe('AgentFamilyCoordinator', () => {
     await Promise.all(clients.map((client) => client.started));
     expect(maximum).toBe(3);
     clients.forEach((client) => client.finish());
-    const notifications = await family.wait(spawned.map((child) => child.runId));
-    expect(notifications.every((notification) => notification.status === 'completed')).toBe(true);
+    const runIds = spawned.map((child) => child.runId);
+    const notifications = [];
+    for (const _runId of runIds) notifications.push((await family.wait(runIds))[0]);
+    expect(new Set(notifications.map((notification) => notification?.runId))).toEqual(new Set(runIds));
+    expect(notifications.every((notification) => notification?.status === 'completed')).toBe(true);
   });
 
-  it('serializes implement and verify children', async () => {
+  it('gives each child the full root budget independently of exhausted root and sibling counters', async () => {
+    const run = { ...rootRun(), budget: { maxModelTurns: 2, maxToolCalls: 1, maxDurationMs: 11_000 }, modelTurns: 2, toolCalls: 1 };
+    const projected: AgentRun[] = [];
+    const family = coordinator(
+      [
+        new ScriptedClient([tool('finish-one', 'complete_task', { summary: 'child one completed', evidence: ['one'] })]),
+        new ScriptedClient([tool('finish-two', 'complete_task', { summary: 'child two completed', evidence: ['two'] })]),
+      ],
+      new AbortController().signal,
+      run,
+      new AgentEventStore(),
+      (childRun) => projected.push(childRun),
+    );
+
+    const first = await family.spawn({ taskId: 'same-budget-one', role: 'explore', prompt: 'x' });
+    const second = await family.spawn({ taskId: 'same-budget-two', role: 'explore', prompt: 'y' });
+    const runIds = [first.runId, second.runId];
+    const notifications = [...await family.wait(runIds), ...await family.wait(runIds)];
+    expect(notifications).toEqual(expect.arrayContaining([
+      expect.objectContaining({ runId: first.runId, status: 'completed' }),
+      expect.objectContaining({ runId: second.runId, status: 'completed' }),
+    ]));
+    const childRuns = projected.filter((candidate) => runIds.includes(candidate.id));
+    expect(new Set(childRuns.map((candidate) => candidate.id))).toEqual(new Set(runIds));
+    expect(childRuns.every((candidate) => candidate.budget.maxModelTurns === run.budget.maxModelTurns && candidate.budget.maxToolCalls === run.budget.maxToolCalls && candidate.budget.maxDurationMs === run.budget.maxDurationMs)).toBe(true);
+  });
+
+  it('runs mixed explore and task children concurrently', async () => {
     let active = 0;
     let maximum = 0;
     const first = new DeferredClient(() => { active += 1; maximum = Math.max(maximum, active); }, () => { active -= 1; });
     const second = new DeferredClient(() => { active += 1; maximum = Math.max(maximum, active); }, () => { active -= 1; });
     const family = coordinator([first, second]);
-    const implement = await family.spawn({ taskId: 'write', role: 'implement', prompt: 'inspect write task' });
-    const verify = await family.spawn({ taskId: 'verify', role: 'verify', prompt: 'inspect verification task' });
-    await first.started;
-    let secondStarted = false;
-    void second.started.then(() => { secondStarted = true; });
-    await Promise.resolve();
-    expect(secondStarted).toBe(false);
+    const implement = await family.spawn({ taskId: 'write', role: 'task', prompt: 'inspect write task' });
+    const verify = await family.spawn({ taskId: 'verify', role: 'task', prompt: 'inspect verification task' });
+    await Promise.all([first.started, second.started]);
     first.finish();
-    await second.started;
     const verifyCalls = [
       { id: 'verify-command', name: 'shell_run', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground' }) },
       { id: 'verify-complete', name: 'complete_task', arguments: JSON.stringify({ summary: 'Verification passed.', evidence: ['npm test passed'] }) },
     ];
     second.finish({ message: { role: 'assistant', content: '', tool_calls: verifyCalls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })) }, toolCalls: verifyCalls });
-    await family.wait([implement.runId, verify.runId]);
-    expect(maximum).toBe(1);
+    const runIds = [implement.runId, verify.runId];
+    await family.wait(runIds);
+    await family.wait(runIds);
+    expect(maximum).toBe(2);
   });
 
   it('cascades parent cancellation and resolves waits as cancelled', async () => {
@@ -163,11 +205,13 @@ describe('AgentFamilyCoordinator', () => {
   });
 
   it('queues parent messages, cancels queued work, and rejects foreign run IDs', async () => {
-    const active = new DeferredClient();
-    const family = coordinator([active]);
-    const first = await family.spawn({ taskId: 'active', role: 'implement', prompt: 'inspect active' });
-    const queued = await family.spawn({ taskId: 'queued', role: 'verify', prompt: 'inspect queued' });
-    await active.started;
+    const active = [new DeferredClient(), new DeferredClient(), new DeferredClient()];
+    const family = coordinator([...active]);
+    const first = await family.spawn({ taskId: 'active-1', role: 'task', prompt: 'inspect active' });
+    await family.spawn({ taskId: 'active-2', role: 'explore', prompt: 'inspect active' });
+    await family.spawn({ taskId: 'active-3', role: 'task', prompt: 'inspect active' });
+    await Promise.all(active.map((client) => client.started));
+    const queued = await family.spawn({ taskId: 'queued', role: 'task', prompt: 'inspect queued' });
     await expect(family.message(first.runId, 'new fact')).resolves.toBe(true);
     await expect(family.message(queued.runId, 'queued fact')).resolves.toBe(true);
     await expect(family.stop(queued.runId)).resolves.toBe(true);
@@ -176,9 +220,28 @@ describe('AgentFamilyCoordinator', () => {
     await expect(family.message(queued.runId, 'too late')).resolves.toBe(false);
     await expect(family.stop('foreign')).resolves.toBe(false);
     await expect(family.wait(['foreign'])).rejects.toThrow('does not belong');
-    active.finish();
+    active.forEach((client) => client.finish());
     await family.wait([first.runId]);
     await expect(family.message(first.runId, 'too late')).resolves.toBe(false);
+  });
+
+  it('stops one child and waits for its terminal notification without cancelling its sibling', async () => {
+    const firstClient = new DeferredClient();
+    const secondClient = new DeferredClient();
+    const family = coordinator([firstClient, secondClient]);
+    const first = await family.spawn({ taskId: 'first', role: 'explore', prompt: 'first' });
+    const second = await family.spawn({ taskId: 'second', role: 'explore', prompt: 'second' });
+    await Promise.all([firstClient.started, secondClient.started]);
+
+    await expect(family.stopAndWait(first.runId)).resolves.toBe(true);
+    await expect(family.wait([first.runId])).resolves.toMatchObject([{ status: 'cancelled' }]);
+    let secondFinished = false;
+    const secondNotification = family.wait([second.runId]).then((notifications) => { secondFinished = true; return notifications; });
+    await Promise.resolve();
+    expect(secondFinished).toBe(false);
+    secondClient.finish();
+    await expect(secondNotification).resolves.toMatchObject([{ status: 'completed' }]);
+    await expect(family.stopAndWait('foreign')).resolves.toBe(false);
   });
 
   it('enforces depth and six-child limits', async () => {
@@ -189,10 +252,37 @@ describe('AgentFamilyCoordinator', () => {
     const active = new DeferredClient();
     const family = coordinator([active], controller.signal);
     const children = [];
-    for (let index = 0; index < 6; index += 1) children.push(await family.spawn({ taskId: `limit-${index}`, role: 'implement', prompt: `inspect ${index}` }));
+    for (let index = 0; index < 6; index += 1) children.push(await family.spawn({ taskId: `limit-${index}`, role: 'task', prompt: `inspect ${index}` }));
     await expect(family.spawn({ taskId: 'limit-7', role: 'explore', prompt: 'inspect' })).rejects.toThrow('maximum of 6');
     controller.abort(new DOMException('stop family', 'AbortError'));
-    await expect(family.wait(children.map((child) => child.runId))).resolves.toHaveLength(6);
+    const runIds = children.map((child) => child.runId);
+    const notifications = [];
+    for (const _child of children) notifications.push(...await family.wait(runIds));
+    expect(notifications).toHaveLength(6);
+    await expect(family.wait(runIds)).rejects.toThrow('already been reported');
+  });
+
+  it('reports one completed child without changing or completing its running sibling', async () => {
+    const firstClient = new DeferredClient();
+    const secondClient = new DeferredClient();
+    const family = coordinator([firstClient, secondClient]);
+    const first = await family.spawn({ taskId: 'first-result', role: 'task', prompt: 'first result' });
+    const second = await family.spawn({ taskId: 'second-result', role: 'task', prompt: 'second result' });
+    await Promise.all([firstClient.started, secondClient.started]);
+
+    firstClient.finish();
+    await expect(family.wait([first.runId, second.runId])).resolves.toMatchObject([{ runId: first.runId, status: 'completed' }]);
+    expect(family.snapshot()).toEqual(expect.arrayContaining([
+      expect.stringContaining(`[task/completed] ${first.taskId}`),
+      expect.stringContaining(`[task/running] ${second.taskId}`),
+    ]));
+
+    let remainingReported = false;
+    const remaining = family.wait([first.runId, second.runId]).then((notifications) => { remainingReported = true; return notifications; });
+    await Promise.resolve();
+    expect(remainingReported).toBe(false);
+    secondClient.finish();
+    await expect(remaining).resolves.toMatchObject([{ runId: second.runId, status: 'completed' }]);
   });
 
   it('reports blocked children and merges changed paths and evidence', async () => {
@@ -205,9 +295,9 @@ describe('AgentFamilyCoordinator', () => {
       tool('finish', 'complete_task', { summary: 'implemented', evidence: ['file created'] }),
     ]);
     const family = coordinator([implementation]);
-    const child = await family.spawn({ taskId: 'implementation', role: 'implement', prompt: 'inspect patch', writeScope: ['src'] });
+    const child = await family.spawn({ taskId: 'implementation', role: 'task', prompt: 'inspect patch', writeScope: ['src'] });
     const [notification] = await family.wait([child.runId]);
     expect(notification?.summary).toBe('implemented');
-    expect(notification).toMatchObject({ status: 'completed', changedPaths: ['src/new.ts'], evidence: ['file created'] });
+    expect(notification).toMatchObject({ status: 'completed', changedPaths: ['src/new.ts'], evidence: ['file created'], verificationRecords: [] });
   });
 });

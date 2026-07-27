@@ -8,15 +8,20 @@ import { SidebarResourceContextMenu } from './SidebarResourceContextMenu';
 import { useSidebarActions } from './useSidebarActions';
 import { SidebarHeader } from './SidebarHeader';
 import { SidebarFooter } from './SidebarFooter';
+import { SessionHistoryList } from './SessionHistoryList';
+import type { AgentController, AgentConversationView } from '@/features/agent-core/useAgentV2';
 import './Sidebar.css';
 
 interface SidebarProps {
   onOpenSettings?: () => void;
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
+  agent?: AgentController;
+  conversationView?: AgentConversationView;
+  onConversationViewChange?: (view: AgentConversationView) => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, onCloseMobile }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, onCloseMobile, agent, conversationView = { kind: 'root' }, onConversationViewChange }) => {
   const { t } = useI18n();
   const [_isCollapsed, setIsCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 900);
@@ -131,7 +136,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
           {!isCollapsed && (
             <div className="sidebar-section">
               <div className="sidebar-section-title">{t('sidebar.history')}</div>
-              <WorkspaceResourceList items={sortedSessions} activeId={activeSessionId} isCollapsed={isCollapsed} emptyLabel={t('sidebar.noSessions')} generatingId={generatingTitleId} editing={editing?.type === 'session' ? editing : null} icon={History} onSelect={selectSession} onOpenContext={(event, id) => handleContextMenu(event, 'session', id)} onEditChange={(_id, text) => setEditing((current) => current ? { ...current, text } : current)} onEditSubmit={handleRenameSubmit} editInputRef={editInputRef} />
+              {agent && onConversationViewChange ? <SessionHistoryList sessions={sortedSessions} activeSessionId={activeSessionId} conversationView={conversationView} agent={agent} generatingId={generatingTitleId} editing={editing?.type === 'session' ? editing : null} editInputRef={editInputRef} emptyLabel={t('sidebar.noSessions')} deleteLabel={t('sidebar.delete')} onSelectSession={selectSession} onConversationViewChange={onConversationViewChange} onOpenSessionContext={(event, id) => handleContextMenu(event, 'session', id)} onEditChange={(_id, text) => setEditing((current) => current ? { ...current, text } : current)} onEditSubmit={handleRenameSubmit} /> : <WorkspaceResourceList items={sortedSessions} activeId={activeSessionId} isCollapsed={isCollapsed} emptyLabel={t('sidebar.noSessions')} generatingId={generatingTitleId} editing={editing?.type === 'session' ? editing : null} icon={History} onSelect={selectSession} onOpenContext={(event, id) => handleContextMenu(event, 'session', id)} onEditChange={(_id, text) => setEditing((current) => current ? { ...current, text } : current)} onEditSubmit={handleRenameSubmit} editInputRef={editInputRef} />}
             </div>
           )}
         </div>

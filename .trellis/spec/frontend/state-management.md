@@ -83,7 +83,7 @@ const isNew = isDefaultSessionTitle(session.title);
 
 ## Derived and paged state
 
-Derive UI data from current events with memoized pure projectors. The main session timeline initially loads 250 events and pages older data; the DOM remains a current 250-message window. Child transcripts load by run only when expanded.
+Derive UI data from current events with memoized pure projectors. The main session timeline initially loads 250 events and pages older data; the DOM remains a current 250-message window. Root message/status/stream projections include depth-zero Runs only. Sidebar may preload lightweight child Run summaries for visible sessions to decide whether a disclosure exists, but child event transcripts load by run only after selection, use an independent recent-250 window, and must not reset the root pagination cursor.
 
 Do not persist derived UI fields as new sources of truth unless recovery requires them. Resource metadata may be projected, while Blob data remains only in the resource store.
 

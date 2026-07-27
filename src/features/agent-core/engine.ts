@@ -9,7 +9,7 @@ import { buildAgentSystemPrompt, createChaosContract } from './prompt';
 import { sanitizeToolTranscript } from './projector';
 import { AgentToolRegistry, type ParsedToolCall, type ToolExecutionContext } from './tools';
 import type { SubagentHost } from './tools/base';
-import type { AgentBudget, AgentEvent, AgentPhase, AgentRole, AgentRun, AgentToolResult, TaskContract } from './types';
+import type { AgentBudget, AgentEvent, AgentPhase, AgentRole, AgentRun, AgentToolResult, SubagentRole, TaskContract } from './types';
 import { createId } from '@/shared/lib/ids';
 import { isAbortError, isPromptTooLongModelError, retryModelRequest } from './modelRetry';
 import { scheduleToolBatch } from './toolBatchScheduler';
@@ -55,19 +55,19 @@ export interface AgentEngineOptions {
   budget?: Partial<AgentBudget>;
   resume?: AgentResumeState;
   inheritedSummary?: string;
-  lineage?: { rootRunId: string; parentRunId: string; role: Exclude<AgentRole, 'root'>; delegatedTaskId: string; depth: 1; writeScope?: string[] };
+  lineage?: { rootRunId: string; parentRunId: string; role: SubagentRole; delegatedTaskId: string; depth: 1; writeScope?: string[] };
   familyBudget?: AgentFamilyBudget;
   mutationLease?: ContainerMutationLease;
   checkpointTimeoutMs?: number;
 }
 
 const CHILD_COMMON_TOOLS = ['workspace_tree', 'read_file', 'search_workspace', 'list_resources', 'read_resource_text', 'read_resource_image', 'update_plan', 'report_progress', 'ask_user', 'complete_task'];
+const CHILD_TASK_TOOLS = [...CHILD_COMMON_TOOLS, 'apply_patch', 'materialize_resource', 'shell_run', 'process_list', 'process_observe', 'process_input', 'process_stop', 'read_user_terminal'];
 
 function toolsForRole(role: AgentRole): string[] | undefined {
   if (role === 'root') return undefined;
   if (role === 'explore') return CHILD_COMMON_TOOLS;
-  if (role === 'implement') return [...CHILD_COMMON_TOOLS, 'apply_patch', 'materialize_resource'];
-  return [...CHILD_COMMON_TOOLS, 'shell_run'];
+  return CHILD_TASK_TOOLS;
 }
 
 export class AgentEngine {
@@ -146,7 +146,6 @@ export class AgentEngine {
     return this.run;
   }
 
-  getFamilyBudget(): AgentFamilyBudget { return this.familyBudget; }
   getMutationLease(): ContainerMutationLease { return this.mutationLease; }
   setSubagentHost(host: SubagentHost): void { if ((this.run.depth ?? 0) === 0) this.subagentHost = host; }
   messageFromParent(message: string): void { this.transcript.push({ role: 'system', content: `Parent coordinator update: ${message}` }); }
@@ -453,7 +452,7 @@ export class AgentEngine {
       while (true) {
         this.assertBudget();
         const workspaceRevision = await this.options.runtime.getWorkspaceRevision(this.options.containerId);
-        const system = buildAgentSystemPrompt({ containerId: this.options.containerId, task: this.task, chaos: this.run.chaos, summary: this.context.getSummary() });
+        const system = buildAgentSystemPrompt({ containerId: this.options.containerId, task: this.task, chaos: this.run.chaos, summary: this.context.getSummary(), agentRole: this.run.agentRole ?? 'root' });
         const estimate = this.options.client.estimateTokens?.bind(this.options.client) ?? ((value: string) => Math.ceil(value.length / 4));
         const toolSchemaTokens = estimate(JSON.stringify(this.registry.getApiDefinitions()));
         const mediaTokens = this.transcript.reduce((total, message) => total + (message.contentParts?.filter((part) => part.type === 'image_resource').length ?? 0) * 1_024, 0);
@@ -486,7 +485,7 @@ export class AgentEngine {
           await this.reflectTask();
         }
         const requestSystem = compacted.compacted
-          ? buildAgentSystemPrompt({ containerId: this.options.containerId, task: this.task, chaos: this.run.chaos, summary: this.context.getSummary() })
+          ? buildAgentSystemPrompt({ containerId: this.options.containerId, task: this.task, chaos: this.run.chaos, summary: this.context.getSummary(), agentRole: this.run.agentRole ?? 'root' })
           : system;
         let response: Awaited<ReturnType<AgentModelClient['complete']>> | undefined;
         for (let promptAttempt = 1; promptAttempt <= 3; promptAttempt += 1) {

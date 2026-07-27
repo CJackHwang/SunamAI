@@ -26,12 +26,17 @@ test('settings and session/container CRUD remain durable and isolated', async ({
   await configure(page);
   const history = page.locator('.sidebar-section').filter({ hasText: '历史对话' });
   const containers = page.locator('.sidebar-section').filter({ hasText: '容器' });
-  const firstSession = history.locator('.sidebar-item').filter({ hasText: '新对话' });
-  await firstSession.locator('.item-action').click();
+  const firstSession = history.locator('.sidebar-session-group').filter({ has: page.locator('.sidebar-session-summary', { hasText: '新对话' }) });
+  await firstSession.locator('.sidebar-session-summary').click({ button: 'right' });
   await page.getByRole('button', { name: '重命名' }).click();
   await history.locator('.sidebar-item-input').fill('已命名会话');
   await history.locator('.sidebar-item-input').press('Enter');
   await expect(history).toContainText('已命名会话');
+  const renamedSession = history.locator('.sidebar-session-group').filter({ hasText: '已命名会话' });
+  await renamedSession.locator('.sidebar-session-summary').click({ button: 'right' });
+  await page.getByRole('button', { name: '置顶' }).click();
+  await expect(renamedSession.locator('.sidebar-session-summary > .lucide-pin')).toHaveCount(1);
+  await expect(renamedSession.locator('.sidebar-session-summary > .lucide-history')).toHaveCount(0);
 
   await page.getByRole('button', { name: '新建任务' }).click();
   await expect(history.locator('.sidebar-item')).toHaveCount(2);
@@ -39,8 +44,8 @@ test('settings and session/container CRUD remain durable and isolated', async ({
   await containers.getByTitle('新建容器').click();
   await expect(containers.locator('.sidebar-item')).toHaveCount(2);
 
-  const newSession = history.locator('.sidebar-item').filter({ hasText: '新对话' });
-  await newSession.locator('.item-action').click();
+  const newSession = history.locator('.sidebar-session-group').filter({ has: page.locator('.sidebar-session-summary', { hasText: '新对话' }) });
+  await newSession.locator('.sidebar-session-summary').click({ button: 'right' });
   await page.getByRole('button', { name: '删除' }).click();
   await expect(history.locator('.sidebar-item')).toHaveCount(1);
 

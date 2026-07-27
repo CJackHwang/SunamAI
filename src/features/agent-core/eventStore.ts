@@ -79,6 +79,25 @@ export class AgentEventStore {
   async listAgentTasks(rootRunId: string): Promise<DelegatedAgentTask[]> { return (await this.repository.listAgentTasks(rootRunId)).value; }
   latestEventSequence(runId: string): Promise<number | undefined> { return this.repository.latestEventSequence(runId); }
 
+  async deleteChildRun(runId: string): Promise<boolean> {
+    const deleted = await this.repository.deleteChildRun(runId);
+    if (!deleted) return false;
+    this.memoryRuns.delete(runId);
+    for (const [sessionId, events] of this.memoryEvents) {
+      this.memoryEvents.set(sessionId, events.filter((event) => event.runId !== runId));
+    }
+    return true;
+  }
+
+  async pruneTerminalChildRuns(sessionId: string, keepRootRunId: string): Promise<string[]> {
+    const deletedRunIds = await this.repository.pruneTerminalChildRuns(sessionId, keepRootRunId);
+    if (!deletedRunIds.length) return [];
+    const deleted = new Set(deletedRunIds);
+    deletedRunIds.forEach((runId) => this.memoryRuns.delete(runId));
+    this.memoryEvents.set(sessionId, (this.memoryEvents.get(sessionId) ?? []).filter((event) => !deleted.has(event.runId)));
+    return deletedRunIds;
+  }
+
   async markInterruptedRuns(sessionId: string): Promise<AgentRun[]> {
     const runs = await this.loadSessionRuns(sessionId);
     const active = runs.filter((run) => isActiveAgentPhase(run.phase));

@@ -122,6 +122,38 @@ export class V3PersistenceRepository {
   listResources(sessionId: string): Promise<V3ListResult<AgentResource>> { return this.resources.list(sessionId); }
   listIssues(): Promise<V3DataIssue[]> { return this.quarantine.list(); }
 
+  private deleteChildRuns(runs: AgentRun[]): Promise<void> {
+    return this.serialize('runWrite', async () => {
+      await this.database.write(['runs', 'events', 'checkpoints', 'agentTasks'], async (transaction) => {
+        for (const run of runs) {
+          await this.agent.deleteByIndex(transaction, 'events', 'runId', run.id);
+          await this.agent.deleteByIndex(transaction, 'checkpoints', 'runId', run.id);
+          if (run.delegatedTaskId) transaction.objectStore('agentTasks').delete(run.delegatedTaskId);
+          transaction.objectStore('runs').delete(run.id);
+        }
+      });
+    });
+  }
+
+  async deleteChildRun(runId: string): Promise<boolean> {
+    const run = (await this.loadRun(runId)).value;
+    if (!run) return false;
+    if ((run.depth ?? 0) !== 1 || !run.parentRunId) throw new Error(`Run ${runId} is not a child Run.`);
+    await this.deleteChildRuns([run]);
+    return true;
+  }
+
+  async pruneTerminalChildRuns(sessionId: string, keepRootRunId: string): Promise<string[]> {
+    const runs = (await this.listRuns(sessionId)).value.filter((run) => (
+      (run.depth ?? 0) === 1
+      && run.rootRunId !== keepRootRunId
+      && !['preparing', 'planning', 'acting', 'observing', 'verifying', 'cancelling'].includes(run.phase)
+    ));
+    if (!runs.length) return [];
+    await this.deleteChildRuns(runs);
+    return runs.map((run) => run.id);
+  }
+
   deleteSession(sessionId: string, nextWorkspace?: WorkspaceState): Promise<void> {
     return this.serialize('workspaceWrite', async () => {
       const stores = ['runs', 'events', 'checkpoints', 'terminalHistory', 'resources', 'agentTasks', ...(nextWorkspace ? ['workspace'] as const : [])] as const;

@@ -28,9 +28,11 @@ class ScriptedClient implements AgentModelClient {
 
 class CapturingClient extends ScriptedClient {
   messages: Parameters<AgentModelClient['complete']>[0] = [];
+  tools: Parameters<AgentModelClient['complete']>[1]['tools'] = [];
 
   override async complete(messages: Parameters<AgentModelClient['complete']>[0], options: Parameters<AgentModelClient['complete']>[1]): Promise<AgentModelResponse> {
     this.messages = messages;
+    this.tools = options.tools;
     return super.complete(messages, options);
   }
 }
@@ -141,6 +143,24 @@ class TrackingCheckpointStore extends AgentEventStore {
 }
 
 describe('Agent Core v2', () => {
+  it('gives explore children read-only tools and task children the complete non-delegating toolset', async () => {
+    const response = { message: { role: 'assistant' as const, content: 'Delegated work complete.' }, toolCalls: [] };
+    const exploreClient = new CapturingClient([response]);
+    const taskClient = new CapturingClient([response]);
+    const base = { sessionId: 's-role', containerId: 'c-role', persona: 'Sunam 6.9 Pron' as const, model: 'model', input: 'Inspect.', initialMessages: [], runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: () => undefined, onRunChange: () => undefined };
+    const explore = new AgentEngine({ ...base, client: exploreClient, lineage: { rootRunId: 'root', parentRunId: 'root', role: 'explore', delegatedTaskId: 'read', depth: 1 } });
+    const task = new AgentEngine({ ...base, client: taskClient, lineage: { rootRunId: 'root', parentRunId: 'root', role: 'task', delegatedTaskId: 'work', depth: 1 } });
+
+    await Promise.all([explore.execute(), task.execute()]);
+
+    const exploreTools = exploreClient.tools.map((tool) => tool.function.name);
+    const taskTools = taskClient.tools.map((tool) => tool.function.name);
+    expect(exploreTools).toEqual(expect.arrayContaining(['workspace_tree', 'read_file', 'search_workspace', 'complete_task']));
+    expect(exploreTools).not.toEqual(expect.arrayContaining(['apply_patch', 'shell_run', 'process_list', 'spawn_subagent']));
+    expect(taskTools).toEqual(expect.arrayContaining(['apply_patch', 'materialize_resource', 'shell_run', 'process_list', 'process_stop', 'read_user_terminal', 'complete_task']));
+    expect(taskTools).not.toEqual(expect.arrayContaining(['spawn_subagent', 'wait_subagents', 'message_subagent', 'stop_subagent']));
+  });
+
   it('preserves reasoning on a final plain assistant message', async () => {
     const events: AgentEvent[] = [];
     const client = new ScriptedClient([{

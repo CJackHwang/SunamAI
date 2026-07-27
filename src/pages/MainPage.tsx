@@ -8,14 +8,13 @@ import { useI18n, type Locale } from '@/shared/i18n';
 import { LoadingState } from '@/shared/ui/AsyncState';
 import './MainPage.css';
 
-const Workspace = lazy(() => import('../widgets/workspace/Workspace.tsx'));
+const ConfiguredPage = lazy(() => import('./ConfiguredPage'));
 
 const MainPage: React.FC = () => {
   const [initialSettings] = useState(readAppSettings);
   const [apiKey, setApiKey] = useState(initialSettings.apiKey);
   const [baseUrl, setBaseUrl] = useState(initialSettings.baseUrl);
   const [apiModel, setApiModel] = useState(initialSettings.apiModel);
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
   const { locale, setLocale, t } = useI18n();
   configureWorkspaceCreationDefaults({ sessionTitle: t('workspace.defaultSessionName'), containerName: t('workspace.defaultContainerName') });
   const activeSessionId = useWorkspaceSelector((state) => state.activeSessionId);
@@ -69,41 +68,8 @@ const MainPage: React.FC = () => {
 
 
   return (
-    <div className="app-container">
-      <Sidebar 
-        onOpenSettings={openSettings}
-        isMobileOpen={isMobileOpen} 
-        onCloseMobile={() => setIsMobileOpen(false)} 
-      />
-
-      <main className="app-main">
-        {persistenceError && <div className="persistence-error motion-notice-in" role="alert"><span>{t('persistence.unavailable')}: {persistenceError}</span><button className="btn btn-secondary" onClick={() => { void reloadWorkspace(); }}>{t('common.retry')}</button></div>}
-        {/* Main Workspace Area */}
-        <div className="app-workspace">
-          {apiKey && hydrated ? (
-            <Suspense fallback={<LoadingState className="app-centered-state">{t('common.loading')}</LoadingState>}>
-              <Workspace
-                apiKey={apiKey}
-                baseUrl={baseUrl}
-                apiModel={apiModel}
-                sunamModel={sunamModel}
-                setSunamModel={handleSunamModelChange}
-                onMobileSidebarToggle={() => setIsMobileOpen(true)}
-                activeSessionId={activeSessionId}
-                activeContainerId={activeContainerId}
-                updateSessionStatus={updateSessionStatus}
-              />
-            </Suspense>
-          ) : apiKey ? (
-            <LoadingState className="app-centered-state">{persistenceError ? t('persistence.unavailable') : t('common.loading')}</LoadingState>
-          ) : (
-            <div className="app-centered-state">
-              <p>{t('main.configureApiKey')}</p>
-            </div>
-          )}
-        </div>
-      </main>
-
+    <>
+      {apiKey && hydrated ? <Suspense fallback={<LoadingState className="app-centered-state">{t('common.loading')}</LoadingState>}><ConfiguredPage apiKey={apiKey} baseUrl={baseUrl} apiModel={apiModel} sunamModel={sunamModel} setSunamModel={handleSunamModelChange} activeSessionId={activeSessionId} activeContainerId={activeContainerId} updateSessionStatus={updateSessionStatus} persistenceError={persistenceError} onReloadWorkspace={() => { void reloadWorkspace(); }}>{({ agent, conversationView, onConversationViewChange, isMobileOpen, onCloseMobile }) => <Sidebar onOpenSettings={openSettings} isMobileOpen={isMobileOpen} onCloseMobile={onCloseMobile} agent={agent} conversationView={conversationView} onConversationViewChange={onConversationViewChange} />}</ConfiguredPage></Suspense> : <div className="app-container"><Sidebar onOpenSettings={openSettings} /><main className="app-main">{persistenceError && <div className="persistence-error motion-notice-in" role="alert"><span>{t('persistence.unavailable')}: {persistenceError}</span><button className="btn btn-secondary" onClick={() => { void reloadWorkspace(); }}>{t('common.retry')}</button></div>}<div className="app-workspace">{apiKey ? <LoadingState className="app-centered-state">{persistenceError ? t('persistence.unavailable') : t('common.loading')}</LoadingState> : <div className="app-centered-state"><p>{t('main.configureApiKey')}</p></div>}</div></main></div>}
       {isSettingsOpen && (
         <SettingsModal
           initialApiKey={apiKey}
@@ -116,7 +82,7 @@ const MainPage: React.FC = () => {
           isExiting={isSettingsClosing}
         />
       )}
-    </div>
+    </>
   );
 };
 

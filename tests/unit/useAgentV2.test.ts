@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { detectEventTailDrift, detectWorkspaceDrift, mergeSessionRecords, recoveredSessionStatus, selectMessageWindow } from '@/features/agent-core/useAgentV2';
+import { detectEventTailDrift, detectWorkspaceDrift, mergeSessionRecords, projectConversationEvents, recoveredSessionStatus, selectMessageWindow } from '@/features/agent-core/useAgentV2';
+import type { AgentEvent } from '@/features/agent-core/types';
 import type { AgentRun } from '@/features/agent-core/types';
 
 describe('useAgentV2 session isolation', () => {
@@ -26,6 +27,24 @@ describe('useAgentV2 session isolation', () => {
 
     expect(recoveredSessionStatus([run('old', 'completed', 1), run('latest', 'interrupted', 2)])).toBe('idle');
     expect(recoveredSessionStatus([run('active', 'acting', 3)])).toBeNull();
+    const child = { ...run('child', 'interrupted', 4), depth: 1, parentRunId: 'active', rootRunId: 'active', agentRole: 'explore' as const };
+    expect(recoveredSessionStatus([run('active', 'completed', 3), child])).toBeNull();
+  });
+
+  it('projects root and selected child conversations without mixing their events', () => {
+    const root = (id: string): AgentRun => ({
+      id, phase: 'completed', updatedAt: 1, sessionId: 's-1', containerId: 'c-1', model: 'm', persona: 'Sunam 6.9 Pron', createdAt: 1,
+      task: { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: false, plan: [], evidence: [], changedWorkspace: false, workspaceRevision: 0, verified: false, verifiedRevision: -1, verificationEvidence: [] },
+      chaos: { persona: 'Sunam 6.9 Pron', ritual: '', privateGoods: '', styleDirective: '', invariants: [] },
+      budget: { maxModelTurns: 1, maxToolCalls: 1, maxDurationMs: 1 }, modelTurns: 0, toolCalls: 0, summary: '', rootRunId: id, depth: 0, agentRole: 'root',
+    });
+    const parent = root('root');
+    const child = { ...root('child'), rootRunId: parent.id, parentRunId: parent.id, depth: 1, agentRole: 'explore' as const };
+    const event = (runId: string, content: string): AgentEvent => ({ id: `${runId}:1`, kind: 'message', sessionId: 's-1', runId, sequence: 1, createdAt: 1, message: { role: 'user', content } });
+    const events = [event(parent.id, 'parent'), event(child.id, 'child')];
+
+    expect(projectConversationEvents(events, [parent, child], { kind: 'root' })).toEqual([events[0]]);
+    expect(projectConversationEvents(events, [parent, child], { kind: 'subagent', sessionId: 's-1', runId: child.id })).toEqual([events[1]]);
   });
 
   it('detects resume drift only when a checkpoint revision is known and differs', () => {

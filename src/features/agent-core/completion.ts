@@ -25,9 +25,6 @@ export async function evaluateCompletionGate(input: {
     ? input.task
     : { ...input.task, changedWorkspace: true, workspaceRevision: currentRevision, verified: false, verifiedRevision: -1 };
 
-  if (input.agentRole === 'verify' && (!task.verified || task.verifiedRevision !== currentRevision)) {
-    return { ok: false, task, message: VERIFICATION_RECOVERY_GUIDANCE, phase: 'verifying' };
-  }
   if (input.agentRole === 'root' && task.changedWorkspace && (!task.verified || task.verifiedRevision !== currentRevision)) {
     return { ok: false, task, message: VERIFICATION_RECOVERY_GUIDANCE, phase: 'verifying' };
   }

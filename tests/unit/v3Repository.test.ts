@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Blob as NodeBlob } from 'node:buffer';
 import type { AgentEvent, AgentRun } from '@/entities/agent/types';
 import type { WorkspaceState } from '@/entities/workspace/types';
@@ -84,10 +84,15 @@ describe('V3PersistenceRepository', () => {
   });
 
   it('stores resource blobs separately and transactionally removes all session data with workspace metadata', async () => {
+    const child = { ...run('child'), rootRunId: 'r-1', parentRunId: 'r-1', depth: 1, agentRole: 'explore' as const, delegatedTaskId: 'task-child', phase: 'completed' as const };
     await repository.saveWorkspace(workspace);
     await repository.saveRun(run());
+    await repository.saveRun(child);
     await repository.appendEvent({ id: 'r-1:1', kind: 'message', sessionId: 's-1', runId: 'r-1', sequence: 1, createdAt: 1, message: { role: 'user', content: 'inspect resource', contentParts: [{ type: 'file_resource', resourceId: 'res-1' }], resourceIds: ['res-1'] } });
+    await repository.appendEvent({ id: 'child:1', kind: 'message', sessionId: 's-1', runId: child.id, sequence: 1, createdAt: 2, message: { role: 'assistant', content: 'child result' } });
     await repository.saveCheckpoint({ id: 'r-1', runId: 'r-1', sessionId: 's-1', containerId: 'c-1', summary: '', messages: [{ role: 'user', content: 'inspect resource', contentParts: [{ type: 'file_resource', resourceId: 'res-1' }], resourceIds: ['res-1'] }], resourceIds: ['res-1'], createdAt: 1 });
+    await repository.saveCheckpoint({ id: child.id, runId: child.id, sessionId: 's-1', containerId: 'c-1', summary: 'child', messages: [], createdAt: 2 });
+    await repository.saveAgentTask({ id: 'task-child', taskId: 'inspect', sessionId: 's-1', rootRunId: 'r-1', parentRunId: 'r-1', runId: child.id, role: 'explore', prompt: 'inspect', status: 'completed', createdAt: 1, updatedAt: 2, evidence: [], changedPaths: [], verificationRecords: [] });
     await repository.saveTerminalHistory('s-1', 'terminal');
     await repository.saveResource({ id: 'res-1', sessionId: 's-1', originatingRunId: 'r-1', name: 'note.txt', kind: 'text', mimeType: 'text/plain', size: 5, sha256: 'abc', createdAt: 1, blob: new Blob(['hello']) });
     expect(JSON.stringify((await repository.listEvents('s-1')).value)).not.toContain('hello');
@@ -98,6 +103,8 @@ describe('V3PersistenceRepository', () => {
     expect((await repository.loadWorkspace()).value).toEqual(next);
     expect((await repository.listRuns('s-1')).value).toEqual([]);
     expect((await repository.listEvents('s-1')).value).toEqual([]);
+    expect((await repository.latestCheckpoint(child.id)).value).toBeNull();
+    expect((await repository.listSessionAgentTasks('s-1')).value).toEqual([]);
     expect((await repository.listResources('s-1')).value).toEqual([]);
     expect((await repository.loadTerminalHistory('s-1')).value).toBeNull();
   });
@@ -188,6 +195,85 @@ describe('V3PersistenceRepository', () => {
     expect(await repository.loadResource('shared-resource')).toMatchObject({ value: { originatingRunId: second.id } });
     await repository.deleteContainer('c-2');
     expect((await repository.loadResource('shared-resource')).value).toBeNull();
+  });
+
+  it('deletes one child ledger without touching its parent or session resources', async () => {
+    const parent = { ...run('parent'), phase: 'acting' as const };
+    const child = {
+      ...run('child'),
+      phase: 'completed' as const,
+      rootRunId: parent.id,
+      parentRunId: parent.id,
+      depth: 1,
+      agentRole: 'explore' as const,
+      delegatedTaskId: 'task-child',
+    };
+    await repository.saveRun(parent);
+    await repository.saveRun(child);
+    await repository.appendEvent({ ...messageEvent(1), id: 'parent:1', runId: parent.id });
+    await repository.appendEvent({ ...messageEvent(1), id: 'child:1', runId: child.id });
+    await repository.saveCheckpoint({ id: child.id, runId: child.id, sessionId: 's-1', containerId: 'c-1', summary: 'child', messages: [], createdAt: 1 });
+    await repository.saveAgentTask({ id: 'task-child', taskId: 'inspect', sessionId: 's-1', rootRunId: parent.id, parentRunId: parent.id, runId: child.id, role: 'explore', prompt: 'inspect', status: 'completed', createdAt: 1, updatedAt: 1, evidence: [], changedPaths: [], verificationRecords: [] });
+    await repository.saveResource({ id: 'shared-child-resource', sessionId: 's-1', originatingRunId: child.id, name: 'shared.txt', kind: 'text', mimeType: 'text/plain', size: 1, sha256: 'child-hash', createdAt: 1, blob: new NodeBlob(['x']) as unknown as Blob });
+
+    await expect(repository.deleteChildRun(parent.id)).rejects.toThrow('not a child Run');
+    await expect(repository.deleteChildRun(child.id)).resolves.toBe(true);
+    await expect(repository.deleteChildRun(child.id)).resolves.toBe(false);
+    expect((await repository.loadRun(parent.id)).value).not.toBeNull();
+    expect((await repository.loadRun(child.id)).value).toBeNull();
+    expect((await repository.listRunEventPage(parent.id)).value).toHaveLength(1);
+    expect((await repository.listRunEventPage(child.id)).value).toEqual([]);
+    expect((await repository.latestCheckpoint(child.id)).value).toBeNull();
+    expect((await repository.listAgentTasks(parent.id)).value).toEqual([]);
+    expect((await repository.loadResource('shared-child-resource')).value).not.toBeNull();
+  });
+
+  it('rolls back every child-ledger removal when its deletion transaction fails', async () => {
+    const parent = { ...run('parent'), phase: 'acting' as const };
+    const child = {
+      ...run('child'), phase: 'completed' as const, rootRunId: parent.id, parentRunId: parent.id,
+      depth: 1, agentRole: 'explore' as const, delegatedTaskId: 'task-child',
+    };
+    await repository.saveRun(parent);
+    await repository.saveRun(child);
+    await repository.appendEvent({ ...messageEvent(1), id: 'child:1', runId: child.id });
+    await repository.saveCheckpoint({ id: child.id, runId: child.id, sessionId: 's-1', containerId: 'c-1', summary: 'child', messages: [], createdAt: 1 });
+    await repository.saveAgentTask({ id: 'task-child', taskId: 'inspect', sessionId: 's-1', rootRunId: parent.id, parentRunId: parent.id, runId: child.id, role: 'explore', prompt: 'inspect', status: 'completed', createdAt: 1, updatedAt: 1, evidence: [], changedPaths: [], verificationRecords: [] });
+
+    const originalDelete = IDBObjectStore.prototype.delete;
+    const deleteSpy = vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (this: IDBObjectStore, key: IDBValidKey | IDBKeyRange) {
+      if (this.name === 'runs') throw new Error('simulated child deletion failure');
+      return originalDelete.call(this, key);
+    });
+    try {
+      await expect(repository.deleteChildRun(child.id)).rejects.toThrow('simulated child deletion failure');
+    } finally {
+      deleteSpy.mockRestore();
+    }
+
+    expect((await repository.loadRun(child.id)).value).not.toBeNull();
+    expect((await repository.listRunEventPage(child.id)).value).toHaveLength(1);
+    expect((await repository.latestCheckpoint(child.id)).value).not.toBeNull();
+    expect((await repository.listAgentTasks(parent.id)).value).toHaveLength(1);
+  });
+
+  it('prunes only terminal children from older root families', async () => {
+    const previousRoot = { ...run('previous-root'), phase: 'completed' as const };
+    const currentRoot = { ...run('current-root'), phase: 'acting' as const };
+    const child = (id: string, rootRunId: string, phase: AgentRun['phase']) => ({
+      ...run(id), phase, rootRunId, parentRunId: rootRunId, depth: 1, agentRole: 'explore' as const, delegatedTaskId: `task-${id}`,
+    });
+    const oldTerminal = child('old-terminal', previousRoot.id, 'failed');
+    const oldActive = child('old-active', previousRoot.id, 'acting');
+    const currentTerminal = child('current-terminal', currentRoot.id, 'completed');
+    for (const candidate of [previousRoot, currentRoot, oldTerminal, oldActive, currentTerminal]) await repository.saveRun(candidate);
+
+    await expect(repository.pruneTerminalChildRuns('s-1', currentRoot.id)).resolves.toEqual([oldTerminal.id]);
+    expect((await repository.listRuns('s-1')).value.map((candidate) => candidate.id)).toEqual(expect.arrayContaining([
+      previousRoot.id, currentRoot.id, oldActive.id, currentTerminal.id,
+    ]));
+    expect((await repository.loadRun(oldTerminal.id)).value).toBeNull();
+    await expect(repository.pruneTerminalChildRuns('s-1', currentRoot.id)).resolves.toEqual([]);
   });
 
   it('stores repeated model task labels under independent delegated-task identities', async () => {

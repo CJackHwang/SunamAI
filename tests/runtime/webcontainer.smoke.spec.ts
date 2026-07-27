@@ -243,7 +243,7 @@ test('real WebContainer materializes a resource and excludes generated directori
   expect(snapshot.byteSize).toBeGreaterThan(0);
 });
 
-test('real WebContainer cascades parent cancellation into a verify child process', async ({ page }) => {
+test('real WebContainer cascades parent cancellation into a task child process', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.addInitScript(() => {
     localStorage.clear();
@@ -271,7 +271,7 @@ test('real WebContainer cascades parent cancellation into a verify child process
       await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
         { id: 'plan', name: 'update_plan', arguments: { items: [{ id: 'cancel', title: 'Start and cancel child verification', status: 'in_progress' }] } },
         { id: 'materialize', name: 'materialize_resource', arguments: { resource_id: resourceId, path: 'package.json' } },
-        { id: 'spawn', name: 'spawn_subagent', arguments: { task_id: 'long-verify', role: 'verify', prompt: 'Run the long verification command.' } },
+        { id: 'spawn', name: 'spawn_subagent', arguments: { task_id: 'long-verify', role: 'task', prompt: 'Run the long verification command.' } },
       ]) });
       return;
     }
@@ -285,7 +285,7 @@ test('real WebContainer cascades parent cancellation into a verify child process
   await expect(composer).toBeEnabled();
   const packageJson = JSON.stringify({ scripts: { test: 'node -e "setInterval(()=>{},1000)"' } });
   await page.locator('.chat-composer-shell input[type="file"]').setInputFiles({ name: 'package.json', mimeType: 'application/json', buffer: Buffer.from(packageJson) });
-  await composer.fill('Start a verify child using this project resource, then wait while its long verification command runs.');
+  await composer.fill('Start a task child using this project resource, then wait while its long verification command runs.');
   await composer.press('Enter');
   await page.getByRole('button', { name: '服务' }).click();
   await expect(page.locator('.service-process-row')).toHaveCount(1, { timeout: 100_000 });
@@ -311,8 +311,8 @@ test('real WebContainer cascades parent cancellation into a verify child process
     database.close();
     return {
       rootCancelled: runs.some((run) => run.agentRole === 'root' && run.phase === 'cancelled'),
-      childCancelled: runs.some((run) => run.agentRole === 'verify' && run.phase === 'cancelled'),
-      taskCancelled: tasks.some((task) => task.role === 'verify' && task.status === 'cancelled'),
+      childCancelled: runs.some((run) => run.agentRole === 'task' && run.phase === 'cancelled'),
+      taskCancelled: tasks.some((task) => task.role === 'task' && task.status === 'cancelled'),
     };
   })).toEqual({ rootCancelled: true, childCancelled: true, taskCancelled: true });
 });

@@ -1,6 +1,6 @@
 .chat-message { max-width: 100%; min-width: 0; align-self: flex-start; padding: 16px; border: 0; border-radius: var(--radius-large); background: var(--color-surface); color: var(--color-text); line-height: 1.6; overflow-wrap: anywhere; content-visibility: auto; contain-intrinsic-block-size: auto 160px; }
 .chat-message[data-has-tools="true"] { padding: 16px; }
-.chat-message[data-role="user"] { max-width: 80%; align-self: flex-end; border: 0; background: var(--color-black); color: var(--color-white); white-space: pre-wrap; }
+.chat-message[data-role="user"] { max-width: 80%; align-self: flex-end; border: 0; background: var(--color-gray-700); color: var(--color-white); white-space: pre-wrap; }
 .chat-answer, .chat-user-content, .chat-ask-user { max-width: 100%; min-width: 0; font-size: 14.5px; }
 .chat-answer[data-has-tools="true"] { margin-bottom: 12px; }
 .chat-tool-list { display: flex; flex-direction: column; gap: 8px; }
@@ -60,6 +60,9 @@
 
 @media (max-width: 520px) {
   .chat-composer-shell { padding: 10px 12px; }
+  .subagent-footer { padding: 10px 12px; }
+  .subagent-action { right: 12px; bottom: 10px; }
+  .subagent-task-list-slot { width: calc(100% - 56px); }
   .chat-attach-btn { right: 12px; bottom: 66px; }
   .chat-scroll-bottom-btn { right: 12px; bottom: 122px; }
   .task-list-phase { max-width: 92px; overflow: hidden; text-overflow: ellipsis; }

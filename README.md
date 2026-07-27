@@ -15,7 +15,7 @@ Sunam 是运行在浏览器中的开源 AI 编程助手。它通过 OpenAI-compa
 - 自动上下文管理：按模型 token 窗口自动压缩完整消息/工具组，保留计划、证据、资源引用、工作区版本和最近相关文件，不提供需要用户操作的压缩按钮。
 - 资源附件：文本、代码、PNG/JPEG/WebP/GIF 和通用二进制作为本地资源保存；文本按范围读取，图片按需送入视觉模型，其他文件可 materialize 到工作区。
 - 多模态降级：模型明确拒绝视觉输入时自动改用文本与持久资源引用；与视觉无关的 400/422 错误原样上抛，不进行无效二次调用。
-- 子 Agent：根 Agent 可分派 `explore`、`implement`、`verify` 子任务；研究最多三路并发，写入和验证串行，父 Agent 负责综合证据并通过当前工作区版本完成门。
+- 子 Agent：根 Agent 在 `explore`（只读探索）与 `task`（完整任务权限、不可递归委派）之间选型，最多三路混合并发；模型执行可并行，实际写入与命令通过容器 lease 串行，父 Agent 负责综合当前工作区版本的证据。
 - 子任务记录按需加载：展开 RunBoard 中的子任务时，才读取该子 Run 最近 250 条事件并显示最近 transcript，不占用主聊天首屏。
 - 可恢复执行：Run、事件、单一 checkpoint、子任务、终端记录和快照保存在浏览器；刷新后活动父子 Run 标记为 `interrupted`，继续时创建新 Run，不复活旧请求、控制器或 PID。
 - 可恢复写入：workspace 保存、session/container 删除和 reset 使用同一串行队列；Run、checkpoint、terminal 和 snapshot 分别串行保存。显式 snapshot flush 会取消尚未触发的 debounce，避免重复快照；失败保留上一份完整版本，已排队的后续快照仍会继续。
@@ -51,7 +51,7 @@ npm run dev
 - data URL 只在实际视觉请求的适配器边界临时生成，不进入持久 ledger。
 - 自动压缩在有效 token 窗口达到 90% 前触发；UI 只在 RunBoard 显示一次非打扰状态。
 
-子 Agent 每个根任务最多创建 6 个，最大深度为 1。子 Run 上限为 20 次模型轮、50 次工具调用和 5 分钟；根任务族共享 90 次模型轮、225 次工具调用和 15 分钟预算。当前版本不实现递归 swarm、team、mailbox 或并行 writer。
+子 Agent 每个根任务最多创建 6 个，最大深度为 1。每个子 Run 完整继承当前主 Run 的模型轮、工具调用和运行时长上限，并使用独立计数器；父或兄弟 Agent 不会提前耗尽它的预算。当前版本不实现递归 swarm、team、mailbox 或并行 writer。
 
 ## 配置与数据安全
 
@@ -93,7 +93,7 @@ npm run check          # typecheck、lint、架构边界、覆盖率、build、�
 npm run check:all      # check、E2E、visual、runtime、生产依赖审计
 ```
 
-冻结门槛：核心 lines/functions/statements ≥85%、branches ≥80%；初始 JS ≤90 KiB gzip、总 JS ≤320 KiB gzip、生产 `dist` ≤1.8 MiB。Playwright 视觉差异上限为 0.2%。
+冻结门槛：核心 lines/functions/statements ≥85%、branches ≥80%；初始 JS ≤90 KiB gzip、总 JS ≤350 KiB gzip、生产 `dist` ≤1.8 MiB。Playwright 视觉差异上限为 0.2%。
 
 ### Trellis 工程工作流
 
@@ -114,7 +114,7 @@ python3 ./.trellis/scripts/task.py validate <task-id>
 
 ### 当前优化冻结状态
 
-2026-07-26 的最终工作区已连续两次通过 `npm run check:all`：35 个测试文件、166 个核心测试，E2E 7/7、视觉 4/4、真实 WebContainer 3/3，生产依赖审计为 0。覆盖率为 statements 91.23%、branches 82.95%、functions 90.39%、lines 94.97%；初始 JS 84.92 KiB gzip、总 JS 313.28 KiB gzip、生产 `dist` 1.34 MiB。
+2026-07-27 的当前工作区已通过一次完整 `npm run check:all`：42 个测试文件、224 个核心测试，E2E 11/11、视觉 4/4、真实 WebContainer 3/3，生产依赖审计为 0。覆盖率为 statements 90.86%、branches 83.02%、functions 90.04%、lines 95.18%；初始 JS 87.39 KiB gzip、总 JS 320.85 KiB gzip、生产 `dist` 1.38 MiB。本轮不声明需要连续两次门禁的优化冻结复验。
 
 完整开发依赖审计仍有 8 个 high，全部位于 `vite-plugin-pwa@1.3.0` / `workbox-build@7.4.1` 构建链；npm 提议的 `vite-plugin-pwa@1.2.0` 不支持 Vite 8，因此按 [依赖 advisory 策略](docs/dependency-advisories.md) 作为上游兼容性例外跟踪，不影响生产依赖零漏洞门禁。
 

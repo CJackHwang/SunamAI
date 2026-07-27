@@ -9,7 +9,7 @@ This is the executable code-spec for changes that touch Agent execution, context
 - `AgentModelClient` owns provider capabilities, token estimation/usage, multimodal wire mapping, and provider-specific fallback detection.
 - `AgentWorkspaceRuntime` owns WebContainer files, processes, runtime service/port registration, resources, snapshots, mutation serialization, and the authoritative container revision.
 - `AgentEventStore` and `V3PersistenceRepository` own durable Runs, events, checkpoints, delegated tasks, resources, terminal history, snapshots, and quarantine.
-- React projects durable/runtime state. A component is never the source of execution, recovery, or verification truth.
+- React projects durable/runtime state. The page composition boundary owns the Agent controller shared by Sidebar and Workspace; root/child view selection is transient UI state. A component is never the source of execution, recovery, or verification truth.
 
 ## Scenario: change an Agent cross-layer contract
 
@@ -20,6 +20,7 @@ Use this scenario when a change does any of the following:
 - adds or changes an Agent tool, event, Run/checkpoint field, message content part, model capability, resource processor, subagent role, or runtime method;
 - changes IndexedDB stores, indexes, record guards, deletion scope, snapshot behavior, or recovery logic;
 - changes what counts as a workspace mutation, verification pass, completed Run, or resumable checkpoint;
+- changes per-Run or delegated-child budget values, ownership, or exhaustion behavior;
 - changes context budgeting, media reinjection, retry/fallback rules, or the data sent to an OpenAI-compatible provider.
 
 These are cross-layer changes even when the diff starts in one file. Trace the complete path:
@@ -59,6 +60,19 @@ interface AgentModelClient {
     onDelta: (message: Pick<Message, 'content' | 'reasoning_content'>) => void;
   }): Promise<AgentModelResponse>;
 }
+```
+
+Function tools publish object-root parameter schemas. Conditional constraints
+remain execution-time refinements when expressing them as a union would remove
+the root `type: 'object'` required by OpenAI-compatible providers:
+
+```ts
+const spawnSubagentSchema = z.object({
+  task_id: z.string().min(1),
+  role: z.enum(['explore', 'task']),
+  prompt: z.string().min(1).max(8_000),
+  write_scope: z.array(z.string().min(1)).max(20).optional(),
+}).strict().superRefine(rejectExploreWriteScope);
 ```
 
 ```ts
@@ -157,7 +171,7 @@ interface AgentCheckpoint {
 interface SubagentNotification {
   runId: string;
   taskId: string;             // model-visible business label
-  role: 'explore' | 'implement' | 'verify';
+  role: 'explore' | 'task';
   status: AgentTaskStatus;
   summary: string;
   evidence: string[];
@@ -167,6 +181,31 @@ interface SubagentNotification {
   usage: AgentUsage;
   blockedReason?: string;
 }
+
+interface SubagentHost {
+  wait(runIds: string[]): Promise<SubagentNotification[]>; // exactly one item
+}
+
+interface AgentBudget {
+  maxModelTurns: number;
+  maxToolCalls: number;
+  maxDurationMs: number;
+}
+
+// Coordinator child construction contract:
+const childBudget: AgentBudget = { ...rootRun.budget };
+const childCounter = new AgentFamilyBudget(
+  childBudget.maxModelTurns,
+  childBudget.maxToolCalls,
+  childBudget.maxDurationMs,
+);
+
+function evaluateCompletionGate(input: {
+  task: TaskContract;
+  agentRole: AgentRole;
+  runtime: AgentWorkspaceRuntime;
+  containerId: string;
+}): Promise<CompletionGateResult>;
 ```
 
 `V3PersistenceRepository` is the only production IndexedDB facade. Required operations include stable session/run event pages, one checkpoint per Run, session-scoped resource lookup, delegated-task lookup, revision-bearing snapshots, quarantine reads, and transactional session/container deletion.
@@ -231,11 +270,25 @@ interface SubagentNotification {
 #### Subagents and cancellation
 
 - Child Runs inherit only the compressed parent summary, Task Contract, resource manifest, authoritative revision, and explicit delegated goal. Never copy the parent transcript.
-- Depth is 1; at most 6 child Runs/root and 3 concurrent `explore` Runs. `implement` and `verify` are exclusive.
-- `explore` is read-only; `implement` may patch/materialize within `writeScope` but cannot shell; `verify` may run foreground shell checks and cannot patch or start background processes.
-- Child Run budget is 20 model turns, 50 tool calls, 5 minutes. Root family budget is 90 turns, 225 calls, 15 minutes.
+- Depth is 1; at most 6 child Runs/root and 3 child Runs execute concurrently regardless of role. Child Runs cannot delegate.
+- New delegation accepts only `explore | task`. `explore` has bounded read/resource/control tools. `task` has the complete workspace/resource/process/control toolset except subagent orchestration and may be narrowed by `writeScope`.
+- Every function parameter schema sent to a provider has a top-level JSON
+  Schema `type: object`. Do not use a root union/discriminated union for tool
+  parameters; providers may reject the request before the model runs. Keep
+  role-dependent constraints in object refinements and test both the published
+  JSON Schema and execution-time validation.
+- The root prompt/tool description tells the model to choose `explore` for read-only investigation, choose `task` for edits/commands/verification/process work, and issue independent spawns before waiting. Each `wait_subagents` call consumes exactly one previously unreported terminal notification from the requested Runs; the root inspects it and waits again for remaining work. Delivery never mutates sibling Run or delegated-task status.
+- Child lifecycles may run concurrently, but every apply/materialize/shell mutation remains serialized by the container mutation lease across all root families. Concurrent unleased writers are forbidden.
+- `sunam-v3` continues accepting persisted legacy `implement | verify` roles. UI and recovery-facing labels normalize them to `task`; the new spawn schema rejects them without a database upgrade.
+- Every child copies all three limits from the current root `AgentRun.budget` and receives an independent counter guard with those same values. Root and sibling model/tool consumption must not reduce a child's allowance. Parent cancellation still bounds child lifetime, and the container mutation lease remains shared.
 - Persisted delegated-task IDs are internally unique. A repeated model `taskId` is a label, not a database key.
 - Parent cancellation cascades to children and owned processes and waits for terminal child/task persistence before the parent records cancellation.
+- Root Chat, streaming state, active/latest Run, RunBoard, and session status must filter to depth-zero Runs. Child events are never merged into the root projection or model context.
+- Sidebar preloads lightweight child Run summaries for visible sessions so only child-bearing history rows render a disclosure. Child event transcripts remain on demand after selection. Entries use immutable `role + delegatedTaskId` identity and support selection and deletion only; a selected child projects only its `runId` transcript and has no composer or upload control. Its own RunBoard appears only when that child TaskContract has a plan; root and sibling plans never project into the child view. Returning from a selected child through its parent row keeps the child list open; only a later root-view activation toggles it.
+- Mandatory current-revision verification gates root completion only. Every depth-one child role may complete with unverified workspace changes; optional checks remain truthful evidence in the structured completion notification. A child-created plan remains local to that child Run and, when present, still follows the ordinary plan-completion gate.
+- RunBoard renders the positive verified badge only when `verifiedRevision === workspaceRevision`; it never renders a negative unverified badge.
+- Stopping a selected child aborts and waits for only that child. Deleting an active child stops it first; failure keeps the durable record and visible entry.
+- Before the first spawn in each new root Run, prune only terminal depth-one Runs from older root families in the same session. Preserve active older children and all current-family children.
 
 #### `sunam-v3` durability
 
@@ -243,6 +296,7 @@ interface SubagentNotification {
 - Stores are `workspace`, `runs`, `events`, `checkpoints`, `terminalHistory`, `snapshots`, `quarantine`, `resources`, and `agentTasks`.
 - Events are append-only. Session and Run pages are stable and capped at 250 records.
 - Checkpoints overwrite by `runId`; one Run cannot accumulate multiple transcript copies.
+- Child deletion atomically removes its Run, run events, checkpoint, and delegated task. It must preserve root records and session-scoped resources. Session deletion remains the broader family cleanup boundary.
 - Run, Event, Checkpoint, Message, Resource, and delegated-task payloads pass deep guards. Invalid records retain their raw value in quarantine and return an issue.
 - Persistence sanitizers recursively remove Blob, File, ArrayBuffer, data URLs, long Base64, and secrets before writing Runs/events/checkpoints.
 - Ordinary workspace saves, reset, and session/container deletion share the workspace serialization queue. Deletion first cancels and waits for matching Runs, then changes workspace metadata and related records in one transaction.
@@ -283,24 +337,45 @@ interface SubagentNotification {
 | Snapshot exceeds file/byte cap or write fails | Preserve previous complete snapshot; report a recoverable persistence error; queued follow-up remains runnable. |
 | IndexedDB record fails deep validation | Quarantine raw record and return an issue; never silently coerce or use memory fallback. |
 | Delete transaction fails | Surface persistence error and do not report durable deletion success. |
+| One child is stopped while its parent/sibling runs | Cancel and await only the selected child; parent and sibling remain active. |
+| A new root first spawns after older children completed | Delete only terminal children from older root families before creating the new child. |
+| New spawn requests `implement`, `verify`, or an explore `write_scope` | Reject at the Zod tool boundary before creating a delegated task. |
+| Published `spawn_subagent` schema has a union root or no root `type` | Fail the tool-definition regression; providers require top-level `type: object`. |
+| Three mixed `explore`/`task` children are active | Run their model lifecycles concurrently; serialize only mutation lease operations. |
+| A fourth child is queued while three are active | Keep it queued until one active child reaches terminal state. |
+| One of several requested children reaches terminal state | Return a one-item array for that previously unreported child; leave every sibling status unchanged and let a later wait continue blocking for the rest. |
+| Every requested child notification was already consumed | Reject with an already-reported error instead of returning stale completion data again. |
+| A task/legacy depth-one child changes files without verification | Allow child completion and report `verificationRecords: []`; do not weaken the root's own current-revision completion gate. |
+| Selected child has a non-empty local plan | Render that child's RunBoard above its stop/return control; never source the board from root/latest Run. |
+| Selected child has no local plan | Render no RunBoard and preserve the compact read-only child controls. |
+| Root or sibling counter is exhausted before a child starts | The child still receives and may consume its own full copy of `root.budget`; never pass the root counter object into the child Engine. |
+| Root uses a customized Run budget | Persist the exact same three values on every newly created child Run rather than falling back to global defaults. |
 
 ### 5. Good / Base / Bad Cases
 
-- Good: A root delegates three read-only explorations, waits for structured notifications, serially applies one scoped implementation, runs foreground verification, rereads the container revision, and completes with revision-bound evidence.
+- Good: A root spawns independent explore and task children before waiting; all three reason concurrently, task mutation calls cross the shared lease one at a time, and completed task notifications carry current-revision verification evidence for root synthesis.
+- Good provider edge: `spawn_subagent` publishes one object root with a two-value role enum while `superRefine` still rejects an explore write scope at execution time.
 - Good runtime edge: A root starts an owned background server, completes any required plan, returns one plain final response, and finishes without stopping the process or demanding unrelated workspace verification.
 - Good lifecycle edge: A later root Run calls `process_list`, selects the registered service from the same session/container, stops it with its original ownership, observes the port/process disappear, and returns one final response.
 - Good service edge: A Node server started from the user terminal inherits a terminal launch ID, reports its exact listener PID, appears as managed, and the port-row stop button terminates that PID without killing unrelated ports.
 - Good recovery edge: An old unowned port becomes orphaned; the user confirms the global impact; snapshots flush successfully before teardown and the replacement runtime boots with an empty port registry.
 - Good watchdog edge: A tool result is durable but snapshot flush hangs; the Run becomes visibly recoverable-failed within the checkpoint deadline and no stale checkpoint replaces the previous one.
 - Good development edge: A root runs a custom validator on the project's actual port, performs a foreground inspection, and completes from the latest successful exit evidence without a parser-specific wrapper script.
+- Good delegation edge: Three children run concurrently; the first completion returns one structured report, the parent inspects it, and the next wait blocks while the two sibling tasks retain their own running states.
+- Good child edge: A task child writes a scoped file, optionally records a local plan, and completes without a foreground check; its notification reports the changed path and empty verification records while root completion remains unverified.
+- Good UI edge: Selecting a planned child shows only that child's plan beside the stop/return action; selecting an unplanned child shows no task board, and neither child view exposes input/upload controls or a negative verification badge.
+- Good budget edge: A root with `2 turns / 1 tool / 11 seconds` has exhausted its own counter, then spawns two children whose persisted Runs still have `2/1/11` and which both complete through independent counters.
 - Base: A short text-only Run stays below budget, uses no resources/subagents, writes one Run/event stream/checkpoint, and completes without invoking compaction.
 - Good provider edge: A reasoning delta with `content: null` reaches `assistant_delta`, and the final durable assistant message retains the same accumulated `reasoning_content`.
-- Bad: A component stores an uploaded `File` in a message event, a provider branch is added inside `AgentEngine`, two writers mutate the same container outside the lease, or resume trusts `TaskContract.workspaceRevision` without reading runtime state.
+- Bad: A component stores an uploaded `File` in a message event, a provider branch is added inside `AgentEngine`, a function tool publishes a union-root parameter schema, two writers mutate the same container outside the lease, or resume trusts `TaskContract.workspaceRevision` without reading runtime state.
 - Bad lifecycle edge: A follow-up Run guesses an OS PID, kills by port, or receives processes from another session/container instead of resolving a registered Agent process ID.
 - Bad service edge: `DualTerminal` creates its own WebContainer port listeners or directly spawns `jsh`, producing a service list with no launch ownership.
 - Bad recovery edge: A force-restart button tears down first and attempts snapshot persistence afterwards, or hides snapshot failure and reports success.
 - Bad watchdog edge: A Run-wide timer only aborts model requests while `reflectTask()` awaits an unbounded snapshot/IndexedDB promise.
 - Bad provider edge: A strict string-only object schema silently drops an entire valid reasoning delta because an optional sibling field is null.
+- Bad delegation edge: `wait_subagents([a, b])` uses `Promise.all`, withholding child `a`'s completed report until `b` finishes, or marks `b` completed when only `a` terminated.
+- Bad completion edge: The shared completion gate uses `agentRole !== 'explore'` for verification and accidentally blocks task/legacy children, or bypasses verification for root.
+- Bad budget edge: The coordinator hardcodes a reduced child budget or passes `root.getFamilyBudget()` into every child, allowing one Agent's usage to terminate another Agent.
 
 ### 6. Tests Required
 
@@ -310,14 +385,64 @@ interface SubagentNotification {
 | Model adapter | Exact outbound content parts; nullable content/reasoning delta normalization; final plain-message reasoning preservation; resource session ownership; usage mapping/estimation; successful vision caching; clear unsupported-vision retry; unrelated 400/422 does not retry. |
 | Resources | Count/size limits including existing IDs; atomic batch failure; same-session SHA dedupe; cross-session rejection; MIME spoof; invalid UTF-8; image 2048/1.5 MiB limits; Blob absent from ledger. |
 | Runtime/revision | Every mutation path advances authoritative revision; verification binds after shell exit; process ownership isolation; same-session/container cross-Run list/observe/input/stop; explicit-stop single revision boundary; launch/listener order reconciliation; exact listener PID provenance; managed/orphan/stopping transitions; snapshot-first restart fail-closed; singleton remount; materialize; snapshot pre-export exclusions; `pagehide`/dispose/checkpoint flush. |
-| Completion | Explicit and plain responses share plan/revision/verification gates; actionable no-whitelist recovery guidance; arbitrary foreground checks/ports; failed-exit invalidation; rejected drafts are not projected; background server completion keeps the process alive; hanging post-tool synchronization becomes visibly failed and cancellation remains terminal. |
-| Persistence | One checkpoint/Run; stable 250-event session and Run pagination; deep quarantine; sanitizer; session/container transaction scope; shared-resource survival; snapshot cap keeps previous value; failed active snapshot still permits queued follow-up. |
-| Subagents | Depth/count/concurrency limits; global same-container mutation serialization; role/tool/write-scope rules; repeated task labels; family budgets; child failure/verification propagation; parent cancellation waits and stops owned processes. |
-| UI/E2E | No manual compact control; non-disruptive compact note; resource cards use IDs; child tree/transcript lazy load; resume drift; cancel; multimodal fallback; managed-port stop button; orphan warning/confirmation/error; localized creation defaults; desktop/mobile visuals. |
+| Completion | Explicit and plain responses share plan/revision gates; current-revision verification gates root but not any depth-one role; optional child verification stays truthful evidence; actionable no-whitelist root recovery guidance; arbitrary foreground checks/ports; failed-exit invalidation; rejected drafts are not projected; background server completion keeps the process alive; hanging post-tool synchronization becomes visibly failed and cancellation remains terminal. |
+| Persistence | One checkpoint/Run; stable 250-event session and Run pagination; deep quarantine; sanitizer; session/container transaction scope; atomic child deletion/pruning; shared-resource survival; snapshot cap keeps previous value; failed active snapshot still permits queued follow-up. |
+| Subagents | Object-root published tool schema; depth/count/three-way mixed-role concurrency; `explore | task` execution validation; complete non-delegating task tools; legacy-role reads; global same-container mutation serialization; write-scope rules; repeated task labels; exact root-to-child budget inheritance; exhausted root/sibling counters do not affect child completion; one-at-a-time unreported notification delivery; sibling state remains active after another child completes; structured completion fields; child failure/verification propagation; isolated single-child stop/delete; parent cancellation waits and stops owned processes. |
+| UI/E2E | Root-only projection; child-presence preload with no empty disclosure; lazy immutable child transcripts; child-local plan visible only when non-empty; legacy roles displayed as task; child menu portalled to the viewport; child-to-root return keeps disclosure open; pinned row replaces History with Pin; session status/action geometry; visibly dark-gray user bubble computed color; read-only child controls; positive-only verification badge; no manual compact control; non-disruptive compact note; resource cards use IDs; resume drift; cancel; multimodal fallback; managed-port stop button; orphan warning/confirmation/error; localized creation defaults; disclosure motion/reduced-motion; desktop/mobile visuals. |
 
 Release-significant changes require `npm run check:all`. An optimization-freeze claim requires two consecutive full passes and actual inspection of new visual baselines.
 
 ### 7. Wrong vs Correct
+
+#### Wrong: wait for every child before reporting any completion
+
+```ts
+return Promise.all(runIds.map((runId) => children.get(runId)!.promise));
+```
+
+#### Correct: consume one previously unreported terminal notification
+
+```ts
+const candidates = requestedChildren.filter((child) => !reportedRunIds.has(child.runId));
+const notification = await Promise.race(candidates.map((child) => child.promise));
+reportedRunIds.add(notification.runId);
+return [notification];
+```
+
+#### Wrong: apply the root verification gate to task children
+
+```ts
+if (agentRole !== 'explore' && task.changedWorkspace && !task.verified) block();
+```
+
+#### Correct: require current-revision verification only for root completion
+
+```ts
+if (agentRole === 'root' && task.changedWorkspace && !isCurrentVerification(task)) block();
+```
+
+#### Wrong: reduce and share the child budget
+
+```ts
+new AgentEngine({
+  budget: { maxModelTurns: 20, maxToolCalls: 50, maxDurationMs: 300_000 },
+  familyBudget: root.getFamilyBudget(),
+});
+```
+
+#### Correct: inherit exact limits with an independent counter
+
+```ts
+const budget = { ...root.budget };
+new AgentEngine({
+  budget,
+  familyBudget: new AgentFamilyBudget(
+    budget.maxModelTurns,
+    budget.maxToolCalls,
+    budget.maxDurationMs,
+  ),
+});
+```
 
 #### Wrong: persist transport bodies in the event ledger
 
@@ -448,7 +573,7 @@ const deltaSchema = z.object({
 - Context management, media trimming, model capability detection, and reconstruction are automatic. The UI may report state but cannot require context housekeeping from the user.
 - `sunam-v3` is an intentional clean-workspace boundary. Old v2 work data is preserved but not imported.
 - Images and text are first-class resources; arbitrary binaries may persist/materialize only. New directly consumable types extend `ResourceProcessorRegistry`, not `AgentEngine`.
-- The first subagent runtime supports coordinator + ordinary child Runs. Team/mailbox/recursive swarm/parallel writers remain out of scope until measured evidence justifies them.
+- The first subagent runtime supports coordinator + ordinary child Runs. Team/mailbox/recursive swarm and unleased parallel mutations remain out of scope until measured evidence justifies them.
 
 ## References
 

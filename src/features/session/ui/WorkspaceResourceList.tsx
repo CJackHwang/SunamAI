@@ -25,8 +25,7 @@ export function WorkspaceResourceList({ items, activeId, isCollapsed, emptyLabel
     const status = 'status' in item ? item.status : undefined;
     const isEditing = editing?.id === item.id;
     return <div key={item.id} className={`sidebar-item list-row ${activeId === item.id ? 'active' : ''}`} onClick={() => onSelect(item.id)} onContextMenu={(event) => onOpenContext(event, item.id)}>
-      <Icon size={16} className={item.pinned ? 'sidebar-resource-icon pinned' : 'sidebar-resource-icon'} />
-      {item.pinned && <Pin size={12} fill="currentColor" className="sidebar-pin" />}
+      {item.pinned ? <Pin size={16} fill="currentColor" className="sidebar-resource-icon" /> : <Icon size={16} className="sidebar-resource-icon" />}
       {isEditing ? <input ref={editInputRef} className="item-text sidebar-item-input" value={editing.text} onChange={(event) => onEditChange(item.id, event.target.value)} onBlur={onEditSubmit} onKeyDown={(event) => event.key === 'Enter' && onEditSubmit()} onClick={(event) => event.stopPropagation()} /> : <span className="item-text">{label}</span>}
       {generatingId === item.id && <Loader2 size={14} className="animate-spin sidebar-generating" />}
       {status === 'running' && <Loader2 size={14} className="animate-spin sidebar-running" />}

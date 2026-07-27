@@ -9,12 +9,14 @@ interface VerificationEvidence { command: string; passed: boolean; workspaceRevi
 export interface TaskContract { objective: string; acceptanceCriteria: string[]; constraints: string[]; requiresPlan: boolean; plan: AgentPlanItem[]; evidence: string[]; changedWorkspace: boolean; workspaceRevision: number; verified: boolean; verifiedRevision: number; verificationEvidence: VerificationEvidence[]; }
 export interface ChaosContract { persona: SunamModel; ritual: string; privateGoods: string; styleDirective: string; invariants: string[]; }
 export interface AgentBudget { maxModelTurns: number; maxToolCalls: number; maxDurationMs: number; }
-export type AgentRole = 'root' | 'explore' | 'implement' | 'verify';
+export type SubagentRole = 'explore' | 'task';
+export type LegacySubagentRole = 'implement' | 'verify';
+export type AgentRole = 'root' | SubagentRole | LegacySubagentRole;
 interface AgentToolPolicy { role: AgentRole; allowedTools: string[]; writeScope?: string[]; }
 type AgentTaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'blocked' | 'interrupted';
 interface AgentUsage { modelTurns: number; toolCalls: number; durationMs: number; estimatedTokens?: number; }
 export interface ModelTokenUsage { inputTokens: number; outputTokens: number; totalTokens: number; estimated: boolean; }
-export interface SubagentNotification { runId: string; taskId: string; role: Exclude<AgentRole, 'root'>; status: AgentTaskStatus; summary: string; evidence: string[]; changedPaths: string[]; verificationRecords: VerificationEvidence[]; workspaceRevision: number; usage: AgentUsage; blockedReason?: string; }
+export interface SubagentNotification { runId: string; taskId: string; role: SubagentRole; status: AgentTaskStatus; summary: string; evidence: string[]; changedPaths: string[]; verificationRecords: VerificationEvidence[]; workspaceRevision: number; usage: AgentUsage; blockedReason?: string; }
 export interface DelegatedAgentTask { id: string; taskId: string; sessionId: string; rootRunId: string; parentRunId: string; runId?: string; role: Exclude<AgentRole, 'root'>; prompt: string; status: AgentTaskStatus; createdAt: number; updatedAt: number; summary?: string; evidence: string[]; changedPaths: string[]; verificationRecords: VerificationEvidence[]; usage?: AgentUsage; blockedReason?: string; }
 export interface AgentRun { id: string; sessionId: string; containerId: string; model: string; persona: SunamModel; phase: AgentPhase; createdAt: number; updatedAt: number; task: TaskContract; chaos: ChaosContract; budget: AgentBudget; modelTurns: number; toolCalls: number; summary: string; modelUsage?: ModelTokenUsage; rootRunId?: string; parentRunId?: string; agentRole?: AgentRole; delegatedTaskId?: string; depth?: number; toolPolicy?: AgentToolPolicy; error?: string; finalSummary?: string; }
 export interface AgentCheckpoint { id: string; runId: string; sessionId: string; containerId: string; summary: string; messages: Message[]; createdAt: number; eventTailSequence?: number; workspaceRevision?: number; resourceIds?: string[]; }
@@ -42,6 +44,10 @@ export type AgentEvent =
 export interface AgentToolResult { ok: boolean; content: string; data?: unknown; modelContent?: import('@/entities/message/types').MessageContentPart[]; resourceReferences?: string[]; changedWorkspace?: boolean; verification?: { command: string; passed: boolean }; stopRun?: 'completed' | 'awaiting_user'; finalSummary?: string; }
 export interface AgentToolCall { id: string; name: string; arguments: string; }
 export interface AgentModelResponse { message: Message; toolCalls: AgentToolCall[]; usage?: ModelTokenUsage; }
+
+export function normalizeSubagentRole(role: AgentRole | undefined): SubagentRole {
+  return role === 'explore' ? 'explore' : 'task';
+}
 
 export function isActiveAgentPhase(phase: AgentPhase): boolean {
   return ['preparing', 'planning', 'acting', 'observing', 'verifying', 'cancelling'].includes(phase);

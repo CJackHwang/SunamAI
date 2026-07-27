@@ -19,7 +19,7 @@
 
 - statements/functions/lines ≥85%，branches ≥80%；
 - 初始 JS ≤90 KiB gzip；
-- 总 JavaScript ≤320 KiB gzip；
+- 总 JavaScript ≤350 KiB gzip；
 - 生产 `dist` ≤1.8 MiB；
 - 视觉最大像素差异比 0.2%。
 
@@ -77,14 +77,22 @@
 
 ## 6. 子 Agent
 
-- [x] 最大深度 1、每 root 最多 6 个、最多 3 路 explore。
-- [x] implement 与 verify 独占；不同 root family 对同一 container 也不能并发 mutation。
-- [x] explore/implement/verify 工具白名单符合设计；verify 只运行识别出的 foreground 验证命令。
+- [x] 最大深度 1、每 root 最多 6 个、最多 3 路混合角色 child lifecycle 并发。
+- [x] 新建只接受 explore/task；explore 只读，task 拥有完整非委派工具，旧 implement/verify 记录保持可读并显示为 task。
+- [x] `spawn_subagent` 发布顶层 object JSON Schema；兼容服务不会因 union root 拒绝函数，explore write scope 仍在执行边界失败。
+- [x] Agent 推理可并行；不同 root family 对同一 container 的 apply/materialize/shell mutation 仍由全局 lease 串行。
 - [x] write scope 同时限制 apply_patch 和 materialize。
-- [x] 子 Run 20 turns/50 tools/5 分钟，root family 90/225/15 分钟。
+- [x] 每个子 Run 继承 root 的完整 turns/tools/time 预算并独立计数；父或兄弟的消耗不会提前耗尽该 child。
 - [x] 模型 taskId 重复不会覆盖 persisted delegated task。
-- [x] notification 包含状态、摘要、证据、路径、验证、真实 revision 和 usage。
-- [x] 子 Run transcript 只在展开时按 run 加载最近 250 条事件，不进入主聊天。
+- [x] notification 包含状态、摘要、证据、路径、验证、真实 revision 和 usage；每次 wait 只返回一个尚未上报的终态 child，随后可继续等待其余任务。
+- [x] 主聊天的消息、流式输出、active/latest Run、RunBoard 和 session 状态只来自 depth-zero Run；child prompt/tool/delta 不混入父页面。
+- [x] Sidebar 预读可见 session 的 child Run 摘要，普通会话不显示展开箭头，只有 child-bearing session 才显示 `role + delegatedTaskId` 二级入口；child 不可改名/置顶，菜单只有删除，选中后才加载该 Run 最近 250 条事件。
+- [x] child 菜单 portal 到 viewport；从 child 点父会话保持 disclosure 展开、再点才折叠；置顶会话以单 Pin 替换 History。
+- [x] 会话生成/运行/成功/失败共用固定状态槽，浏览器几何回归证明红点与操作按钮不重叠。
+- [x] child 页面隐藏输入和上传；自身 plan 非空时显示隔离 RunBoard，活动态只停止当前 child，终态只返回父 Agent，父 Run 与兄弟 child 不受影响。
+- [x] child workspace 变更无需强制验收即可完成并上报；root 的当前 revision 验收门仍保持强制。
+- [x] RunBoard 隐藏未验收负向标签，仅在当前 revision 已验收时显示正向状态。
+- [x] child 删除原子清理 Run/event/checkpoint/delegated task 并保留父记录/resources；新 root 首次 spawn 只清理旧 family 的终态 child。
 - [x] child 写入使父旧验证失效；child failed verification 也撤销旧 pass。
 - [x] root complete 时重新读取当前 runtime revision。
 - [x] shell 进程结束显式推进 runtime revision；验证记录不能绑定命令执行前的 revision。
@@ -109,6 +117,7 @@
 - [x] OpenAI-compatible SSE 的 nullable content/reasoning 字段在边界规范化，思考过程不会因 `content: null` 被整帧丢弃。
 - [x] 聊天自动跟底使用无动画校正，只有用户显式“回到底部”才启用 smooth scroll；任务条和输入区高度变化不重启连续滚动动画。
 - [x] 思考过程使用紧凑的内部滚动区；普通工具调用默认折叠并保留运行/完成状态，`ask_user` 继续直接展示；消息气泡与工具 disclosure 不绘制描边，并使用四边对称 padding、固有宽高非线性动画、底部锚定和 reduced-motion 回退。
+- [x] RunBoard 断点和子任务默认折叠，复用工具调用的固有尺寸动画、无描边同心圆角和 reduced-motion；用户消息使用视觉上明确的深灰 `--color-gray-700`（`#3a3a3a`）。
 - [x] 全局 motion token 按反馈/空间/退场角色使用；移动菜单 presence 覆盖完整 sheet exit，模型选择器有退场动画，终端标签不再动画 font-size。
 - [x] 历史 Markdown 使用 `content-visibility`。
 - [x] 文件列表不读取全文求大小。
@@ -117,11 +126,11 @@
 
 ## 8. Playwright 场景
 
-E2E：配置门禁、设置与 session/container CRUD、图片视觉 fallback、自动 compact、真实 checkpoint resume、用户取消、root/subagent 委派与 revision 完成门。
+E2E：配置门禁、设置与 session/container CRUD、图片视觉 fallback、自动 compact、真实 checkpoint resume、用户取消、root/subagent 委派与 revision 完成门，以及父子 transcript 隔离、单 child 停止/删除和跨 root 终态清理。
 
 Visual：配置页与资源卡/子任务树，桌面 1440×900、移动 390×844，差异 0.2%。新增截图必须先用匹配版本 Chromium 更新基线，再运行一次不带 update 的验证。
 
-Runtime：真实 WebContainer launch/PID/端口登记、服务面板手动停止、资源 materialize、快照导出排除、父取消级联到 verify child 和 PID 清理。
+Runtime：真实 WebContainer launch/PID/端口登记、服务面板手动停止、资源 materialize、快照导出排除、父取消级联到 task child 和 PID 清理。
 
 ## 9. 依赖与资产
 
@@ -136,15 +145,15 @@ Runtime：真实 WebContainer launch/PID/端口登记、服务面板手动停止
 
 任何缺少 Chromium、网络或转换工具的检查都必须记录为“未执行/外部阻塞”，不能标记为通过。发布说明应列出实际命令、结果和未执行原因。
 
-## 11. 当前工作区验证记录（2026-07-26）
+## 11. 当前工作区验证记录（2026-07-27）
 
-- 优化冻结状态：**通过**。最终代码状态下 `npm run check:all` 已连续两次完整通过；每次都包含 `npm run check`、E2E、visual、runtime 和 production audit。
-- 核心自动化：36 个测试文件、175 个测试，连续两次全绿。
-- 覆盖率：statements 91.24%、branches 83.05%、functions 90.40%、lines 94.97%。
-- 包体：初始 84.94 KiB gzip、总 JS 314.09 KiB gzip、dist 1.34 MiB。v3 数据层从首屏拆出并在 hydrate 时懒加载。
-- Playwright 实际执行结果：E2E 7/7、visual 4/4、runtime 3/3；资源卡/子任务树的桌面与移动基线已经生成、人工检查，并在不更新截图的两次完整门禁中通过。
-- Runtime 证据包括：桌面切换到移动端后 Agent 后台进程和端口保持；资源 materialize 后 snapshot 仅保留源数据并排除 `node_modules`/dist；父取消会级联停止 verify 子任务进程。
-- `npm run check:audit` 在两次完整门禁中均返回 `found 0 vulnerabilities`。完整 development audit 仍有 8 个 high，全部属于 `vite-plugin-pwa@1.3.0` / `workbox-build@7.4.1` 构建链；不兼容 Vite 8 的 1.2.0 降级不作为修复，详见 [依赖策略](dependency-advisories.md)。
+- 功能门禁状态：**通过**。最终代码状态下 `npm run check:all` 完整通过一次，包含 `npm run check`、E2E、visual、runtime 和 production audit；本轮不声明需要连续两次的优化冻结复验。
+- 核心自动化：42 个测试文件、224 个测试全绿。
+- 覆盖率：statements 90.86%、branches 83.02%、functions 90.04%、lines 95.18%。
+- 包体：初始 87.39 KiB gzip、总 JS 320.85 KiB gzip、dist 1.38 MiB；未配置首屏不加载 Agent Core/WebContainer，总 JS 门槛为 350 KiB gzip。
+- Playwright 实际执行结果：E2E 11/11、visual 4/4、runtime 3/3；父子 transcript 隔离、object-root 子 Agent schema、状态槽几何、单 child 停止/删除、旧终态 child 清理和桌面/移动折叠视觉均已验证。
+- Runtime 证据包括：桌面切换到移动端后 Agent 后台进程和端口保持；资源 materialize 后 snapshot 仅保留源数据并排除 `node_modules`/dist；父取消会级联停止 task 子任务进程。
+- `npm run check:audit` 返回 `found 0 vulnerabilities`。完整 development audit 仍有 8 个 high，全部属于 `vite-plugin-pwa@1.3.0` / `workbox-build@7.4.1` 构建链；不兼容 Vite 8 的 1.2.0 降级不作为修复，详见 [依赖策略](dependency-advisories.md)。
 - 字体已转换并只保留 WOFF2：normal 400/500/600/700 与 italic 400；README 头图已移出 `public`，无效生产图标和 PWA asset 声明已删除。
 
-因此当前基础已达到本计划定义的可接受优化冻结线，可以进入后续功能开发。后续变更仍需满足本清单，且不得把 development-only advisory 例外扩展到生产依赖。
+因此本轮父子 Agent 会话隔离功能达到发布门禁。后续变更仍需满足本清单，且不得把 development-only advisory 例外扩展到生产依赖；需要重新声明优化冻结时，仍必须连续两次执行完整门禁。

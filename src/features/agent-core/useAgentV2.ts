@@ -7,14 +7,24 @@ import { AgentEngine, type AgentResumeState } from './engine';
 import { AgentEventStore } from './eventStore';
 import { OpenAIChatModelClient } from './modelClient';
 import { projectMessages, projectModelMessages } from './projector';
-import { isActiveAgentPhase, type AgentEvent, type AgentRun } from './types';
+import { isActiveAgentPhase, normalizeSubagentRole, type AgentEvent, type AgentRun } from './types';
 import { toErrorMessage } from '@/shared/lib/errors';
 import { AgentFamilyCoordinator } from './subagentCoordinator';
 import { registerWorkspaceDeletionPreparation } from '@/entities/workspace/deletionCoordinator';
 
 type UpdateSessionStatus = (id: string, status: SessionStatus) => void;
 const MESSAGE_WINDOW_SIZE = 250;
-interface ActiveExecution { sessionId: string; containerId: string; controller: AbortController; completion: Promise<void>; }
+interface ActiveExecution { sessionId: string; containerId: string; controller: AbortController; coordinator: AgentFamilyCoordinator; completion: Promise<void>; }
+interface StreamingState { content: string; reasoning: string; }
+export type AgentConversationView = { kind: 'root' } | { kind: 'subagent'; sessionId: string; runId: string };
+
+function isRootRun(run: AgentRun): boolean { return (run.depth ?? 0) === 0; }
+
+export function projectConversationEvents(events: AgentEvent[], runs: AgentRun[], view: AgentConversationView): AgentEvent[] {
+  if (view.kind === 'subagent') return events.filter((event) => event.sessionId === view.sessionId && event.runId === view.runId);
+  const rootRunIds = new Set(runs.filter(isRootRun).map((run) => run.id));
+  return events.filter((event) => rootRunIds.has(event.runId));
+}
 
 export function selectMessageWindow<T>(messages: T[], end: number | null, size = MESSAGE_WINDOW_SIZE): T[] {
   const boundedEnd = end === null ? messages.length : Math.min(messages.length, Math.max(0, end));
@@ -28,7 +38,7 @@ export function mergeSessionRecords<T extends { id: string; sessionId: string }>
 }
 
 export function recoveredSessionStatus(runs: AgentRun[]): SessionStatus | null {
-  const latest = [...runs].sort((left, right) => right.updatedAt - left.updatedAt)[0];
+  const latest = runs.filter(isRootRun).sort((left, right) => right.updatedAt - left.updatedAt)[0];
   return latest && (latest.phase === 'interrupted' || latest.phase === 'awaiting_user') ? 'idle' : null;
 }
 
@@ -56,14 +66,15 @@ export function useAgentV2(
   activeSessionId: string | null,
   activeContainerId: string | null,
   updateSessionStatus: UpdateSessionStatus,
+  conversationView: AgentConversationView = { kind: 'root' },
 ) {
   const storeRef = useRef(new AgentEventStore());
   const executionsRef = useRef(new Map<string, ActiveExecution>());
   const recoveredSessionsRef = useRef(new Set<string>());
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
-  const [streamingContent, setStreamingContent] = useState('');
-  const [streamingReasoning, setStreamingReasoning] = useState('');
+  const [streamingByRunId, setStreamingByRunId] = useState<Record<string, StreamingState>>({});
+  const [childRunsBySession, setChildRunsBySession] = useState<Record<string, AgentRun[]>>({});
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const [hasOlderEvents, setHasOlderEvents] = useState(false);
   const [visibleMessageEnd, setVisibleMessageEnd] = useState<number | null>(null);
@@ -72,6 +83,10 @@ export function useAgentV2(
   visibleMessageEndRef.current = visibleMessageEnd;
   const sessionRef = useRef(activeSessionId);
   sessionRef.current = activeSessionId;
+  const runsRef = useRef(runs);
+  runsRef.current = runs;
+  const conversationViewRef = useRef(conversationView);
+  conversationViewRef.current = conversationView;
 
   useEffect(() => {
     const executions = executionsRef.current;
@@ -91,8 +106,6 @@ export function useAgentV2(
     if (!activeSessionId) {
       setEvents([]);
       setRuns([]);
-      setStreamingContent('');
-      setStreamingReasoning('');
       setHasOlderEvents(false);
       setVisibleMessageEnd(null);
       return () => { mounted = false; };
@@ -116,8 +129,7 @@ export function useAgentV2(
         setRuns((previous) => {
           return mergeSessionRecords(restoredRuns, previous, activeSessionId).sort((left, right) => right.updatedAt - left.updatedAt);
         });
-        setStreamingContent('');
-        setStreamingReasoning('');
+        setChildRunsBySession((previous) => ({ ...previous, [activeSessionId]: restoredRuns.filter((run) => !isRootRun(run)) }));
         setHasOlderEvents(store.hasOlderSessionEvents(activeSessionId));
         setVisibleMessageEnd(null);
       }
@@ -129,23 +141,32 @@ export function useAgentV2(
   const appendEvent = useCallback((event: AgentEvent) => {
     if (event.transient) {
       if (event.kind === 'assistant_delta' && event.sessionId === sessionRef.current) {
-        setStreamingContent(event.content);
-        setStreamingReasoning(event.reasoningContent);
+        setStreamingByRunId((previous) => ({ ...previous, [event.runId]: { content: event.content, reasoning: event.reasoningContent } }));
       }
       return;
     }
     if (event.sessionId === sessionRef.current) {
       setEvents((previous) => previous.some((candidate) => candidate.id === event.id) ? previous : [...previous, event]);
-      setVisibleMessageEnd(null);
+      const view = conversationViewRef.current;
+      const run = event.kind === 'run_started' ? event.run : runsRef.current.find((candidate) => candidate.id === event.runId);
+      if (view.kind === 'subagent' ? event.runId === view.runId : Boolean(run && isRootRun(run))) setVisibleMessageEnd(null);
     }
     if (event.kind === 'message' && event.message.role === 'assistant' && event.sessionId === sessionRef.current) {
-      setStreamingContent('');
-      setStreamingReasoning('');
+      setStreamingByRunId((previous) => {
+        if (!previous[event.runId]) return previous;
+        const next = { ...previous };
+        delete next[event.runId];
+        return next;
+      });
     }
   }, []);
 
   const updateRun = useCallback((run: AgentRun) => {
-    updateSessionStatus(run.sessionId, toSessionStatus(run));
+    if (isRootRun(run)) updateSessionStatus(run.sessionId, toSessionStatus(run));
+    else setChildRunsBySession((previous) => {
+      const withoutCurrent = (previous[run.sessionId] ?? []).filter((candidate) => candidate.id !== run.id);
+      return { ...previous, [run.sessionId]: [run, ...withoutCurrent].sort((left, right) => left.createdAt - right.createdAt) };
+    });
     if (run.sessionId === sessionRef.current) {
       setRuns((previous) => {
         const withoutCurrent = previous.filter((candidate) => candidate.id !== run.id);
@@ -159,11 +180,10 @@ export function useAgentV2(
     const containerId = overrideContainerId ?? activeContainerId;
     if (!sessionId || !containerId || !runtime || !userPrompt.trim()) return;
     setPersistenceError(null);
-    if (sessionId === sessionRef.current) setStreamingContent('');
-    if (sessionId === sessionRef.current) setStreamingReasoning('');
     [...executionsRef.current.values()].filter((execution) => execution.sessionId === sessionId).forEach((execution) => execution.controller.abort(new DOMException('Superseded by a newer run.', 'AbortError')));
     const controller = new AbortController();
-    const initialMessages: Message[] = inheritedMessages ?? (sessionId === sessionRef.current ? projectModelMessages(events) : []);
+    const rootEvents = projectConversationEvents(events, runs, { kind: 'root' });
+    const initialMessages: Message[] = inheritedMessages ?? (sessionId === sessionRef.current ? projectModelMessages(rootEvents) : []);
     const createClient = () => new OpenAIChatModelClient({ apiKey, baseUrl, model: apiModel }, sessionId);
     const engine = new AgentEngine({
       sessionId,
@@ -181,9 +201,17 @@ export function useAgentV2(
       onRunChange: updateRun,
       ...(resume ? { resume } : {}),
     });
-    engine.setSubagentHost(new AgentFamilyCoordinator({
-      root: engine, createClient, runtime, store: storeRef.current, signal: controller.signal, persona: sunamModel, model: apiModel, onEvent: appendEvent, onRunChange: updateRun,
-    }));
+    const onChildrenPruned = (runIds: string[]) => {
+      const removed = new Set(runIds);
+      setRuns((previous) => previous.filter((run) => !removed.has(run.id)));
+      setEvents((previous) => previous.filter((event) => !removed.has(event.runId)));
+      setChildRunsBySession((previous) => Object.fromEntries(Object.entries(previous).map(([key, value]) => [key, value.filter((run) => !removed.has(run.id))])));
+      setStreamingByRunId((previous) => Object.fromEntries(Object.entries(previous).filter(([runId]) => !removed.has(runId))));
+    };
+    const coordinator = new AgentFamilyCoordinator({
+      root: engine, createClient, runtime, store: storeRef.current, signal: controller.signal, persona: sunamModel, model: apiModel, onEvent: appendEvent, onRunChange: updateRun, onChildrenPruned,
+    });
+    engine.setSubagentHost(coordinator);
     updateRun(engine.getRun());
     const runId = engine.getRun().id;
     const completion = engine.execute()
@@ -191,8 +219,8 @@ export function useAgentV2(
       .finally(() => {
         executionsRef.current.delete(runId);
       });
-    executionsRef.current.set(runId, { sessionId, containerId, controller, completion });
-  }, [activeContainerId, activeSessionId, apiKey, apiModel, appendEvent, baseUrl, events, runtime, sunamModel, updateRun]);
+    executionsRef.current.set(runId, { sessionId, containerId, controller, coordinator, completion });
+  }, [activeContainerId, activeSessionId, apiKey, apiModel, appendEvent, baseUrl, events, runs, runtime, sunamModel, updateRun]);
 
   const startTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, attachments?: ChatAttachment[]) => {
     launchTask(userPrompt, overrideSessionId, overrideContainerId, undefined, attachments);
@@ -208,8 +236,8 @@ export function useAgentV2(
       const currentSequence = await storeRef.current.latestEventSequence(target.id);
       const eventTailDrift = detectEventTailDrift(checkpoint?.eventTailSequence, currentSequence);
       const delegatedTasks = await storeRef.current.listAgentTasks(target.rootRunId ?? target.id);
-      const subagentStatus = delegatedTasks.map((task) => `- ${task.runId ?? task.id} [${task.role}/${task.status}] ${task.taskId}: ${task.prompt}${task.summary ? ` — ${task.summary}` : ''}`);
-      const inherited = checkpoint?.messages ?? (target.sessionId === sessionRef.current ? projectModelMessages(events) : []);
+      const subagentStatus = delegatedTasks.map((task) => `- ${task.runId ?? task.id} [${normalizeSubagentRole(task.role)}/${task.status}] ${task.taskId}: ${task.prompt}${task.summary ? ` — ${task.summary}` : ''}`);
+      const inherited = checkpoint?.messages ?? (target.sessionId === sessionRef.current ? projectModelMessages(projectConversationEvents(events, runs, { kind: 'root' })) : []);
       const baseSummary = checkpoint?.summary ?? target.summary ?? 'reassess the interrupted task';
       const recoveryNotes = [
         workspaceDrift ? `Workspace drift detected: checkpoint revision ${workspaceDrift.checkpointRevision}, current revision ${workspaceDrift.currentRevision}. Prior file reads and verification must be refreshed.` : '',
@@ -226,18 +254,57 @@ export function useAgentV2(
     if (activeSessionId) [...executionsRef.current.values()].filter((execution) => execution.sessionId === activeSessionId).forEach((execution) => execution.controller.abort());
   }, [activeSessionId]);
 
+  const stopSubagent = useCallback(async (runId: string): Promise<boolean> => {
+    for (const execution of executionsRef.current.values()) {
+      if (await execution.coordinator.stopAndWait(runId)) return true;
+    }
+    return false;
+  }, []);
+
+  const deleteSubagent = useCallback(async (sessionId: string, runId: string): Promise<boolean> => {
+    try {
+      await stopSubagent(runId);
+      const deleted = await storeRef.current.deleteChildRun(runId);
+      if (!deleted) return false;
+      setRuns((previous) => previous.filter((run) => run.id !== runId));
+      setEvents((previous) => previous.filter((event) => event.runId !== runId));
+      setChildRunsBySession((previous) => ({ ...previous, [sessionId]: (previous[sessionId] ?? []).filter((run) => run.id !== runId) }));
+      setStreamingByRunId((previous) => {
+        if (!previous[runId]) return previous;
+        const next = { ...previous };
+        delete next[runId];
+        return next;
+      });
+      return true;
+    } catch (error) {
+      setPersistenceError(toErrorMessage(error));
+      return false;
+    }
+  }, [stopSubagent]);
+
+  const loadSessionSubagents = useCallback(async (sessionId: string): Promise<AgentRun[]> => {
+    try {
+      const children = (await storeRef.current.loadSessionRuns(sessionId)).filter((run) => !isRootRun(run));
+      setChildRunsBySession((previous) => ({ ...previous, [sessionId]: children }));
+      return children;
+    } catch (error) {
+      setPersistenceError(toErrorMessage(error));
+      return [];
+    }
+  }, []);
+
   const loadOlderEvents = useCallback(async () => {
     const sessionId = sessionRef.current;
     if (!sessionId || loadingOlderRef.current || !storeRef.current.hasOlderSessionEvents(sessionId)) return false;
     loadingOlderRef.current = true;
     try {
-      const previousMessages = projectMessages(eventsRef.current).length;
+      const previousMessages = projectMessages(projectConversationEvents(eventsRef.current, runs, { kind: 'root' })).length;
       const previousEnd = visibleMessageEndRef.current ?? previousMessages;
       const page = await storeRef.current.loadOlderSessionEvents(sessionId);
       if (sessionRef.current === sessionId) {
         setEvents(page.events);
         setHasOlderEvents(page.hasMore);
-        const nextMessages = projectMessages(page.events).length;
+        const nextMessages = projectMessages(projectConversationEvents(page.events, runs, { kind: 'root' })).length;
         const added = Math.max(0, nextMessages - previousMessages);
         setVisibleMessageEnd(Math.min(nextMessages, added + Math.max(0, previousEnd - MESSAGE_WINDOW_SIZE)));
       }
@@ -248,7 +315,7 @@ export function useAgentV2(
     } finally {
       loadingOlderRef.current = false;
     }
-  }, []);
+  }, [runs]);
 
   const loadRunEvents = useCallback(async (runId: string) => {
     const sessionId = sessionRef.current;
@@ -261,13 +328,14 @@ export function useAgentV2(
     }
   }, []);
 
-  const allMessages = useMemo(() => projectMessages(events), [events]);
+  const viewEvents = useMemo(() => projectConversationEvents(events, runs, conversationView), [conversationView, events, runs]);
+  const allMessages = useMemo(() => projectMessages(viewEvents), [viewEvents]);
   const eventsRef = useRef(events);
   eventsRef.current = events;
   const messages = useMemo(() => {
-    return selectMessageWindow(allMessages, visibleMessageEnd);
-  }, [allMessages, visibleMessageEnd]);
-  const hasNewerEvents = visibleMessageEnd !== null && visibleMessageEnd < allMessages.length;
+    return selectMessageWindow(allMessages, conversationView.kind === 'root' ? visibleMessageEnd : null);
+  }, [allMessages, conversationView.kind, visibleMessageEnd]);
+  const hasNewerEvents = conversationView.kind === 'root' && visibleMessageEnd !== null && visibleMessageEnd < allMessages.length;
   const showNewerEvents = useCallback(() => {
     setVisibleMessageEnd((current) => {
       if (current === null) return null;
@@ -275,8 +343,13 @@ export function useAgentV2(
       return next >= allMessages.length ? null : next;
     });
   }, [allMessages.length]);
-  const activeRun = useMemo(() => runs.find((run) => isActiveAgentPhase(run.phase)) ?? null, [runs]);
-  const latestRun = runs[0] ?? null;
+  const rootRuns = useMemo(() => runs.filter(isRootRun), [runs]);
+  const activeRun = useMemo(() => rootRuns.find((run) => isActiveAgentPhase(run.phase)) ?? null, [rootRuns]);
+  const latestRun = rootRuns[0] ?? null;
+  const viewedRun = conversationView.kind === 'subagent' ? runs.find((run) => run.id === conversationView.runId) ?? null : activeRun ?? latestRun;
+  const streaming = viewedRun ? streamingByRunId[viewedRun.id] : undefined;
 
-  return { events, runs, messages, activeRun, latestRun, streamingContent, streamingReasoning, persistenceError, hasOlderEvents, hasNewerEvents, loadOlderEvents, loadRunEvents, showNewerEvents, startTask, resumeTask, stopTask };
+  return { events, runs, childRunsBySession, messages, activeRun, latestRun, viewedRun, streamingContent: streaming?.content ?? '', streamingReasoning: streaming?.reasoning ?? '', persistenceError, hasOlderEvents: conversationView.kind === 'root' && hasOlderEvents, hasNewerEvents, loadOlderEvents, loadRunEvents, loadSessionSubagents, showNewerEvents, startTask, resumeTask, stopTask, stopSubagent, deleteSubagent };
 }
+
+export type AgentController = ReturnType<typeof useAgentV2>;

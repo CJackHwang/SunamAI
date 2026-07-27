@@ -1,16 +1,15 @@
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 import { createId } from '@/shared/lib/ids';
 import type { SunamModel } from '@/shared/config/models';
-import type { AgentEvent, AgentRole, AgentRun, DelegatedAgentTask, SubagentNotification } from './types';
+import type { AgentEvent, AgentRun, DelegatedAgentTask, SubagentNotification, SubagentRole } from './types';
 import type { AgentModelClient } from './modelClient';
 import type { AgentEventStore } from './eventStore';
 import { AgentEngine } from './engine';
 import type { SubagentHost } from './tools/base';
-import type { AgentFamilyBudget, ContainerMutationLease } from './agentFamily';
+import { AgentFamilyBudget, type ContainerMutationLease } from './agentFamily';
 
 interface FamilyRoot {
   getRun(): AgentRun;
-  getFamilyBudget(): AgentFamilyBudget;
   getMutationLease(): ContainerMutationLease;
 }
 
@@ -24,11 +23,12 @@ export interface CoordinatorOptions {
   createClient: () => AgentModelClient;
   onEvent: (event: AgentEvent) => void;
   onRunChange: (run: AgentRun) => void;
+  onChildrenPruned?: (runIds: string[]) => void;
 }
 
 interface QueuedChild {
   runId: string;
-  task: DelegatedAgentTask;
+  task: DelegatedAgentTask & { role: SubagentRole };
   writeScope: string[] | undefined;
   controller: AbortController;
   messages: string[];
@@ -50,8 +50,9 @@ export class AgentFamilyCoordinator implements SubagentHost {
   private readonly options: CoordinatorOptions;
   private readonly children = new Map<string, QueuedChild>();
   private readonly queue: QueuedChild[] = [];
+  private readonly reportedRunIds = new Set<string>();
   private activeCount = 0;
-  private activeExclusive = false;
+  private cleanupPromise: Promise<string[]> | null = null;
 
   constructor(options: CoordinatorOptions) {
     this.options = options;
@@ -65,12 +66,16 @@ export class AgentFamilyCoordinator implements SubagentHost {
     });
   }
 
-  async spawn(input: { taskId: string; role: Exclude<AgentRole, 'root'>; prompt: string; writeScope?: string[] }): Promise<{ runId: string; taskId: string; status: string }> {
+  async spawn(input: { taskId: string; role: SubagentRole; prompt: string; writeScope?: string[] }): Promise<{ runId: string; taskId: string; status: string }> {
     if ((this.options.root.getRun().depth ?? 0) !== 0) throw new Error('Subagents cannot create nested subagents.');
     if (this.children.size >= 6) throw new Error('This root run already created the maximum of 6 subagents.');
+    const root = this.options.root.getRun();
+    this.cleanupPromise ??= this.options.store.pruneTerminalChildRuns(root.sessionId, root.rootRunId ?? root.id);
+    const prunedRunIds = await this.cleanupPromise;
+    if (prunedRunIds.length) this.options.onChildrenPruned?.(prunedRunIds);
     const runId = createId('r-child');
     const now = Date.now();
-    const task: DelegatedAgentTask = {
+    const task: DelegatedAgentTask & { role: SubagentRole } = {
       id: createId('task'), taskId: input.taskId, sessionId: this.options.root.getRun().sessionId, rootRunId: this.options.root.getRun().rootRunId ?? this.options.root.getRun().id,
       parentRunId: this.options.root.getRun().id, runId, role: input.role, prompt: input.prompt, status: 'queued', createdAt: now, updatedAt: now,
       evidence: [], changedPaths: [], verificationRecords: [],
@@ -86,11 +91,16 @@ export class AgentFamilyCoordinator implements SubagentHost {
   }
 
   async wait(runIds: string[]): Promise<SubagentNotification[]> {
-    return Promise.all(runIds.map((runId) => {
+    const children = runIds.map((runId) => {
       const child = this.children.get(runId);
       if (!child) throw new Error(`Subagent ${runId} does not belong to this root run.`);
-      return child.promise;
-    }));
+      return child;
+    });
+    const pendingReports = children.filter((child) => !this.reportedRunIds.has(child.runId));
+    if (!pendingReports.length) throw new Error('Every requested subagent completion has already been reported.');
+    const notification = await Promise.race(pendingReports.map((child) => child.promise));
+    this.reportedRunIds.add(notification.runId);
+    return [notification];
   }
 
   async message(runId: string, message: string): Promise<boolean> {
@@ -114,25 +124,24 @@ export class AgentFamilyCoordinator implements SubagentHost {
     return true;
   }
 
+  async stopAndWait(runId: string): Promise<boolean> {
+    const child = this.children.get(runId);
+    if (!child) return false;
+    await this.stop(runId);
+    await child.promise;
+    return true;
+  }
+
   private pump(): void {
-    if (this.activeExclusive) return;
-    const next = this.queue[0];
-    if (!next) return;
-    if (next.task.role !== 'explore') {
-      if (this.activeCount === 0) this.start(this.queue.shift()!);
-      return;
-    }
-    while (this.activeCount < 3 && this.queue[0]?.task.role === 'explore') this.start(this.queue.shift()!);
+    while (this.activeCount < 3 && this.queue.length > 0) this.start(this.queue.shift()!);
   }
 
   private start(child: QueuedChild): void {
     this.activeCount += 1;
-    this.activeExclusive = child.task.role !== 'explore';
     void this.runChild(child)
       .catch((error) => this.finishUnexpectedFailure(child, error))
       .finally(() => {
         this.activeCount -= 1;
-        if (child.task.role !== 'explore') this.activeExclusive = false;
         this.pump();
       });
   }
@@ -152,11 +161,14 @@ export class AgentFamilyCoordinator implements SubagentHost {
       `Delegated goal: ${child.task.prompt}`,
     ].join('\n');
     const childEvents: AgentEvent[] = [];
+    const childBudget = { ...root.budget };
     const engine = new AgentEngine({
       runId: child.runId, sessionId: root.sessionId, containerId: root.containerId, persona: this.options.persona, model: this.options.model,
       input: child.task.prompt, initialMessages: [], inheritedSummary, client: this.options.createClient(), runtime: this.options.runtime, store: this.options.store,
       signal: child.controller.signal, onEvent: (event) => { childEvents.push(event); this.options.onEvent(event); }, onRunChange: this.options.onRunChange,
-      budget: { maxModelTurns: 20, maxToolCalls: 50, maxDurationMs: 5 * 60_000 }, familyBudget: this.options.root.getFamilyBudget(), mutationLease: this.options.root.getMutationLease(),
+      budget: childBudget,
+      familyBudget: new AgentFamilyBudget(childBudget.maxModelTurns, childBudget.maxToolCalls, childBudget.maxDurationMs),
+      mutationLease: this.options.root.getMutationLease(),
       lineage: { rootRunId: root.rootRunId ?? root.id, parentRunId: root.id, role: child.task.role, delegatedTaskId: child.task.id, depth: 1, ...(child.writeScope ? { writeScope: child.writeScope } : {}) },
     });
     child.engine = engine;

@@ -92,25 +92,31 @@ preparing → planning → acting → observing / verifying
 
 根 Agent 通过以下工具分工：
 
-- `spawn_subagent({ taskId, role, prompt, writeScope? })`
-- `wait_subagents({ runIds })`
-- `message_subagent({ runId, message })`
-- `stop_subagent({ runId })`
+- `spawn_subagent({ task_id, role, prompt, write_scope? })`
+- `wait_subagents({ run_ids })`
+- `message_subagent({ run_id, message })`
+- `stop_subagent({ run_id })`
 
 每个 delegated task 使用内部唯一持久化 ID；模型提供的 `taskId` 只是业务标签，重复标签不会覆盖其他任务。子 Agent 拥有独立 runId、事件侧链、上下文、预算和 AbortController，只继承父摘要、Task Contract、资源 manifest、workspace revision 和明确目标，不复制父 transcript。
 
 约束：
 
 - 最大深度 1；子 Agent 不能再委派。
-- 每个 root 最多 6 个子 Run，同时最多 3 个 explore。
-- explore 只读；implement 允许 read/search/apply_patch/materialize 且受 write scope；verify 只允许识别出的前台验证命令。
-- implement 与 verify 独占调度；任何 root family 以及其他 family 对同一 container 的 mutation 都由全局容器 lease 串行化。
-- 子 Run 上限 20 model turns、50 tool calls、5 分钟；root family 共享 90 turns、225 calls、15 分钟。
-- notification 返回 status、summary、evidence、changed paths、verification records、workspace revision、usage 和 blocked reason。
+- 每个 root 最多 6 个子 Run，同时最多运行 3 个任意角色的 child lifecycle。
+- 新任务只区分 `explore` 与 `task`：explore 只读；task 拥有完整 workspace/resource/process/control 工具但不能递归委派，并可受 write scope 约束。
+- `spawn_subagent` 对模型发布顶层 `type: object` 的参数 schema；角色条件通过 object refinement 校验，避免兼容服务在模型执行前拒绝 union-root function schema。
+- root prompt 明确要求只读调查选 explore，编辑、命令、验证或进程工作选 task；独立任务必须先全部 spawn 再 wait。每次 wait 只消费一个尚未上报的终态通知，父 Agent 检查后继续等待其余任务。
+- explore/task 可并行推理和读取；任何 root family 以及其他 family 对同一 container 的 apply/materialize/shell mutation 都由全局容器 lease 串行化。
+- 旧 `implement | verify` 持久化记录保持可读并显示为 task，但新 spawn schema 拒绝旧角色。
+- 每个子 Run 完整复制当前 root Run 的 model-turn、tool-call 和 wall-clock 上限，并使用独立计数器；父或兄弟的消耗不会缩短该 child 的预算。parent cancellation 仍会停止 child，mutation lease 仍跨 family 串行写入。
+- 子 Agent 完成不受强制 workspace verification 门禁限制；验证是可选证据，任何已执行检查仍必须如实上报。root 自身的计划、revision 与 verification 完成门保持不变。
+- notification 返回 status、summary、evidence、changed paths、verification records、workspace revision、usage 和 blocked reason。通知一个 child 只写 root 的综合任务状态，不取消或改写任何 sibling Run/delegated task。
 - parent 等待结果时把真实 revision 合并到自己的任务；child 写入使旧验证失效，child failed verification 也撤销父级旧 pass。
 - 父级取消会等待子任务到达终态并停止所属进程，然后父 Run 才完成取消。
 
-RunBoard 以树形摘要展示子任务；展开子任务时按 run 索引读取最近 250 条事件并显示最近 transcript，不注入主聊天。v1 不实现 team、mailbox、递归 swarm、teammate 互聊或并行 writer。
+主聊天的消息、流式文本、active/latest Run、RunBoard 和 session 状态只投影 depth-zero Run。Sidebar 预读可见父会话的轻量 child Run 摘要，普通会话保持无箭头单行，只有确实保留 child 的会话才显示折叠入口；子项以 `role + delegatedTaskId` 作为不可改名、不可置顶的身份，选择后才按 `runId` 读取该 child 最近 250 条事件。子页点击父会话只返回父 transcript 并保持列表展开，已经位于父页时再次点击才折叠。child 删除菜单 portal 到 viewport 并复用普通侧栏菜单；置顶会话以 Pin 替换 History，不追加第二枚图标。会话生成、运行、成功未读、失败未读统一使用固定状态槽，与折叠箭头和操作按钮分别占位。子页面隐藏输入和上传；仅当该 child 自己创建了 plan 时显示隔离的 RunBoard。运行态只提供停止当前 child，终态只提供返回父 Agent。单 child 停止或完成不会取消父 Run 或改变兄弟 child。
+
+RunBoard 仍以树形摘要展示子任务，但断点和子任务详情默认折叠，并复用工具调用的固有尺寸动画和 reduced-motion 回退。RunBoard 只显示当前 revision 的正向已验收状态，不显示未验收徽标。child transcript 永不注入主聊天。v1 不实现 team、mailbox、递归 swarm、teammate 互聊或并行 writer。
 
 ## 7. 工具和权限
 
@@ -122,7 +128,7 @@ RunBoard 以树形摘要展示子任务；展开子任务时按 run 索引读取
 - 关闭已登记服务必须使用 Agent process ID，不通过端口猜 PID。显式停止异步等待一次 post-stop revision flush，并同步当前任务 revision，避免服务已经关闭但完成门继续循环。
 - Agent shell 与用户终端都由 runtime service registry 登记 launch ID、来源、容器和句柄。Node `listen` 由内部 preload 记录真实 PID/port；服务面板只对 managed 端口提供精确停止，不从端口反推 PID。
 - 无法关联当前生命周期启动记录的端口标记为 orphaned。用户可确认“强制重启关闭”，但 runtime 必须先成功 flush 全部快照；失败时不重启。成功重启会停止全局 WebContainer 中的全部端口、终端和 Agent 后台进程。
-- verify shell 只要求 foreground；不使用通用命令解析器猜测项目验证语义，也不允许启动后台服务。
+- task 可使用前后台 shell；workspace 发生变化后必须用相关 foreground 检查在当前 revision 上完成验证，不使用通用命令解析器猜测项目验证语义。
 - 后台 `shell_run` 用于服务等持续进程，不单独制造 workspace mutation；如果它实际写文件或退出，权威 revision 漂移仍会使完成门要求重新验证。
 - 验证后仍可继续读取或运行前台检查；前台命令会在新的 shell revision 上刷新真实 exit evidence，后续 workspace 写入仍要求再次检查。
 - Agent 只能读取有界用户终端缓冲，不能向用户交互 shell 写入；所有命令都必须通过 Agent-owned `shell_run` 执行并受进程所有权与 mutation lease 约束。
@@ -137,6 +143,8 @@ v3 stores：workspace、runs、events、checkpoints、terminalHistory、snapshot
 
 - events append-only，按 session/run + sequence 建索引；session 时间线与单个 Run 均提供最多 250 条的页面查询，主聊天自动向上分页，子 Run transcript 按展开动作加载。
 - 每个 Run 只有一个覆盖式 checkpoint，保存摘要、最近完整消息组、event tail、workspace revision 和资源 ID。
+- 单独删除 child 时先等待该 Run 进入终态，再在一个事务中删除 child Run、事件、checkpoint 和 delegated task；父记录与 session-scoped resources 保留，失败时入口不做乐观移除。
+- 每个 root Run 第一次 spawn 前删除同 session 中其他 root family 的终态 child；活动旧 child 与当前 family 始终保留。删除父 session 仍会清理全部 child 侧链。
 - 普通 workspace save、session/container 删除和 reset 在 store 与 repository 两层进入统一串行队列；reload 等待队列排空，避免旧保存覆盖删除结果。
 - 删除 session/container 前先取消并等待所有命中范围的活动父/子 Run 收尾，再执行 workspace 元数据和关联数据的同一事务，避免旧 execution 在删除后写回数据。
 - session 删除清理对应 Run、事件、checkpoint、资源、任务和 session-scoped terminal history；container 删除清理 container-scoped Run 侧链、资源归属和 snapshot。terminal history 不按 container 存储，因此不作无法兑现的 container 级清理承诺。
@@ -156,8 +164,8 @@ v3 stores：workspace、runs、events、checkpoints、terminalHistory、snapshot
 
 ## 10. 当前实现基线
 
-2026-07-26 的最终工作区已连续两次通过完整 `npm run check:all`。核心自动化为 36 个测试文件、175 个测试；E2E 7/7、视觉 4/4、真实 WebContainer 3/3。真实 Runtime 已覆盖移动端切换后后台进程和端口保持、资源 materialize 后快照排除生成目录，以及父 Run 取消级联停止 verify 子进程。
+2026-07-27 的当前工作区已通过一次完整 `npm run check:all`。核心自动化为 42 个测试文件、224 个测试；E2E 11/11、视觉 4/4、真实 WebContainer 3/3。真实 Runtime 已覆盖移动端切换后后台进程和端口保持、资源 materialize 后快照排除生成目录，以及父 Run 取消级联停止 task 子进程。
 
-当前覆盖率为 statements 91.24%、branches 83.05%、functions 90.40%、lines 94.97%；初始/总 JS 为 84.94/314.09 KiB gzip，生产 `dist` 1.34 MiB，生产依赖 high/critical 为零。该基线表示上下文、资源、v3 persistence 与普通 subagent 的第一版已经越过优化冻结门，后续功能仍需遵守本设计中的预算、revision、持久化和取消边界。
+当前覆盖率为 statements 90.86%、branches 83.02%、functions 90.04%、lines 95.18%；初始/总 JS 为 87.39/320.85 KiB gzip，生产 `dist` 1.38 MiB，生产依赖 high/critical 为零。本轮功能门禁通过，但不声明需要连续两次完整通过的优化冻结复验；后续功能仍需遵守本设计中的预算、revision、持久化和取消边界。
 
 自动化门槛和真实浏览器场景见 [发布与优化冻结验收](refactor-acceptance.md)，模块依赖见 [架构说明](architecture.md)。
