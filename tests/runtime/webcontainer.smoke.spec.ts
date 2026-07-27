@@ -107,7 +107,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(page.locator('.terminal-environment-dot')).toHaveCount(0);
   const terminalRows = page.locator('.xterm-rows').nth(1);
   await expect(terminalRows).not.toContainText(/\.sunam\/workspaces\/c-/);
-  await expect(page.locator('.terminal-environment-path')).toHaveText('/');
+  await expect(page.locator('.terminal-environment-path')).toHaveCount(0);
 
   const terminalInput = page.locator('.terminal-panel[data-active="true"] .xterm-helper-textarea');
   await terminalInput.focus();
@@ -160,7 +160,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await containers.locator('.sidebar-item-input').fill('Runtime renamed container');
   await containers.locator('.sidebar-item-input').press('Enter');
   await expect(activeContainer).toContainText('Runtime renamed container');
-  await expect(page.locator('.terminal-environment-path')).toHaveText('/');
+  await expect(page.locator('.terminal-environment-path')).toHaveCount(0);
   await expect(page.locator('.fm-breadcrumb')).toHaveText('/');
   await expect(page.locator('.fm-item-name').filter({ hasText: /^user-created$/ })).toBeVisible();
 
@@ -233,6 +233,19 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(services.getByText('端口 3457')).toBeHidden();
   await expect(serverProcess).toHaveCount(0);
   await expect(page.locator('.service-process-row')).toHaveCount(17);
+
+  await mobileNavigation.getByRole('button', { name: '文件' }).click();
+  await expect(page.locator('.workspace-container')).toHaveAttribute('data-active-tab', 'files');
+  await page.locator('.fm-item').filter({ has: page.locator('.fm-item-name', { hasText: /^user-created$/ }) }).dblclick();
+  const mobileAgentFile = page.locator('.fm-item').filter({ has: page.locator('.fm-item-name', { hasText: /^from-agent\.txt$/ }) });
+  const mobileSize = mobileAgentFile.locator('.fm-item-size');
+  const mobileMenu = mobileAgentFile.locator('.fm-item-menu');
+  await expect(mobileSize).toHaveText('17 B');
+  await expect(mobileSize).toBeVisible();
+  const [mobileSizeBox, mobileMenuBox] = await Promise.all([mobileSize.boundingBox(), mobileMenu.boundingBox()]);
+  expect(mobileSizeBox).not.toBeNull();
+  expect(mobileMenuBox).not.toBeNull();
+  expect(mobileSizeBox!.x + mobileSizeBox!.width).toBeLessThanOrEqual(mobileMenuBox!.x);
 });
 
 test('real WebContainer materializes a resource and excludes generated directories before snapshot serialization', async ({ page }) => {

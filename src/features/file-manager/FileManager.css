@@ -356,10 +356,6 @@
     min-height: 52px;
   }
 
-  .fm-item-size {
-    display: none;
-  }
-
   .fm-item-menu { opacity: 1; transform: none; pointer-events: auto; }
 
 
