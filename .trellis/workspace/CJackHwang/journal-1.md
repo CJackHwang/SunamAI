@@ -169,3 +169,25 @@ Separated root and child Agent conversations, added temporary child navigation a
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: Standardize action menus and workspace file tools
+
+**Date**: 2026-07-28
+**Task**: Standardize action menus and workspace file tools
+**Branch**: `main`
+
+### Summary
+
+Unified responsive action menus, restored file sizes, added complete workspace ZIP export, fixed sidebar rename layout, and kept mobile file sizes visible while simplifying the environment header.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9b68f00` | (see git log) |
+| `65957f4` | (see git log) |
+
+### Status
+
+[OK] **Completed**

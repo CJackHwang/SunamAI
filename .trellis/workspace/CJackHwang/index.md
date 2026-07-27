@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
-- **Last Active**: 2026-07-27
+- **Total Sessions**: 8
+- **Last Active**: 2026-07-28
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~171 | Active |
+| `journal-1.md` | ~193 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-07-28 | Standardize action menus and workspace file tools | `9b68f00`, `65957f4` | `main` |
 | 7 | 2026-07-27 | 修复移动端子 Agent 删除菜单 | `3130ae5` | `main` |
 | 6 | 2026-07-27 | 统一 Agent 容器工作区路径 | `1cee0d3` | `main` |
 | 5 | 2026-07-27 | Isolate subagent conversations | `9b3b16e` | `main` |
