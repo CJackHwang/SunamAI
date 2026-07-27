@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
+- **Total Sessions**: 6
 - **Last Active**: 2026-07-27
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~129 | Active |
+| `journal-1.md` | ~150 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-07-27 | 统一 Agent 容器工作区路径 | `1cee0d3` | `main` |
 | 5 | 2026-07-27 | Isolate subagent conversations | `9b3b16e` | `main` |
 | 4 | 2026-07-27 | Fix workspace runtime and Agent lifecycle bugs | `7d1edbe`, `6848e04`, `1357a4a`, `04227b7` | `main` |
 | 3 | 2026-07-27 | Refine Agent completion and process lifecycle | `f152e48`, `9d21bed`, `868ea64` | `main` |

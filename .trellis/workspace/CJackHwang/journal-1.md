@@ -127,3 +127,24 @@ Separated root and child Agent conversations, added temporary child navigation a
 ### Status
 
 [OK] **Completed**
+
+
+## Session 6: 统一 Agent 容器工作区路径
+
+**Date**: 2026-07-27
+**Task**: 统一 Agent 容器工作区路径
+**Branch**: `main`
+
+### Summary
+
+将 Agent、子 Agent、用户终端、文件管理器、资源和快照统一到 /home/workspace/<containerId>，拒绝旧伪路径并补齐真实 WebContainer 双向可见性与重命名回归。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1cee0d3` | (see git log) |
+
+### Status
+
+[OK] **Completed**
