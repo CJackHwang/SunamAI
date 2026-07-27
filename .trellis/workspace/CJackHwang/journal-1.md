@@ -148,3 +148,24 @@ Separated root and child Agent conversations, added temporary child navigation a
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: 修复移动端子 Agent 删除菜单
+
+**Date**: 2026-07-27
+**Task**: 修复移动端子 Agent 删除菜单
+**Branch**: `main`
+
+### Summary
+
+将子 Agent 单项删除菜单从移动端全宽 bottom sheet 改为靠近触发项的视口级 popover，补充 portal、几何、动画与普通资源菜单兼容性测试，并更新组件规范。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3130ae5` | (see git log) |
+
+### Status
+
+[OK] **Completed**
