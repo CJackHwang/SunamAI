@@ -10,7 +10,7 @@ describe('ServicesPanel', () => {
     const writeText = vi.fn(async () => undefined);
     const onPreview = vi.fn();
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    const { container } = render(<I18nProvider><ServicesPanel ports={[{ port: 5173, url: 'https://5173.example.webcontainer-api.io', state: 'managed' }]} processes={[]} containerName="demo" onPreview={onPreview} onKillProcess={vi.fn()} {...actions} /></I18nProvider>);
+    const { container } = render(<I18nProvider><ServicesPanel ports={[{ port: 5173, url: 'https://5173.example.webcontainer-api.io', state: 'managed' }]} processes={[]} onPreview={onPreview} onKillProcess={vi.fn()} {...actions} /></I18nProvider>);
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
     expect(screen.queryByText('清除记录')).not.toBeInTheDocument();
     expect(screen.queryByText('已登记')).not.toBeInTheDocument();
@@ -24,15 +24,15 @@ describe('ServicesPanel', () => {
     expect(onPreview).not.toHaveBeenCalled();
   });
 
-  it('sanitizes internal paths in process commands', () => {
-    render(<I18nProvider><ServicesPanel ports={[]} containerName="demo" processes={[{ id: 'proc-1', sessionId: 's-1', runId: 'r-1', containerId: 'c-1', command: 'node /home/sunam/.sunam/workspaces/c-1/server.js', isRunning: true, output: '', cursor: 0 }]} onPreview={vi.fn()} onKillProcess={vi.fn()} {...actions} /></I18nProvider>);
-    expect(screen.getByText(/\/containers\/demo\/server\.js/)).toBeInTheDocument();
-    expect(screen.queryByText(/\.sunam\/workspaces/)).not.toBeInTheDocument();
+  it('shows the real canonical process path without a display-only alias', () => {
+    render(<I18nProvider><ServicesPanel ports={[]} processes={[{ id: 'proc-1', sessionId: 's-1', runId: 'r-1', containerId: 'c-1', command: 'node /home/workspace/c-1/server.js', isRunning: true, output: '', cursor: 0 }]} onPreview={vi.fn()} onKillProcess={vi.fn()} {...actions} /></I18nProvider>);
+    expect(screen.getByText(/\/home\/workspace\/c-1\/server\.js/)).toBeInTheDocument();
+    expect(screen.queryByText(/\/containers\/demo/)).not.toBeInTheDocument();
   });
 
   it('shows clipboard failures instead of using a legacy copy fallback', async () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn(async () => { throw new Error('permission denied'); }) } });
-    render(<I18nProvider><ServicesPanel ports={[{ port: 3000, url: 'https://3000.example.test', state: 'managed' }]} processes={[]} containerName="demo" onPreview={vi.fn()} onKillProcess={vi.fn()} {...actions} /></I18nProvider>);
+    render(<I18nProvider><ServicesPanel ports={[{ port: 3000, url: 'https://3000.example.test', state: 'managed' }]} processes={[]} onPreview={vi.fn()} onKillProcess={vi.fn()} {...actions} /></I18nProvider>);
     fireEvent.click(screen.getByRole('button', { name: '复制端口 3000 地址' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('permission denied');
   });
@@ -44,7 +44,7 @@ describe('ServicesPanel', () => {
     const view = render(<I18nProvider><ServicesPanel ports={[
       { port: 3000, url: 'https://3000.example.test', state: 'managed', launchId: 'launch-1' },
       { port: 4173, url: 'https://4173.example.test', state: 'orphaned' },
-    ]} processes={[]} containerName="demo" isRestarting={false} onPreview={vi.fn()} onKillProcess={vi.fn()} onStopPort={onStopPort} onForceRestart={onForceRestart} /></I18nProvider>);
+    ]} processes={[]} isRestarting={false} onPreview={vi.fn()} onKillProcess={vi.fn()} onStopPort={onStopPort} onForceRestart={onForceRestart} /></I18nProvider>);
 
     fireEvent.click(within(view.container).getByRole('button', { name: '停止端口 3000 的服务' }));
     expect(onStopPort).toHaveBeenCalledWith(3000);

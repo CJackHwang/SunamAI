@@ -122,7 +122,9 @@ RunBoard 仍以树形摘要展示子任务，但断点和子任务详情默认�
 
 每个工具必须声明 Zod schema、只读/并发属性、数据影响、超时和结果类型。角色白名单在构造子 Run 时冻结。
 
-- 所有文件路径通过容器根目录解析并拒绝逃逸。
+- WebContainer 真实 workdir 为 `/home/workspace`，项目根是 `/home/workspace/<containerId>`。Agent、子 Agent、用户终端、FileManager、资源物化和快照只使用这一命名空间；容器名不参与路径。
+- Agent 和用户 shell 使用同一项目 `cwd` 与 `SUNAM_WORKSPACE`，但 `HOME=/home/workspace` 保持在项目根之外，避免 `.jshrc` 等启动文件进入用户目录和快照。
+- 文件工具接受相对路径或当前规范绝对路径；`/home/user`、旧 `.sunam/workspaces`、伪 `/containers`、其他/重复 container root、反斜线、NUL 和 traversal 在读写前失败，错误返回当前规范根。
 - 进程所有权是 `(sessionId, runId, containerId)`；不匹配的观察、输入和停止失败。
 - root 的 `process_list` 可以列出同一 session/container 内由较早 Run 启动的进程；后续观察、输入和停止使用列表记录的原始完整所有权。其他 session/container 不可见，子 Agent 不获得跨 Run 进程工具。
 - 关闭已登记服务必须使用 Agent process ID，不通过端口猜 PID。显式停止异步等待一次 post-stop revision flush，并同步当前任务 revision，避免服务已经关闭但完成门继续循环。
@@ -164,8 +166,8 @@ v3 stores：workspace、runs、events、checkpoints、terminalHistory、snapshot
 
 ## 10. 当前实现基线
 
-2026-07-27 的当前工作区已通过一次完整 `npm run check:all`。核心自动化为 42 个测试文件、224 个测试；E2E 11/11、视觉 4/4、真实 WebContainer 3/3。真实 Runtime 已覆盖移动端切换后后台进程和端口保持、资源 materialize 后快照排除生成目录，以及父 Run 取消级联停止 task 子进程。
+2026-07-27 的当前工作区已通过一次完整 `npm run check:all`。核心自动化为 41 个测试文件、236 个测试；E2E 11/11、视觉 4/4、真实 WebContainer 3/3。真实 Runtime 已覆盖移动端切换后后台进程和端口保持、资源 materialize 后快照排除生成目录、父 Run 取消级联停止 task 子进程，以及用户终端、Agent 文件工具、Agent shell 与 FileManager 的规范工作区双向可见性。
 
-当前覆盖率为 statements 90.86%、branches 83.02%、functions 90.04%、lines 95.18%；初始/总 JS 为 87.39/320.85 KiB gzip，生产 `dist` 1.38 MiB，生产依赖 high/critical 为零。本轮功能门禁通过，但不声明需要连续两次完整通过的优化冻结复验；后续功能仍需遵守本设计中的预算、revision、持久化和取消边界。
+当前覆盖率为 statements 90.93%、branches 83.22%、functions 89.94%、lines 95.31%；初始/总 JS 为 87.39/321.21 KiB gzip，生产 `dist` 1.38 MiB，生产依赖 high/critical 为零。本轮功能门禁通过，但不声明需要连续两次完整通过的优化冻结复验；后续功能仍需遵守本设计中的预算、revision、持久化和取消边界。
 
 自动化门槛和真实浏览器场景见 [发布与优化冻结验收](refactor-acceptance.md)，模块依赖见 [架构说明](architecture.md)。

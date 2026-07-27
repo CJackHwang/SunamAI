@@ -13,7 +13,7 @@ function createRuntime(snapshot: Record<string, unknown> | null = null) {
     kill,
   };
   const webcontainer = {
-    workdir: '/home/project',
+    workdir: '/home/workspace',
     fs: {
       mkdir: vi.fn(async () => undefined),
       watch: vi.fn(() => ({ close: vi.fn() })),
@@ -38,12 +38,12 @@ function createRuntime(snapshot: Record<string, unknown> | null = null) {
 
 function createFilesystemRuntime() {
   const files = new Map<string, Uint8Array>([
-    ['.sunam/workspaces/c-1/src/main.txt', new TextEncoder().encode('line one\nneedle line\nline three')],
-    ['.sunam/workspaces/c-1/node_modules/skip.txt', new TextEncoder().encode('skip')],
-    ['.sunam/workspaces/c-1/.git/config', new TextEncoder().encode('skip')],
-    ['.sunam/workspaces/c-1/large.bin', new Uint8Array(200_001)],
+    ['c-1/src/main.txt', new TextEncoder().encode('line one\nneedle line\nline three')],
+    ['c-1/node_modules/skip.txt', new TextEncoder().encode('skip')],
+    ['c-1/.git/config', new TextEncoder().encode('skip')],
+    ['c-1/large.bin', new Uint8Array(200_001)],
   ]);
-  const directories = new Set(['.sunam', '.sunam/workspaces', '.sunam/workspaces/c-1', '.sunam/workspaces/c-1/src', '.sunam/workspaces/c-1/node_modules', '.sunam/workspaces/c-1/.git']);
+  const directories = new Set(['c-1', 'c-1/src', 'c-1/node_modules', 'c-1/.git']);
   const watchers: Array<{ close: ReturnType<typeof vi.fn> }> = [];
   const inputs: string[] = [];
   const events: string[] = [];
@@ -72,7 +72,7 @@ function createFilesystemRuntime() {
     });
   });
   const webcontainer = {
-    workdir: '/home/project',
+    workdir: '/home/workspace',
     fs: {
       mkdir: vi.fn(async (path: string) => { directories.add(path); }),
       watch: vi.fn(() => { const watcher = { close: vi.fn() }; watchers.push(watcher); return watcher; }),
@@ -103,6 +103,16 @@ function createFilesystemRuntime() {
 }
 
 describe('WebContainerAgentRuntime process ownership', () => {
+  it('launches the user shell inside the same real root and environment as Agent shells', async () => {
+    const { runtime, webcontainer } = createRuntime();
+    await runtime.spawnUserShell('c-1');
+    expect(webcontainer.spawn).toHaveBeenCalledWith('jsh', [], expect.objectContaining({
+      cwd: 'c-1',
+      env: expect.objectContaining({ HOME: '/home/workspace', SUNAM_WORKSPACE: '/home/workspace/c-1', SUNAM_CONTAINER_ID: 'c-1' }),
+    }));
+    runtime.dispose();
+  });
+
   it('lists all and only running processes in the requested container', async () => {
     const { runtime } = createRuntime();
     const first = await runtime.runShell({ command: 'one', mode: 'background', sessionId: 's-1', runId: 'r-1', containerId: 'c-1' });
@@ -181,8 +191,8 @@ describe('WebContainerAgentRuntime process ownership', () => {
     const tree = { 'restored.txt': { file: { contents: 'v3' } } };
     const { runtime, webcontainer } = createRuntime(tree);
     await runtime.ensureContainer('c-1');
-    expect(webcontainer.mount).toHaveBeenCalledWith(tree, { mountPoint: '.sunam/workspaces/c-1' });
-    expect(webcontainer.fs.watch).toHaveBeenCalledWith('.sunam/workspaces/c-1', expect.any(Function));
+    expect(webcontainer.mount).toHaveBeenCalledWith(tree, { mountPoint: 'c-1' });
+    expect(webcontainer.fs.watch).toHaveBeenCalledWith('c-1', expect.any(Function));
   });
 
   it('uses the shared root for bounded file operations, process output, snapshots, and disposal', async () => {
@@ -197,7 +207,11 @@ describe('WebContainerAgentRuntime process ownership', () => {
 
     const changes = await runtime.applyWorkspaceChanges('c-1', [{ path: 'src/main.txt', content: 'updated', expectedContent: 'line one\nneedle line\nline three' }, { path: 'new.txt', content: 'new' }]);
     expect(changes[0]).toEqual({ path: 'src/main.txt', kind: 'updated', beforeBytes: 31, afterBytes: 7 });
-    expect(new TextDecoder().decode(files.get('.sunam/workspaces/c-1/new.txt'))).toBe('new');
+    expect(new TextDecoder().decode(files.get('c-1/new.txt'))).toBe('new');
+    await runtime.applyWorkspaceChanges('c-1', [{ path: '/home/workspace/c-1/absolute.txt', content: 'same root' }]);
+    expect(new TextDecoder().decode(files.get('c-1/absolute.txt'))).toBe('same root');
+    await expect(runtime.applyWorkspaceChanges('c-1', [{ path: 'home/user/parallel.txt', content: 'blocked' }])).rejects.toThrow('/home/workspace/c-1');
+    expect(files.has('c-1/home/user/parallel.txt')).toBe(false);
     await expect(runtime.applyWorkspaceChanges('c-1', [{ path: 'src/main.txt', content: 'nope', expectedContent: 'stale' }])).rejects.toThrow('Refusing to overwrite');
 
     const result = await runtime.runShell({ command: 'echo hi', mode: 'foreground', timeoutMs: 1_000, sessionId: 's-1', runId: 'r-1', containerId: 'c-1' });
@@ -209,7 +223,11 @@ describe('WebContainerAgentRuntime process ownership', () => {
     expect(await runtime.sendProcessInput(result.process.id, ownership, 'input')).toBe(false);
     expect(events).toEqual(expect.arrayContaining(['started', 'output', 'exited']));
     await runtime.flushSnapshots();
-    expect(webcontainer.export).toHaveBeenCalledWith('.sunam/workspaces/c-1', expect.objectContaining({ format: 'json', excludes: expect.arrayContaining(['node_modules/**', 'dist/**']) }));
+    expect(webcontainer.export).toHaveBeenCalledWith('c-1', expect.objectContaining({ format: 'json', excludes: expect.arrayContaining(['node_modules/**', 'dist/**']) }));
+    expect(webcontainer.spawn).toHaveBeenCalledWith('jsh', ['-c', 'echo hi'], expect.objectContaining({
+      cwd: 'c-1',
+      env: expect.objectContaining({ HOME: '/home/workspace', SUNAM_WORKSPACE: '/home/workspace/c-1', SUNAM_CONTAINER_ID: 'c-1' }),
+    }));
     expect(repository.saveSnapshot).toHaveBeenCalledWith('c-1', expect.any(Object), expect.any(Number));
     runtime.dispose();
     expect(watchers[0]?.close).toHaveBeenCalledOnce();
@@ -227,8 +245,8 @@ describe('WebContainerAgentRuntime process ownership', () => {
       { path: 'temporary.txt', content: 'must roll back' },
       { path: 'src/main.txt', content: 'must fail', expectedContent: 'line one\nneedle line\nline three' },
     ])).rejects.toThrow('disk write failed');
-    expect(files.has('.sunam/workspaces/c-1/temporary.txt')).toBe(false);
-    expect(new TextDecoder().decode(files.get('.sunam/workspaces/c-1/src/main.txt'))).toBe('line one\nneedle line\nline three');
+    expect(files.has('c-1/temporary.txt')).toBe(false);
+    expect(new TextDecoder().decode(files.get('c-1/src/main.txt'))).toBe('line one\nneedle line\nline three');
   });
 
   it('rejects duplicate paths before writing an atomic workspace batch', async () => {
@@ -256,7 +274,7 @@ describe('WebContainerAgentRuntime process ownership', () => {
     await expect(runtime.readResourceImage('s-1', 'text-resource')).rejects.toThrow('not an image resource');
     const change = await runtime.materializeResource('s-1', 'c-1', 'image-resource', 'assets/image.png');
     expect(change).toMatchObject({ path: 'assets/image.png', kind: 'created', afterBytes: 3 });
-    expect(new TextDecoder().decode(files.get('.sunam/workspaces/c-1/assets/image.png'))).toBe('png');
+    expect(new TextDecoder().decode(files.get('c-1/assets/image.png'))).toBe('png');
     expect(await runtime.getWorkspaceRevision('c-1')).toBe(1);
   });
 

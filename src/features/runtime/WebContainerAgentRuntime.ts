@@ -10,7 +10,7 @@ import type {
   RuntimeResourceDescriptor,
 } from '@/shared/contracts/agentRuntime';
 import type { RuntimePortStatus } from '@/shared/contracts/terminal';
-import { getContainerRoot } from '@/shared/lib/containerPaths';
+import { getContainerPublicPath, getContainerRoot, WEB_CONTAINER_HOME } from '@/shared/lib/containerPaths';
 import { toErrorMessage } from '@/shared/lib/errors';
 import { clipTextToTokenBudget } from '@/shared/lib/tokenEstimate';
 import { createId } from '@/shared/lib/ids';
@@ -130,7 +130,13 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
 
   async spawnUserShell(containerId: string): Promise<{ launchId: string; process: Awaited<ReturnType<WebContainer['spawn']>> }> {
     await this.ensureContainer(containerId);
-    return this.services.spawn({ source: 'terminal', containerId, command: 'jsh', cwd: getContainerRoot(containerId) });
+    return this.services.spawn({
+      source: 'terminal',
+      containerId,
+      command: 'jsh',
+      cwd: getContainerRoot(containerId),
+      env: { HOME: WEB_CONTAINER_HOME, SUNAM_WORKSPACE: getContainerPublicPath(containerId) },
+    });
   }
 
   stopUserShell(launchId: string): boolean { return this.services.stopLaunch(launchId); }
@@ -164,6 +170,7 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
       command: 'jsh',
       args: ['-c', request.command],
       cwd: getContainerRoot(request.containerId),
+      env: { HOME: WEB_CONTAINER_HOME, SUNAM_WORKSPACE: getContainerPublicPath(request.containerId) },
       processId: id,
       sessionId: request.sessionId,
       runId: request.runId,

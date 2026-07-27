@@ -106,7 +106,7 @@ class FailingVerificationRuntime extends FakeRuntime {
 }
 
 class BackgroundServerRuntime extends FakeRuntime {
-  readonly process: ProcessStatus = { id: 'server-1', sessionId: 'server-session', runId: 'server-run', containerId: 'server-container', command: 'npm run dev', isRunning: true, output: 'ready', cursor: 5 };
+  readonly process: ProcessStatus = { id: 'server-1', sessionId: 'server-session', runId: 'server-run', containerId: 'c-server-container', command: 'npm run dev', isRunning: true, output: 'ready', cursor: 5 };
   stopRunCalls = 0;
 
   override async runShell(request: ShellRunRequest): Promise<ShellRunResult> {
@@ -180,7 +180,7 @@ describe('Agent Core v2', () => {
       tool('server', 'shell_run', { command: 'npm run dev', mode: 'background' }),
       { message: { role: 'assistant', content: 'Server is running at http://localhost:3000.' }, toolCalls: [] },
     ]);
-    const engine = new AgentEngine({ sessionId: 'server-session', containerId: 'server-container', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Start the server', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+    const engine = new AgentEngine({ sessionId: 'server-session', containerId: 'c-server-container', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Start the server', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
 
     await engine.execute();
 

@@ -10,7 +10,7 @@ import { CollapsedTerminalNav, TerminalTabs } from '@/features/terminal-session/
 import { ServicesPanel } from '@/features/terminal-session/ServicesPanel';
 import { ServicePreviewOverlay } from '@/features/terminal-session/ServicePreviewOverlay';
 import type { RuntimePortStatus, TerminalLayout, TerminalTab } from '@/shared/contracts/terminal';
-import { toDisplayWorkspacePath } from '@/features/terminal-session/displayPaths';
+import { getContainerPublicPath } from '@/shared/lib/containerPaths';
 import './DualTerminal.css';
 import './DualTerminalLayout.css';
 import { AgentTerminalPanel } from '@/features/terminal-session/AgentTerminalPanel';
@@ -47,6 +47,7 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
   sessionIdRef.current = activeSessionId;
   const containerLabel = activeContainerName?.trim() || t('sidebar.newContainer');
   const containerIdentity = activeContainerId ? `${containerLabel} · ${activeContainerId.slice(-6)}` : containerLabel;
+  const publicWorkspacePath = activeContainerId ? getContainerPublicPath(activeContainerId) : '/home/workspace';
 
   useEffect(() => {
     if (runtime) onReady?.();
@@ -68,13 +69,12 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
   useEffect(() => {
     if (!runtime) return;
     return runtime.subscribe((event) => {
-      const command = toDisplayWorkspacePath(event.process.command, containerLabel);
-      const prefix = event.type === 'started' ? `\r\n[Agent process ${event.process.id}] Admin@Sunam ~ # ${command}\r\n` : event.type === 'exited' ? `\r\n[Process ${event.process.id} exited with code ${event.process.exitCode}]\r\n` : event.type === 'stopped' ? `\r\n[Process ${event.process.id} stopped]\r\n` : event.type === 'error' ? `\r\n[Process ${event.process.id} output error: ${event.chunk ?? 'unknown error'}]\r\n` : event.chunk ?? '';
+      const prefix = event.type === 'started' ? `\r\n[Agent process ${event.process.id}] Admin@Sunam ~ # ${event.process.command}\r\n` : event.type === 'exited' ? `\r\n[Process ${event.process.id} exited with code ${event.process.exitCode}]\r\n` : event.type === 'stopped' ? `\r\n[Process ${event.process.id} stopped]\r\n` : event.type === 'error' ? `\r\n[Process ${event.process.id} output error: ${event.chunk ?? 'unknown error'}]\r\n` : event.chunk ?? '';
       appendAgentTerminalBuffer(event.process.sessionId, prefix);
       if (sessionIdRef.current === event.process.sessionId && prefix) aiTermRef.current?.write(prefix);
       setProcessVersion((version) => version + 1);
     });
-  }, [containerLabel, runtime]);
+  }, [runtime]);
 
   useEffect(() => {
     if (!runtime || !activeContainerId || !isUserTermReady || !userTermRef.current) return;
@@ -92,7 +92,7 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
       let receivedOutput = false;
       void process.output.pipeTo(new WritableStream<string>({
         write(data) {
-          userTermRef.current?.write(toDisplayWorkspacePath(data, containerLabel));
+          userTermRef.current?.write(data);
           runtime?.appendUserTerminalBuffer(data);
           if (!receivedOutput) { receivedOutput = true; setIsBooted(true); }
         },
@@ -111,7 +111,7 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
       userShellWriterRef.current = null;
       onDataDisposable?.dispose();
     };
-  }, [activeContainerId, containerLabel, isUserTermReady, runtime]);
+  }, [activeContainerId, isUserTermReady, runtime]);
 
   useEffect(() => {
     if (!runtime) { setActivePorts([]); return; }
@@ -130,13 +130,13 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
 
   return <><div className="dual-terminal" data-layout={layoutState}>
     {layoutState === 'collapsed' ? <CollapsedTerminalNav activeTab={activeTab} onTabChange={onTabChange} onExpand={() => onLayoutChange?.('half')} /> : <TerminalTabs activeTab={activeTab} onTabChange={onTabChange} layoutState={layoutState} {...(onLayoutChange ? { onLayoutChange } : {})} />}
-    {layoutState !== 'collapsed' && <div className="terminal-environment-bar" title={activeContainerId ?? undefined}>{containerIdentity}<span className="terminal-environment-path">/containers/{containerLabel}</span></div>}
+    {layoutState !== 'collapsed' && <div className="terminal-environment-bar" title={activeContainerId ?? undefined}>{containerIdentity}<span className="terminal-environment-path">{publicWorkspacePath}</span></div>}
     <div className="terminal-content" data-tab={activeTab}>
       {!isBooted && activeTab !== 'services' && <div className="terminal-boot-state"><Loader2 className="lucide-spin" /><span>{t('terminal.booting')}</span></div>}
       <div className="terminal-panel" data-active={activeTab === 'ai'}><AgentTerminalPanel sessionId={activeSessionId ?? null} terminalRef={aiTermRef} /></div>
       <div className="terminal-panel" data-active={activeTab === 'user'}><TerminalView readOnly={false} onTerminalReady={(terminal) => { userTermRef.current = terminal; setIsUserTermReady(true); }} /></div>
-      <div className="terminal-panel terminal-file-panel" data-active={activeTab === 'files'}>{isBooted && <Suspense fallback={null}><FileManager wc={webcontainer} rootDir={rootDir} rootLabel={containerLabel} /></Suspense>}</div>
-      {activeTab === 'services' && <div className="terminal-panel terminal-services-panel" data-active="true"><ServicesPanel ports={activePorts} processes={processes} containerName={containerLabel} isRestarting={isRestarting} onPreview={(port, url) => setActivePreview({ port, lastUrl: url })} onStopPort={(port) => runtime?.stopPort(port) ?? Promise.resolve(false)} onForceRestart={onForceRestart} onKillProcess={(process) => { void runtime?.stopProcess(process.id, { sessionId: process.sessionId, runId: process.runId, containerId: process.containerId }); }} /></div>}
+      <div className="terminal-panel terminal-file-panel" data-active={activeTab === 'files'}>{isBooted && <Suspense fallback={null}><FileManager wc={webcontainer} rootDir={rootDir} rootLabel={publicWorkspacePath} /></Suspense>}</div>
+      {activeTab === 'services' && <div className="terminal-panel terminal-services-panel" data-active="true"><ServicesPanel ports={activePorts} processes={processes} isRestarting={isRestarting} onPreview={(port, url) => setActivePreview({ port, lastUrl: url })} onStopPort={(port) => runtime?.stopPort(port) ?? Promise.resolve(false)} onForceRestart={onForceRestart} onKillProcess={(process) => { void runtime?.stopProcess(process.id, { sessionId: process.sessionId, runId: process.runId, containerId: process.containerId }); }} /></div>}
     </div>
   </div>{activePreview && <ServicePreviewOverlay port={activePreview.port} url={previewService?.url ?? activePreview.lastUrl} isOnline={Boolean(previewService)} onDismiss={() => setActivePreview(null)} />}</>;
 };

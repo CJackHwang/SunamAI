@@ -91,6 +91,12 @@ Workspace store → load sunam-v3 workspace
 
 Workspace store 在 hydrate 前接收当前 locale 的非持久化创建默认值。首次工作区、reset、后续新会话和新容器使用创建当下的语言；持久化结构仍只保存最终字符串。历史中、英、日默认空会话由统一 helper 识别，自定义名称和已有记录不会因切换语言被改写。
 
+### 规范工作区路径
+
+WebContainer 使用真实 workdir `/home/workspace`，每个 Sunam 容器的项目根固定为 `/home/workspace/<containerId>`。`containerId` 是不可变所有权边界，容器名称只是标签；重命名不会迁移目录。文件 API 使用相对 workdir 的 `<containerId>`，Agent 提示词、终端环境栏和文件管理器展示可直接执行的规范绝对路径，不再维护 `/containers/<名称>` 一类显示别名。
+
+主 Agent、任务型子 Agent和用户终端均以 `<containerId>` 为 `cwd`，并共享 `SUNAM_WORKSPACE=/home/workspace/<containerId>`、`SUNAM_CONTAINER_ID=<containerId>`。它们的 `HOME` 统一为 `/home/workspace`，故 `jsh` 的 `.jshrc` 等运行时文件位于项目根之外。文件工具只接受相对路径或当前规范绝对路径，并在写入前拒绝 `/home/user`、旧 `.sunam/workspaces`、伪 `/containers`、其他/重复 container root 和 traversal。快照仍是按 `containerId` 保存的无根内容树，无需数据库迁移。
+
 ### 服务与端口生命周期
 
 `WebContainerAgentRuntime` 与 WebContainer 共享单例生命周期，并通过 runtime service registry 统一拥有 Agent shell、用户终端、端口事件和停止动作。每次受控启动记录 launch ID、来源、容器、进程句柄、状态和时间；Node 子进程通过 `.sunam/runtime` 下的 preload 在 `net.Server.listen` 成功后写入实际 PID/port/launch ID。该目录位于容器项目根之外，不进入工作区快照。
@@ -111,7 +117,7 @@ Agent Core 与 WebContainer 的唯一边界：
 - runtime 进程事件和只供 Agent 读取的有限用户终端缓冲；Agent 不能向用户交互 shell 注入输入。
 - runtime-owned launch/port registry、用户终端启动、managed port stop 和 snapshot-first global restart。
 
-所有根路径由 `getContainerRoot(containerId)` 生成，任何调用方都不能自行拼接或绕过路径解析。
+所有 WebContainer 相对根由 `getContainerRoot(containerId)` 生成，公开绝对根由 `getContainerPublicPath(containerId)` 生成；任何调用方都不能自行拼接、创建显示别名或绕过 `resolveContainerPath()`。
 
 ### `AgentModelClient`
 
@@ -169,4 +175,4 @@ Agent 工具批次后的 snapshot/Run/event/checkpoint 同步有独立 watchdog�
 
 ## 当前架构基线
 
-2026-07-27，架构边界检查已随本轮完整门禁通过。当前生产构建初始 JS 为 87.39 KiB gzip、总 JS 为 320.85 KiB gzip、`dist` 为 1.38 MiB；核心自动化 42 文件/224 测试，E2E 11/11、视觉 4/4、真实 WebContainer 3/3。生产依赖审计为零，剩余 8 个 high 仅来自开发期 PWA/Workbox 链，并按 [依赖策略](dependency-advisories.md) 跟踪。本轮不声明连续两次完整门禁要求的优化冻结复验。
+2026-07-27，架构边界检查已随本轮完整门禁通过。当前生产构建初始 JS 为 87.39 KiB gzip、总 JS 为 321.21 KiB gzip、`dist` 为 1.38 MiB；核心自动化 41 文件/236 测试，E2E 11/11、视觉 4/4、真实 WebContainer 3/3。生产依赖审计为零，剩余 8 个 high 仅来自开发期 PWA/Workbox 链，并按 [依赖策略](dependency-advisories.md) 跟踪。本轮不声明连续两次完整门禁要求的优化冻结复验。

@@ -43,11 +43,22 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
         body: streamResponse({ tool_calls: [
           { index: 0, id: 'plan', type: 'function', function: { name: 'update_plan', arguments: JSON.stringify({ items: [{ id: 'runtime', title: 'Runtime smoke', status: 'in_progress' }] }) } },
           ...backgroundCalls,
+          { index: 19, id: 'tree', type: 'function', function: { name: 'workspace_tree', arguments: JSON.stringify({ max_depth: 4 }) } },
+          { index: 20, id: 'write-shared', type: 'function', function: { name: 'apply_patch', arguments: JSON.stringify({ changes: [{ path: 'user-created/from-agent.txt', content: 'shared-agent-file' }] }) } },
         ] }),
       });
       return;
     }
     if (modelTurn === 2) {
+      const transcript = JSON.stringify(request.messages ?? []);
+      if (!transcript.includes('user-created/from-terminal/proof.txt')) throw new Error('Agent workspace_tree did not observe the user-terminal directory.');
+      await route.fulfill({
+        contentType: 'text/event-stream',
+        body: streamTools([{ id: 'verify-shared-root', name: 'shell_run', arguments: { command: 'pwd && node -e "const fs=require(\'fs\');const root=process.env.SUNAM_WORKSPACE;if(process.cwd()!==root||process.env.HOME!==\'/home/workspace\'||!fs.existsSync(\'user-created/from-terminal/proof.txt\')||!fs.existsSync(\'user-created/from-agent.txt\'))process.exit(1);process.stdout.write(fs.readFileSync(root+\'/user-created/from-agent.txt\',\'utf8\'))"', mode: 'foreground' } }]),
+      });
+      return;
+    }
+    if (modelTurn === 3) {
       await route.fulfill({
         contentType: 'text/event-stream',
         body: streamTools([{ id: 'plan-complete', name: 'update_plan', arguments: { items: [{ id: 'runtime', title: 'Runtime smoke', status: 'completed' }] } }]),
@@ -71,9 +82,6 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(disabledSend).toBeDisabled();
   await expect(composer).toHaveCSS('backdrop-filter', 'blur(16px)');
   await expect(disabledSend).toHaveCSS('backdrop-filter', 'blur(16px)');
-  await composer.fill('请执行完整的 WebContainer runtime smoke verification command and services test');
-  await composer.press('Enter');
-
   await page.getByRole('button', { name: '终端' }).click();
   await page.locator('.terminal-layout-actions .terminal-icon-btn').last().click();
   const rightNavigation = page.locator('.collapsed-terminal-nav');
@@ -82,11 +90,46 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await rightNavigation.getByTitle('终端').click();
   await expect(page.locator('.terminal-environment-dot')).toHaveCount(0);
   const terminalRows = page.locator('.xterm-rows').nth(1);
-  await expect(terminalRows).toContainText('/containers/新容器');
   await expect(terminalRows).not.toContainText(/\.sunam\/workspaces\/c-/);
-  await expect(terminalRows).not.toContainText('//containers');
+  await expect(page.locator('.terminal-environment-path')).toContainText(/\/home\/workspace\/c-[a-z0-9_-]+/);
 
-  await page.getByRole('button', { name: '服务' }).click();
+  const terminalInput = page.locator('.terminal-panel[data-active="true"] .xterm-helper-textarea');
+  await terminalInput.focus();
+  await terminalInput.pressSequentially('mkdir -p user-created/from-terminal && echo terminal > user-created/from-terminal/proof.txt && pwd && ls user-created/from-terminal');
+  await terminalInput.press('Enter');
+  await expect(terminalRows).toContainText(/\/home\/workspace\/c-[a-z0-9_-]+/);
+  await expect(terminalRows).toContainText('proof.txt');
+
+  await composer.fill('请执行完整的 WebContainer runtime smoke verification command and services test');
+  await composer.press('Enter');
+  await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph')
+    .filter({ hasText: /^Runtime smoke complete$/ }))
+    .toHaveCount(1, { timeout: 100_000 });
+
+  await terminalInput.focus();
+  await terminalInput.pressSequentially('cat user-created/from-agent.txt');
+  await terminalInput.press('Enter');
+  await expect(terminalRows).toContainText('shared-agent-file');
+
+  await page.locator('.dual-terminal-tabs').getByRole('button', { name: '文件' }).click();
+  await expect(page.locator('.fm-breadcrumb')).toContainText(/\/home\/workspace\/c-[a-z0-9_-]+/);
+  await expect(page.locator('.fm-item-name').filter({ hasText: /^user-created$/ })).toBeVisible();
+  await expect(page.locator('.fm-item-name').filter({ hasText: /^\.jshrc$/ })).toHaveCount(0);
+
+  const canonicalPath = (await page.locator('.terminal-environment-path').textContent())?.trim() ?? '';
+  await page.getByTitle('Expand Sidebar').click();
+  const containers = page.locator('.sidebar-section').filter({ hasText: '容器' });
+  const activeContainer = containers.locator('.sidebar-item.active');
+  await activeContainer.locator('.item-action').click();
+  await page.getByRole('button', { name: '重命名' }).click();
+  await containers.locator('.sidebar-item-input').fill('Runtime renamed container');
+  await containers.locator('.sidebar-item-input').press('Enter');
+  await expect(activeContainer).toContainText('Runtime renamed container');
+  await expect(page.locator('.terminal-environment-path')).toHaveText(canonicalPath);
+  await expect(page.locator('.fm-breadcrumb')).toContainText(canonicalPath);
+  await expect(page.locator('.fm-item-name').filter({ hasText: /^user-created$/ })).toBeVisible();
+
+  await page.locator('.dual-terminal-tabs').getByRole('button', { name: '服务' }).click();
   const services = page.locator('.services-panel');
   const processList = page.locator('.services-process-list');
   await expect(services.getByText('端口 3457')).toBeVisible();
@@ -95,9 +138,6 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(services).toHaveCSS('overflow', 'hidden');
   await expect(processList).toHaveCSS('overflow-y', 'auto');
   await expect(page.locator('.service-process-command').first()).not.toContainText('.sunam/workspaces');
-  await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph')
-    .filter({ hasText: /^Runtime smoke complete$/ }))
-    .toHaveCount(1, { timeout: 100_000 });
 
   await services.getByRole('button', { name: '预览端口 3457' }).click();
   const preview = page.getByRole('dialog', { name: '端口 3457 实时预览' });

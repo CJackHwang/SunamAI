@@ -62,10 +62,13 @@ describe('AgentToolRegistry', () => {
     expect(prompt).toContain('Use `explore` for independent read-only investigation and `task` for work that may edit files');
     expect(prompt).toContain('issue every `spawn_subagent` call before `wait_subagents`');
     expect(prompt).toContain('Each `wait_subagents` call returns one completed child report');
+    expect(prompt).toContain('real root `/home/workspace/c-1`');
+    expect(prompt).toContain('A relative directory such as `story-project` is created directly under the shared root');
 
     const childPrompt = buildAgentSystemPrompt({ containerId: 'c-1', task: getTask(), chaos: createChaosContract('Sunam 6.9 Pron'), summary: '', agentRole: 'task' });
     expect(childPrompt).toContain('Verification does not gate child completion');
     expect(childPrompt).toContain('child-local plan');
+    expect(childPrompt).toContain('/home/workspace/c-1');
     expect(childPrompt).not.toContain('After making changes, you MUST use `shell_run`');
   });
 

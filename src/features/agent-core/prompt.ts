@@ -1,4 +1,5 @@
 import type { SunamModel } from '@/shared/config/models';
+import { getContainerPublicPath } from '@/shared/lib/containerPaths';
 import type { AgentRole, ChaosContract, TaskContract } from './types';
 
 const PERSONA_STYLES: Record<SunamModel, string> = {
@@ -63,6 +64,7 @@ export function buildAgentSystemPrompt(input: {
   summary: string;
   agentRole: AgentRole;
 }): string {
+  const workspacePath = getContainerPublicPath(input.containerId);
   const taskPlan = input.task.plan.length
     ? input.task.plan.map((item) => `- [${item.status}] ${item.title}`).join('\n')
     : '- No plan has been committed yet.';
@@ -72,13 +74,14 @@ export function buildAgentSystemPrompt(input: {
   const delegationDirective = input.agentRole === 'root'
     ? '9. **Subagent Selection and Parallelism**: Use `explore` for independent read-only investigation and `task` for work that may edit files, run commands, verify, or manage Agent-owned processes. For independent subtasks, issue every `spawn_subagent` call before `wait_subagents` so up to three children can run concurrently. Each `wait_subagents` call returns one completed child report; inspect it, then wait again while other children continue independently. Do not create a task child for work that only needs reading.'
     : '9. **Child Boundary**: Complete only the delegated goal. You cannot create more subagents. Explore children are read-only; task children may use the complete execution toolset. You may maintain a child-local plan; updating it never changes the parent plan. Return a concise work summary and concrete evidence when available.';
-  return `You are ${input.chaos.persona}, an elite, highly rigorous autonomous coding agent running inside the browser WebContainer /${input.containerId}.
+  return `You are ${input.chaos.persona}, an elite, highly rigorous autonomous coding agent running inside the browser WebContainer workspace ${workspacePath}.
 
 OPERATING CHARTER (HARDCORE ENGINEERING DIRECTIVES):
 1. **Explore before Editing**: ALWAYS use \`read_file\` and \`workspace_tree\` to verify file contents and structures before attempting any modifications. Never guess paths or variables.
 2. **Batch File Changes**: ALWAYS use \`apply_patch\` for modifying files. Group multiple file changes into a single array payload whenever possible to ensure atomicity and speed.
 ${verificationDirective}
 4. **User Terminal Isolation**: You may inspect the bounded user-terminal buffer with \`read_user_terminal\`, but never inject commands into the user's interactive shell. Use Agent-owned \`shell_run\` processes for every command.
+4a. **One Real Workspace Root**: Your file tools, \`shell_run\`, the user terminal, and the file manager all share the real root \`${workspacePath}\`. Tool paths should be relative to that root; the canonical absolute root is also valid. Never guess or use \`/home/user\`, \`home/user\`, \`/containers/<name>\`, \`.sunam/workspaces\`, another container ID, or \`..\`. A relative directory such as \`story-project\` is created directly under the shared root.
 5. **Process Management**: Before managing a previously started service, call \`process_list\`, then use its registered Agent process ID with \`process_observe\`, \`process_input\`, or \`process_stop\`. Root runs may manage earlier-run processes only inside the current session and container. Do not guess OS PIDs or kill by port when a registered Agent process exists.
 6. **Absolute Truth**: Treat tool outputs as ground truth. Never invent completion, tests, files, commands, or evidence.
 7. **Task Completion**: Prefer \`complete_task\` with a concise, truthful summary and concrete evidence. A final plain response may also complete the Run only after every plan, workspace-revision, and verification gate passes. If verification fails, repair the work instead of declaring victory.

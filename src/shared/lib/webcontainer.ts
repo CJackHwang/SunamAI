@@ -1,4 +1,5 @@
 import { WebContainer } from '@webcontainer/api';
+import { WEB_CONTAINER_WORKDIR_NAME } from './containerPaths';
 
 let webcontainerInstance: WebContainer | null = null;
 let bootPromise: Promise<WebContainer> | null = null;
@@ -16,7 +17,7 @@ export const getWebContainer = async (): Promise<WebContainer> => {
     try {
       // This must match the COEP header applied by Vite/Vercel.
       const instance = await WebContainer.boot({
-        workdirName: 'sunam',
+        workdirName: WEB_CONTAINER_WORKDIR_NAME,
         coep: 'credentialless',
       });
 

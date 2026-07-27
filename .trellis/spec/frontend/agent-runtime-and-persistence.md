@@ -119,6 +119,17 @@ interface ShellRunRequest {
 }
 ```
 
+Workspace paths and managed shell environments are owned by one shared module:
+
+```ts
+const WEB_CONTAINER_WORKDIR_NAME = 'workspace';
+const WEB_CONTAINER_HOME = '/home/workspace';
+
+getContainerRoot(containerId: string): string;       // c-<id>, for WebContainer APIs
+getContainerPublicPath(containerId: string): string; // /home/workspace/c-<id>
+resolveContainerPath(containerId: string, inputPath?: string): string;
+```
+
 The concrete WebContainer runtime also owns the terminal/service projection boundary. These handles remain runtime-only and are not added to `AgentWorkspaceRuntime` merely for React convenience:
 
 ```ts
@@ -233,6 +244,14 @@ function evaluateCompletionGate(input: {
 - Images must pass signature sniffing and browser decode/dimension validation. The model copy is at most 2048 px on the longest edge and 1.5 MiB; the original remains materializable.
 - Vision fallback is allowed only for a clear unsupported-content signal: HTTP 415, or 400/422 text that identifies vision/image/multimodal/content-part support. Unrelated 4xx errors propagate.
 
+#### Workspace namespace and shell environment
+
+- WebContainer boots with `workdirName: 'workspace'`, so its real home is `/home/workspace`. Every project root is the immutable `/home/workspace/<containerId>`; the mutable container name is a label only.
+- WebContainer filesystem APIs use `getContainerRoot(containerId)` (`<containerId>` relative to the workdir). Prompts, diagnostics, terminal UI, and FileManager use `getContainerPublicPath(containerId)`. Live output is never rewritten to a display-only path.
+- Agent, task-child, and user shells receive identical `cwd=<containerId>`, `HOME=/home/workspace`, `SUNAM_WORKSPACE=/home/workspace/<containerId>`, and `SUNAM_CONTAINER_ID=<containerId>`. `HOME` is deliberately outside the project so shell startup files such as `.jshrc` cannot pollute snapshots or user-visible project files.
+- File tools accept only a project-relative path or the active canonical absolute root/path. They reject `/home/user`, relative `home/user`, old `.sunam/workspaces`, fake `/containers`, sibling/repeated container roots, backslashes, NUL, empty segments, dot segments, and traversal before any write.
+- Snapshot mount/export/watch, resource materialization, FileManager navigation, revision watching, and process `cwd` all consume the same container-relative root. Snapshot payloads remain rootless trees keyed by `containerId`; `.sunam/runtime` stays under the shared workdir and outside every project export.
+
 #### Mutation, revision, and verification
 
 - All `apply_patch`, `materialize_resource`, and `shell_run` operations use the container mutation lease.
@@ -306,6 +325,9 @@ function evaluateCompletionGate(input: {
 
 | Condition | Required behavior |
 | --- | --- |
+| File tool receives the active `/home/workspace/<containerId>/...` path | Normalize to the same WebContainer-relative project path; do not create a nested `home/workspace` tree. |
+| File tool receives `/home/user`, `.sunam/workspaces`, `/containers`, a sibling/repeated container root, or traversal | Reject before reading/writing and include the active canonical root in the error. |
+| Managed shell starts in a project | Use project `cwd`/`SUNAM_WORKSPACE`, shared `HOME=/home/workspace`, and the same environment for Agent and user shells; `.jshrc` must not appear in the project root. |
 | Unknown model | Use conservative 32k profile; do not assume Claude/GPT constants. |
 | SSE delta has `content: null` and string `reasoning_content` | Accept the frame, normalize null content to no-op, and accumulate/persist the reasoning string. |
 | Optional provider content/reasoning field is non-null and non-string | Reject or ignore the malformed frame at the validated adapter boundary; never cast it into `Message`. |
@@ -356,6 +378,7 @@ function evaluateCompletionGate(input: {
 - Good: A root spawns independent explore and task children before waiting; all three reason concurrently, task mutation calls cross the shared lease one at a time, and completed task notifications carry current-revision verification evidence for root synthesis.
 - Good provider edge: `spawn_subagent` publishes one object root with a two-value role enum while `superRefine` still rejects an explore write scope at execution time.
 - Good runtime edge: A root starts an owned background server, completes any required plan, returns one plain final response, and finishes without stopping the process or demanding unrelated workspace verification.
+- Good workspace edge: The user terminal creates `folder/file.txt` from `/home/workspace/c-1`; Agent `workspace_tree`, Agent shell, FileManager, and snapshot export all observe that exact project entry, while shell startup files remain outside `c-1`.
 - Good lifecycle edge: A later root Run calls `process_list`, selects the registered service from the same session/container, stops it with its original ownership, observes the port/process disappear, and returns one final response.
 - Good service edge: A Node server started from the user terminal inherits a terminal launch ID, reports its exact listener PID, appears as managed, and the port-row stop button terminates that PID without killing unrelated ports.
 - Good recovery edge: An old unowned port becomes orphaned; the user confirms the global impact; snapshots flush successfully before teardown and the replacement runtime boots with an empty port registry.
@@ -370,6 +393,7 @@ function evaluateCompletionGate(input: {
 - Bad: A component stores an uploaded `File` in a message event, a provider branch is added inside `AgentEngine`, a function tool publishes a union-root parameter schema, two writers mutate the same container outside the lease, or resume trusts `TaskContract.workspaceRevision` without reading runtime state.
 - Bad lifecycle edge: A follow-up Run guesses an OS PID, kills by port, or receives processes from another session/container instead of resolving a registered Agent process ID.
 - Bad service edge: `DualTerminal` creates its own WebContainer port listeners or directly spawns `jsh`, producing a service list with no launch ownership.
+- Bad workspace edge: UI shows `/containers/name`, Agent writes relative `home/user/project`, or `HOME` points to `/home/workspace/c-1`; these create an unreachable parallel tree or leak `.jshrc` into the project.
 - Bad recovery edge: A force-restart button tears down first and attempts snapshot persistence afterwards, or hides snapshot failure and reports success.
 - Bad watchdog edge: A Run-wide timer only aborts model requests while `reflectTask()` awaits an unbounded snapshot/IndexedDB promise.
 - Bad provider edge: A strict string-only object schema silently drops an entire valid reasoning delta because an optional sibling field is null.
@@ -384,7 +408,7 @@ function evaluateCompletionGate(input: {
 | Context/profile/token logic | Complete tool grouping; media stripping; micro-compaction safety; PTL three-attempt bound; abort; deterministic circuit; one oversized round ends inside effective window; task/resource/file/subagent rehydration. |
 | Model adapter | Exact outbound content parts; nullable content/reasoning delta normalization; final plain-message reasoning preservation; resource session ownership; usage mapping/estimation; successful vision caching; clear unsupported-vision retry; unrelated 400/422 does not retry. |
 | Resources | Count/size limits including existing IDs; atomic batch failure; same-session SHA dedupe; cross-session rejection; MIME spoof; invalid UTF-8; image 2048/1.5 MiB limits; Blob absent from ledger. |
-| Runtime/revision | Every mutation path advances authoritative revision; verification binds after shell exit; process ownership isolation; same-session/container cross-Run list/observe/input/stop; explicit-stop single revision boundary; launch/listener order reconciliation; exact listener PID provenance; managed/orphan/stopping transitions; snapshot-first restart fail-closed; singleton remount; materialize; snapshot pre-export exclusions; `pagehide`/dispose/checkpoint flush. |
+| Runtime/revision | Canonical relative/absolute path normalization and legacy/foreign/traversal rejection; identical Agent/user `cwd`, `HOME`, `SUNAM_WORKSPACE`, and container ID; real WebContainer round-trip from user terminal write to Agent tools/shell and Agent write to user terminal/FileManager; no project `.jshrc`; every mutation path advances authoritative revision; verification binds after shell exit; process ownership isolation; same-session/container cross-Run list/observe/input/stop; explicit-stop single revision boundary; launch/listener order reconciliation; exact listener PID provenance; managed/orphan/stopping transitions; snapshot-first restart fail-closed; singleton remount; materialize; snapshot pre-export exclusions; `pagehide`/dispose/checkpoint flush. |
 | Completion | Explicit and plain responses share plan/revision gates; current-revision verification gates root but not any depth-one role; optional child verification stays truthful evidence; actionable no-whitelist root recovery guidance; arbitrary foreground checks/ports; failed-exit invalidation; rejected drafts are not projected; background server completion keeps the process alive; hanging post-tool synchronization becomes visibly failed and cancellation remains terminal. |
 | Persistence | One checkpoint/Run; stable 250-event session and Run pagination; deep quarantine; sanitizer; session/container transaction scope; atomic child deletion/pruning; shared-resource survival; snapshot cap keeps previous value; failed active snapshot still permits queued follow-up. |
 | Subagents | Object-root published tool schema; depth/count/three-way mixed-role concurrency; `explore | task` execution validation; complete non-delegating task tools; legacy-role reads; global same-container mutation serialization; write-scope rules; repeated task labels; exact root-to-child budget inheritance; exhausted root/sibling counters do not affect child completion; one-at-a-time unreported notification delivery; sibling state remains active after another child completes; structured completion fields; child failure/verification propagation; isolated single-child stop/delete; parent cancellation waits and stops owned processes. |
@@ -567,6 +591,26 @@ const deltaSchema = z.object({
 });
 ```
 
+#### Wrong: alias paths and use the project as shell home
+
+```ts
+const cwd = `.sunam/workspaces/${containerId}`;
+const displayPath = `/containers/${containerName}`;
+const env = { HOME: `/home/workspace/${containerId}` };
+```
+
+#### Correct: expose one real project path and keep runtime home outside it
+
+```ts
+const cwd = getContainerRoot(containerId);
+const project = getContainerPublicPath(containerId);
+const env = {
+  HOME: WEB_CONTAINER_HOME,
+  SUNAM_WORKSPACE: project,
+  SUNAM_CONTAINER_ID: containerId,
+};
+```
+
 ## Persistent design decisions
 
 - Reliability and recoverability take priority over bundle cosmetics. Bundle work remains gated, but it cannot weaken validation, durable truth, or cancellation.
@@ -574,6 +618,7 @@ const deltaSchema = z.object({
 - `sunam-v3` is an intentional clean-workspace boundary. Old v2 work data is preserved but not imported.
 - Images and text are first-class resources; arbitrary binaries may persist/materialize only. New directly consumable types extend `ResourceProcessorRegistry`, not `AgentEngine`.
 - The first subagent runtime supports coordinator + ordinary child Runs. Team/mailbox/recursive swarm and unleased parallel mutations remain out of scope until measured evidence justifies them.
+- `/home/workspace/<containerId>` is the only executable project namespace. Runtime `HOME=/home/workspace` is shared intentionally; container labels and UI aliases never participate in path resolution.
 
 ## References
 

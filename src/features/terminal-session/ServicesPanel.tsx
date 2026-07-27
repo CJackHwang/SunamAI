@@ -4,14 +4,12 @@ import { useI18n } from '@/shared/i18n';
 import type { ProcessStatus } from '@/shared/contracts/agentRuntime';
 import type { RuntimePortStatus } from '@/shared/contracts/terminal';
 import { toErrorMessage } from '@/shared/lib/errors';
-import { toDisplayWorkspacePath } from './displayPaths';
 import { EmptyState, ErrorState } from '@/shared/ui/AsyncState';
 import './ServicesPanel.css';
 
 interface ServicePanelProps {
   ports: RuntimePortStatus[];
   processes: ProcessStatus[];
-  containerName: string;
   isRestarting: boolean;
   onPreview: (port: number, url: string) => void;
   onStopPort: (port: number) => Promise<boolean>;
@@ -19,7 +17,7 @@ interface ServicePanelProps {
   onKillProcess: (process: ProcessStatus) => void;
 }
 
-export function ServicesPanel({ ports, processes, containerName, isRestarting, onPreview, onStopPort, onForceRestart, onKillProcess }: ServicePanelProps) {
+export function ServicesPanel({ ports, processes, isRestarting, onPreview, onStopPort, onForceRestart, onKillProcess }: ServicePanelProps) {
   const { t, format } = useI18n();
   const [copiedPort, setCopiedPort] = useState<number | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
@@ -104,7 +102,7 @@ export function ServicesPanel({ ports, processes, containerName, isRestarting, o
         : processes.map((process) => <div className="service-row list-row service-process-row" key={process.id}>
           <div className="service-process-details">
             <span className="service-process-id">{process.id}</span>
-            <span className="service-process-command" title={`$ ${toDisplayWorkspacePath(process.command, containerName)}`}>$ {toDisplayWorkspacePath(process.command, containerName)}</span>
+            <span className="service-process-command" title={`$ ${process.command}`}>$ {process.command}</span>
           </div>
           <button className="icon-button icon-button-danger" onClick={() => onKillProcess(process)} title={t('services.kill')} aria-label={`${t('services.kill')} ${process.id}`}><StopCircle size={18} /></button>
         </div>)}</div>

@@ -64,6 +64,14 @@
 - [x] 来源失联端口的全局重启先 flush 全部快照；快照失败时不 teardown，错误可见。
 - [x] 真实 WebContainer 测试按 active containerId 读取 IndexedDB snapshot，并检查 revision/fileCount/byteSize。
 
+### 4.1 真实工作区路径
+
+- [x] WebContainer workdir 为 `/home/workspace`，容器项目根固定为 `/home/workspace/<containerId>`；容器重命名不改变路径。
+- [x] Agent、子 Agent、用户终端、FileManager、资源物化、watch 和 snapshot mount/export 使用同一 container root，不存在 `/containers/<名称>` 展示别名。
+- [x] Agent 与用户 shell 的 `cwd`/`SUNAM_WORKSPACE` 指向项目根，`HOME` 统一为 `/home/workspace`；项目根不会生成 `.jshrc`。
+- [x] 文件工具接受当前规范绝对路径并拒绝 `/home/user`、旧 `.sunam/workspaces`、伪 `/containers`、其他/重复 root、反斜线、NUL 与 traversal，失败前不产生平行目录。
+- [x] 真实 WebContainer 回归覆盖“用户终端写入 -> Agent tree/shell 读取 -> Agent 写入 -> 用户终端/FileManager 读取”的双向链路。
+
 ## 5. 资源与多模态
 
 - [x] UI 与 ResourceProcessor 核心都执行 8 文件、2/10/20 MiB 和 50 MiB 限制；持久化 resource ID 同样计数计量，整批原子失败。
@@ -130,7 +138,7 @@ E2E：配置门禁、设置与 session/container CRUD、图片视觉 fallback、
 
 Visual：配置页与资源卡/子任务树，桌面 1440×900、移动 390×844，差异 0.2%。新增截图必须先用匹配版本 Chromium 更新基线，再运行一次不带 update 的验证。
 
-Runtime：真实 WebContainer launch/PID/端口登记、服务面板手动停止、资源 materialize、快照导出排除、父取消级联到 task child 和 PID 清理。
+Runtime：真实 WebContainer launch/PID/端口登记、服务面板手动停止、规范工作区双向文件可见性与无 `.jshrc` 污染、资源 materialize、快照导出排除、父取消级联到 task child 和 PID 清理。
 
 ## 9. 依赖与资产
 
@@ -148,11 +156,11 @@ Runtime：真实 WebContainer launch/PID/端口登记、服务面板手动停止
 ## 11. 当前工作区验证记录（2026-07-27）
 
 - 功能门禁状态：**通过**。最终代码状态下 `npm run check:all` 完整通过一次，包含 `npm run check`、E2E、visual、runtime 和 production audit；本轮不声明需要连续两次的优化冻结复验。
-- 核心自动化：42 个测试文件、224 个测试全绿。
-- 覆盖率：statements 90.86%、branches 83.02%、functions 90.04%、lines 95.18%。
-- 包体：初始 87.39 KiB gzip、总 JS 320.85 KiB gzip、dist 1.38 MiB；未配置首屏不加载 Agent Core/WebContainer，总 JS 门槛为 350 KiB gzip。
+- 核心自动化：41 个测试文件、236 个测试全绿。
+- 覆盖率：statements 90.93%、branches 83.22%、functions 89.94%、lines 95.31%。
+- 包体：初始 87.39 KiB gzip、总 JS 321.21 KiB gzip、dist 1.38 MiB；未配置首屏不加载 Agent Core/WebContainer，总 JS 门槛为 350 KiB gzip。
 - Playwright 实际执行结果：E2E 11/11、visual 4/4、runtime 3/3；父子 transcript 隔离、object-root 子 Agent schema、状态槽几何、单 child 停止/删除、旧终态 child 清理和桌面/移动折叠视觉均已验证。
-- Runtime 证据包括：桌面切换到移动端后 Agent 后台进程和端口保持；资源 materialize 后 snapshot 仅保留源数据并排除 `node_modules`/dist；父取消会级联停止 task 子任务进程。
+- Runtime 证据包括：用户终端与 Agent 双向读写同一规范根、容器重命名不改变路径或文件、项目根无 `.jshrc`；桌面切换到移动端后 Agent 后台进程和端口保持；资源 materialize 后 snapshot 仅保留源数据并排除 `node_modules`/dist；父取消会级联停止 task 子任务进程。
 - `npm run check:audit` 返回 `found 0 vulnerabilities`。完整 development audit 仍有 8 个 high，全部属于 `vite-plugin-pwa@1.3.0` / `workbox-build@7.4.1` 构建链；不兼容 Vite 8 的 1.2.0 降级不作为修复，详见 [依赖策略](dependency-advisories.md)。
 - 字体已转换并只保留 WOFF2：normal 400/500/600/700 与 italic 400；README 头图已移出 `public`，无效生产图标和 PWA asset 声明已删除。
 
