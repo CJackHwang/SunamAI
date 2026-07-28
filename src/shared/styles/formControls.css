@@ -4,12 +4,13 @@
   align-items: center;
   justify-content: center;
   padding: 12px 20px;
+  min-height: 44px;
   line-height: normal;
   border-radius: var(--radius-medium);
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  transition: opacity var(--motion-fast) ease, background-color var(--motion-fast) ease, color var(--motion-fast) ease, border-color var(--motion-fast) ease, transform var(--motion-fast) var(--motion-snappy);
+  transition: opacity var(--motion-fast) ease, background-color var(--motion-fast) ease, color var(--motion-fast) ease, border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease, scale var(--motion-fast) var(--motion-snappy);
   border: none;
 }
 
@@ -19,19 +20,21 @@
 }
 
 .btn-primary:hover:not(:disabled) {
-  opacity: 0.9;
+  background-color: color-mix(in srgb, var(--color-black) 88%, white);
 }
 
 .btn-primary:disabled {
   background-color: var(--color-border);
   color: var(--color-text-secondary);
   cursor: not-allowed;
+  opacity: .72;
 }
 
 .btn-secondary {
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
   color: var(--color-text);
+  box-shadow: var(--elevation-1);
 }
 
 .btn-secondary:hover {
@@ -39,6 +42,7 @@
 }
 
 .input-field {
+  min-height: 44px;
   padding: 12px 16px;
   line-height: normal;
   border-radius: var(--radius-medium);
@@ -50,6 +54,11 @@
 }
 
 .input-field:focus {
-  border-color: var(--color-black);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-black) 8%, transparent);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+.input-field:disabled {
+  opacity: .58;
+  cursor: not-allowed;
 }

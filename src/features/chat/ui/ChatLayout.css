@@ -1,4 +1,5 @@
 .chat-composer-shell {
+  --chat-inline-gutter: max(24px, calc((100% - var(--chat-content-max)) / 2));
   position: absolute;
   right: 0;
   bottom: 0;
@@ -7,12 +8,13 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 10px;
-  padding: 12px 24px;
+  padding: 12px var(--chat-inline-gutter);
   pointer-events: none;
   z-index: 5;
 }
 
 .subagent-footer {
+  --chat-inline-gutter: max(24px, calc((100% - var(--chat-content-max)) / 2));
   position: absolute;
   right: 0;
   bottom: 0;
@@ -20,7 +22,7 @@
   display: flex;
   align-items: flex-end;
   min-height: 68px;
-  padding: 12px 24px;
+  padding: 12px var(--chat-inline-gutter);
   z-index: 5;
   pointer-events: none;
 }
@@ -33,10 +35,10 @@
 
 .subagent-action {
   position: absolute;
-  right: 24px;
+  right: var(--chat-inline-gutter);
   bottom: 12px;
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   padding: 0;
   pointer-events: auto;
   border-radius: 50%;
@@ -61,27 +63,27 @@
 
 .chat-attach-btn {
   position: absolute;
-  right: 24px;
-  bottom: 68px;
+  right: var(--chat-inline-gutter);
+  bottom: 70px;
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   padding: 0;
-  flex: 0 0 44px;
+  flex: 0 0 46px;
   border-radius: 50%;
   color: var(--color-text);
 }
 
 .chat-scroll-bottom-btn {
   position: absolute;
-  right: 24px;
-  bottom: 124px;
+  right: var(--chat-inline-gutter);
+  bottom: 128px;
   z-index: 1;
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   padding: 0;
   pointer-events: auto;
   border-radius: 50%;
@@ -115,10 +117,11 @@
   padding: 6px 8px;
   flex: 0 0 auto;
   border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
-  border-radius: 12px;
-  background-color: color-mix(in srgb, var(--color-surface) 70%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  border-radius: var(--radius-medium);
+  background-color: var(--material-regular);
+  box-shadow: var(--elevation-1);
+  backdrop-filter: blur(var(--material-blur)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--material-blur)) saturate(160%);
   font-size: 12px;
 }
 
@@ -160,7 +163,7 @@
   padding: 4px 7px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 8px;
+  border-radius: var(--radius-small);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -199,8 +202,23 @@
   width: 100%;
   pointer-events: auto;
   color: var(--color-text);
-  border-radius: 22px;
+  border-radius: var(--radius-large);
   overflow: hidden;
+}
+
+@media (max-width: 520px) {
+  .chat-composer-shell,
+  .subagent-footer {
+    --chat-inline-gutter: 12px;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .chat-attachment-chip {
+    background-color: var(--color-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 
 .task-list-summary {
@@ -296,12 +314,14 @@
 }
 
 .task-list-note summary,
-.task-list-subagent summary {
+.task-list-subagent summary,
+.task-list-tools summary {
   list-style: none;
 }
 
 .task-list-note summary::-webkit-details-marker,
-.task-list-subagent summary::-webkit-details-marker {
+.task-list-subagent summary::-webkit-details-marker,
+.task-list-tools summary::-webkit-details-marker {
   display: none;
 }
 
@@ -335,7 +355,7 @@
   align-items: center;
   gap: 7px;
   padding: 7px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-small);
   background: color-mix(in srgb, var(--color-bg) 78%, transparent);
   color: var(--color-text-secondary);
 }
@@ -345,7 +365,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 8px;
-  border-radius: 12px;
+  border-radius: var(--radius-medium);
   background: color-mix(in srgb, var(--color-bg) 82%, transparent);
 }
 
@@ -416,7 +436,14 @@
   font: 11px/1.45 var(--font-mono);
 }
 
+.task-list-tools {
+  overflow: clip;
+}
+
 .task-list-tools summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   cursor: pointer;
   color: var(--color-text-secondary);
 }

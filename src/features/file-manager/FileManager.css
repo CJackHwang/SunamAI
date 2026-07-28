@@ -3,7 +3,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background-color: var(--color-bg);
+  background-color: var(--color-surface);
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
@@ -15,8 +15,8 @@
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--color-border);
-  background-color: var(--color-surface);
+  border-bottom: 1px solid var(--color-separator);
+  background-color: var(--material-thick);
   flex-shrink: 0;
 }
 
@@ -74,7 +74,7 @@
   font-weight: 500;
   color: var(--color-text-secondary);
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-small);
   white-space: nowrap;
   flex-shrink: 0;
   transition: color var(--motion-fast) ease, background-color var(--motion-fast) ease;
@@ -130,7 +130,7 @@
   padding: 10px 12px;
   border-radius: var(--radius-medium);
   cursor: pointer;
-  transition: background-color var(--motion-fast) ease, transform var(--motion-fast) var(--motion-snappy);
+  transition: background-color var(--motion-fast) ease, scale var(--motion-fast) var(--motion-snappy);
   position: relative;
   min-height: 48px; /* Touch target minimum */
 }
@@ -144,7 +144,7 @@
 }
 
 .fm-item.selected {
-  background-color: rgba(0, 0, 0, 0.06);
+  background-color: color-mix(in srgb, var(--color-black) 8%, transparent);
 }
 
 .fm-item.drag-over {
@@ -158,7 +158,7 @@
 .fm-parent-icon { color: var(--color-text-secondary); }
 
 .fm-touch-dragging { touch-action: none; }
-.fm-touch-drag-preview { position: fixed; z-index: 1400; display: flex; max-width: min(260px, calc(100vw - 24px)); align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid var(--color-border); border-radius: 12px; background: color-mix(in srgb, var(--color-surface) 92%, transparent); box-shadow: 0 8px 24px rgb(0 0 0 / 16%); color: var(--color-text); font-size: 13px; pointer-events: none; transform: translate(-50%, calc(-100% - 14px)); }
+.fm-touch-drag-preview { position: fixed; z-index: 1400; display: flex; max-width: min(260px, calc(100vw - 24px)); align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-medium); background: color-mix(in srgb, var(--color-surface) 92%, transparent); box-shadow: 0 8px 24px rgb(0 0 0 / 16%); color: var(--color-text); font-size: 13px; pointer-events: none; transform: translate(-50%, calc(-100% - 14px)); }
 .fm-touch-drag-preview svg { flex: 0 0 auto; }
 .fm-touch-drag-preview span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -309,8 +309,10 @@
 }
 
 .fm-new-item { display: flex; align-items: center; gap: 8px; padding: 4px 12px; }
-.fm-new-item-input { height: 36px; min-width: 0; flex: 1; padding: 0 12px; }
-.fm-new-item-action { height: 36px; padding: 0 16px; }
+.fm-new-item-input { height: 36px; min-width: 0; min-height: 36px; flex: 1; padding: 0 12px; border-radius: var(--radius-medium); }
+.fm-new-item-action { width: 36px; height: 36px; min-height: 36px; flex: 0 0 36px; padding: 0; border-radius: 50%; box-shadow: none; }
+.fm-new-item-action-icon { display: block; }
+.fm-new-item-action-label { display: none; }
 .fm-empty-hint { font-size: 12px; }
 .fm-rename-input { height: 32px; min-width: 0; flex: 1; padding: 0 10px; }
 .fm-item-menu { display: flex; width: 32px; height: 32px; opacity: 0; transform: translateX(4px) scale(.94); pointer-events: none; transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--motion-spring); }
@@ -357,6 +359,13 @@
   }
 
   .fm-item-menu { opacity: 1; transform: none; pointer-events: auto; }
+
+  .fm-new-item { gap: 6px; padding: 6px 10px; }
+  .fm-new-item-input {
+    height: 44px;
+    min-height: 44px;
+  }
+  .fm-new-item-action { width: 44px; height: 44px; min-height: 44px; flex: 0 0 44px; padding: 0; border-radius: 50%; }
 
 
 

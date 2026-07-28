@@ -8,7 +8,9 @@
 }
 
 .context-overlay.dimmed {
-  background-color: rgba(0, 0, 0, 0.4);
+  background-color: rgb(0 0 0 / 28%);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
 }
 
 .context-overlay.is-exiting {
@@ -19,17 +21,19 @@
 .context-menu,
 .avatar-menu {
   position: fixed;
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-medium);
+  background-color: var(--material-thick);
+  border: 1px solid color-mix(in srgb, var(--color-border) 82%, white);
+  border-radius: var(--radius-large);
   box-shadow: var(--elevation-4);
   padding: 8px;
   min-width: 180px;
   z-index: 1001;
   transform-origin: top left;
-  animation: context-menu-in var(--motion-base) var(--motion-spring);
+  animation: context-menu-in var(--motion-base) var(--motion-ease);
   display: flex;
   flex-direction: column;
+  backdrop-filter: blur(var(--material-blur)) saturate(170%);
+  -webkit-backdrop-filter: blur(var(--material-blur)) saturate(170%);
 }
 
 .context-menu-positioned {
@@ -39,13 +43,13 @@
 
 .context-menu.is-exiting {
   pointer-events: none;
-  animation: context-menu-out 160ms var(--motion-exit) both;
+  animation: context-menu-out var(--motion-exit-duration) var(--motion-exit) both;
 }
 
 @keyframes context-menu-in {
   from {
     opacity: 0;
-    transform: translateY(-5px) scale(0.96);
+    transform: translateY(-4px) scale(0.98);
   }
 
   to {
@@ -72,8 +76,8 @@
   font-size: 13px;
   font-weight: 500;
   color: var(--color-text);
-  border-radius: var(--radius-small);
-  transition: background-color var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-fast) var(--motion-snappy);
+  border-radius: calc(var(--radius-large) - 8px);
+  transition: background-color var(--motion-fast) ease, color var(--motion-fast) ease, scale var(--motion-fast) var(--motion-snappy);
   width: 100%;
   text-align: left;
   border: none;
@@ -83,6 +87,10 @@
 
 .context-item:hover {
   background-color: var(--color-gray-200);
+}
+
+.context-item:active:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-gray-200) 82%, var(--color-surface));
 }
 
 .context-item:disabled {
@@ -116,18 +124,32 @@
 
 @media (max-width: 900px) {
   .action-menu-overlay {
-    background-color: rgba(0, 0, 0, 0.4);
+    background-color: rgb(0 0 0 / 28%);
   }
 
   .context-menu {
     /* Bottom sheet style on mobile */
     inset: auto 0 0;
+    border: 1px solid color-mix(in srgb, var(--color-border) 78%, white);
+    border-bottom: 0;
     border-radius: var(--radius-large) var(--radius-large) 0 0;
     min-width: 100%;
-    padding: 8px;
+    padding: 18px 8px 8px;
     padding-bottom: max(8px, env(safe-area-inset-bottom));
     transform-origin: bottom center;
     animation: context-sheet-up var(--motion-slow) var(--motion-sheet);
+  }
+
+  .context-menu::before {
+    content: '';
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    width: 36px;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--color-text-tertiary) 52%, transparent);
+    transform: translateX(-50%);
   }
 
   .context-menu.is-exiting { animation: context-sheet-down var(--motion-base) var(--motion-exit) both; }
@@ -152,5 +174,41 @@
   .context-item {
     padding: 14px 16px;
     font-size: 15px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-overlay,
+  .context-menu {
+    animation: sunam-fade-in 120ms ease-out both !important;
+  }
+
+  .context-overlay.is-exiting,
+  .context-menu.is-exiting {
+    animation: sunam-fade-out 120ms ease-in both !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .context-overlay.dimmed {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .context-menu,
+  .avatar-menu {
+    background-color: var(--color-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .context-menu,
+  .avatar-menu {
+    border-color: var(--color-text);
+    background-color: var(--color-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }

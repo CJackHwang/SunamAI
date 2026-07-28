@@ -2,30 +2,67 @@
   display: none;
   justify-content: space-around;
   align-items: stretch;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-surface);
+  position: relative;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+  background: var(--material-regular);
+  box-shadow: 0 -8px 24px rgb(0 0 0 / 5%);
+  backdrop-filter: blur(var(--material-blur)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--material-blur)) saturate(160%);
   flex-shrink: 0;
-  height: 60px;
+  height: calc(60px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .mobile-bottom-bar button {
+  position: relative;
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--color-text-secondary);
   border-radius: 0;
-  border-top: 2px solid transparent;
-  transition: color var(--motion-base) ease, background-color var(--motion-fast) ease, border-color var(--motion-base) ease;
+  border-top: 0;
+  transition: color var(--motion-fast) ease, background-color var(--motion-fast) ease;
+}
+
+.mobile-bottom-bar button::after {
+  content: '';
+  position: absolute;
+  bottom: 7px;
+  left: 50%;
+  width: 22px;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+  opacity: 0;
+  transform: translateX(-50%) scaleX(.5);
+  transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--motion-snappy);
 }
 
 .mobile-bottom-bar button svg { transition: transform var(--motion-base) var(--motion-spring); }
 
 .mobile-bottom-bar button.active {
   color: var(--color-black);
-  border-top-color: var(--color-black);
 }
 
 .mobile-bottom-bar button.active svg { transform: translateY(-1px) scale(1.08); }
+.mobile-bottom-bar button.active::after { opacity: 1; transform: translateX(-50%) scaleX(1); }
 
 @media (max-width: 900px) { .mobile-bottom-bar { display: flex; } }
+
+@media (prefers-reduced-transparency: reduce) {
+  .mobile-bottom-bar {
+    background: var(--color-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .mobile-bottom-bar {
+    border-top-color: var(--color-text);
+    background: var(--color-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}

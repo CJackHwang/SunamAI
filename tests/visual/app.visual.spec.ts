@@ -86,16 +86,19 @@ async function openResourceSubagentWorkspace(page: import('@playwright/test').Pa
   await childAction.click();
   const childMenu = page.locator('body > .sidebar-context-menu.subagent-context-menu');
   await expect(childMenu).toBeVisible();
+  await expect(childMenu.locator('.context-item')).toHaveCSS('border-radius', '20px');
   if (viewport.width <= 900) await childMenu.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
   const childMenuBox = await childMenu.boundingBox();
   expect(childActionBox).not.toBeNull();
   expect(childMenuBox).not.toBeNull();
   if (viewport.width <= 900) {
+    await expect(childMenu).toHaveCSS('border-radius', '28px 28px 0px 0px');
     expect(childMenuBox!.x).toBe(0);
     expect(childMenuBox!.width).toBe(viewport.width);
     expect(childMenuBox!.y + childMenuBox!.height).toBe(viewport.height);
     expect(await childMenu.evaluate((element) => getComputedStyle(element).animationName)).toBe('context-sheet-up');
   } else {
+    await expect(childMenu).toHaveCSS('border-radius', '28px');
     expect(childMenuBox!.x).toBeGreaterThanOrEqual(8);
     expect(childMenuBox!.x + childMenuBox!.width).toBeLessThanOrEqual(viewport.width - 8);
     expect(childMenuBox!.y).toBeGreaterThanOrEqual(8);
@@ -145,6 +148,16 @@ async function openResourceSubagentWorkspace(page: import('@playwright/test').Pa
   }
   await page.locator('.task-list-summary').click();
   await expect(page.locator('.task-list-subagent')).toHaveCount(1);
+  const taskTools = page.locator('details.task-list-tools');
+  await expect(taskTools).toHaveCount(1);
+  await taskTools.locator('summary').click();
+  await expect(taskTools).toHaveAttribute('open', '');
+  await expect(taskTools).toHaveAttribute('data-animating', 'true');
+  await expect(taskTools).not.toHaveAttribute('data-animating', 'true');
+  await taskTools.locator('summary').click();
+  await expect(taskTools).toHaveAttribute('data-animating', 'true');
+  await expect(taskTools).not.toHaveAttribute('data-animating', 'true');
+  await expect(taskTools).not.toHaveAttribute('open', '');
   const attachments = page.locator('.message-attachments');
   await expect(attachments).toContainText('requirements.txt');
   const firstTool = page.locator('details.chat-tool').first();
@@ -167,6 +180,7 @@ test('configuration gate keeps the desktop visual baseline', async ({ page }) =>
   await page.addInitScript(() => localStorage.clear());
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
+  await expect(page.locator('.settings-modal-content')).toHaveCSS('border-radius', '28px');
   await expect(page).toHaveScreenshot('configuration-desktop.png', { maxDiffPixelRatio: 0.002 });
 });
 
@@ -174,6 +188,7 @@ test('configuration gate keeps the mobile visual baseline', async ({ page }) => 
   await page.addInitScript(() => localStorage.clear());
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
+  await expect(page.locator('.settings-modal-content')).toHaveCSS('border-radius', '28px 28px 0px 0px');
   await expect(page).toHaveScreenshot('configuration-mobile.png', { maxDiffPixelRatio: 0.002 });
 });
 

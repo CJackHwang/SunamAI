@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '@/shared/i18n';
 import { RunBoard } from '@/features/agent-core/RunBoard';
-import type { AgentRun } from '@/features/agent-core/types';
+import type { AgentEvent, AgentRun } from '@/features/agent-core/types';
 
 const interruptedRun: AgentRun = {
   id: 'r-1', sessionId: 's-1', containerId: 'c-1', model: 'm', persona: 'Sunam 6.9 Pron', phase: 'interrupted', createdAt: 1, updatedAt: 1,
@@ -39,6 +39,31 @@ describe('RunBoard', () => {
     await user.click(view.getByText('断点'));
     expect(checkpoint).toHaveAttribute('open');
     expect(view.getByText('Long checkpoint detail')).toBeVisible();
+  });
+
+  it('animates tool records through the shared disclosure', async () => {
+    const user = userEvent.setup();
+    const events: AgentEvent[] = [{
+      id: 'tool-finished',
+      kind: 'tool_finished',
+      sessionId: 's-1',
+      runId: interruptedRun.id,
+      sequence: 1,
+      createdAt: 1,
+      toolCall: { id: 'tool-call', type: 'function', function: { name: 'read_file', arguments: '{"path":"src/app.tsx"}' } },
+      result: { ok: true, content: 'Read src/app.tsx' },
+    }];
+    const rendered = render(<I18nProvider><RunBoard run={interruptedRun} events={events} /></I18nProvider>);
+    const view = within(rendered.container);
+    await user.click(view.getByRole('button', { name: /任务列表/ }));
+    const tools = view.getByText('1 项工具输出').closest('details');
+    expect(tools).not.toHaveAttribute('open');
+    expect(tools).toHaveAttribute('data-expanded', 'false');
+    expect(view.getByText('Read src/app.tsx')).not.toBeVisible();
+    await user.click(view.getByText('1 项工具输出'));
+    expect(tools).toHaveAttribute('open');
+    expect(tools).toHaveAttribute('data-expanded', 'true');
+    expect(view.getByText('Read src/app.tsx')).toBeVisible();
   });
 
   it('does not display stale verification as passed after a later workspace revision', async () => {

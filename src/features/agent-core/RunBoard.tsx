@@ -65,7 +65,7 @@ export function RunBoard({ run, runs = [], events, liveOutput, onResume, onLoadR
           <span>{t('agent.budget')}: {run.modelTurns}/{run.budget.maxModelTurns} · {run.toolCalls}/{run.budget.maxToolCalls}</span>
           {isVerified && <span className="task-list-verification"><ShieldCheck size={12} />{t('agent.verified')}</span>}
         </div>
-        {tools.length > 0 && <details className="task-list-tools"><summary>{tools.length} {t('agent.toolOutputs')}</summary><div>{tools.map((event) => <div key={event.id} className="task-list-tool"><div>{event.result.ok ? '✓' : '×'} {event.toolCall.function.name}</div><pre>{event.result.content.slice(0, 600)}</pre></div>)}</div></details>}
+        {tools.length > 0 && <RunBoardDisclosure className="task-list-tools" summary={<>{tools.length} {t('agent.toolOutputs')}</>}><div>{tools.map((event) => <div key={event.id} className="task-list-tool"><div>{event.result.ok ? '✓' : '×'} {event.toolCall.function.name}</div><pre>{event.result.content.slice(0, 600)}</pre></div>)}</div></RunBoardDisclosure>}
         {run.task.evidence.length > 0 && <div className="task-list-evidence"><strong>{t('agent.evidence')}:</strong> {run.task.evidence.slice(-3).join(' · ')}</div>}
         {(run.phase === 'interrupted' || run.phase === 'awaiting_user') && onResume && <button className="btn btn-primary task-list-resume" onClick={onResume}><RotateCcw size={14} />{t('agent.resume')}</button>}
       </div>

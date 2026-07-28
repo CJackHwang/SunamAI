@@ -45,7 +45,8 @@ const SettingsModal = ({ initialApiKey, initialBaseUrl, initialModel, locale, on
 
   return (
     <Modal title={t('settings.title')} {...(initialApiKey ? { onDismiss: onClose } : {})} isExiting={isExiting}>
-        
+        <p className="settings-local-storage-note">{t('settings.localStorageNote')}</p>
+
         <div className="settings-field">
           <label htmlFor="settings-base-url">
             {t('settings.baseUrl')}

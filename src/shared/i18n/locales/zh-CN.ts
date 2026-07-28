@@ -13,6 +13,7 @@ export const zhCN = {
   'persistence.unavailable': '工作区存储不可用，为防止覆盖数据已停止编辑',
   'common.error': '错误',
   'settings.title': '配置',
+  'settings.localStorageNote': '所有配置信息仅保存在当前设备本地。',
   'settings.baseUrl': '接口地址 (OpenAI Compatible)',
   'settings.apiKey': 'API 密钥',
   'settings.model': '模型',

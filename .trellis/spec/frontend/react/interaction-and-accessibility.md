@@ -9,6 +9,7 @@ Read this leaf when changing keyboard controls, async UI states, dialogs/overlay
 - Interactive controls use semantic buttons/links, accessible labels, and keyboard behavior.
 - Modal/overlay UI restores focus, traps it where appropriate, supports Escape, and exposes `role="dialog"` with `aria-modal`.
 - Async failures become visible state such as `role="alert"`. Loading regions use status semantics and disable unsafe actions.
+- The settings dialog renders the localized `settings.localStorageNote` disclosure directly below its title, stating that all configuration is stored only on the current device; do not imply cloud sync or remote settings storage.
 - The root app mounts `BeforeUnloadGuard` for its lifetime. It calls `preventDefault()`, assigns `BeforeUnloadEvent.returnValue`, unregisters on unmount, and leaves wording to the browser.
 
 `ChatComposer` follows the existing `900px` boundary:

@@ -1,41 +1,53 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-
 :root {
-  --color-bg: #f0f0f0;
+  --color-bg: #f3f3f5;
   --color-surface: #ffffff;
-  --color-text: #1a1a1a;
-  --color-text-secondary: #666666;
-  --color-text-tertiary: #999999;
-  --color-border: #e0e0e0;
-  --color-black: #000000;
+  --color-surface-subtle: #f8f8fa;
+  --color-text: #1d1d1f;
+  --color-text-secondary: #68686d;
+  --color-text-tertiary: #8a8a90;
+  --color-border: #d9d9de;
+  --color-separator: rgb(29 29 31 / 10%);
+  --color-black: #1d1d1f;
   --color-white: #ffffff;
-  --color-gray-100: #f5f5f5;
-  --color-gray-200: #e5e5e5;
+  --color-gray-100: #f5f5f7;
+  --color-gray-200: #e8e8ed;
   --color-gray-700: #3a3a3a;
   --color-gray-800: #222222;
-  --color-primary: #111111;
+  --color-primary: #1d1d1f;
+  --color-accent: #007aff;
   --color-success: #10b981;
   --color-danger: #ef4444;
   --color-link: #0969da;
   --color-code: #d63384;
-  --color-info: #5b9bd5;
-  --radius-large: 24px;
+  --color-info: #0a84ff;
+  --radius-large: 28px;
   --radius-medium: 16px;
-  --radius-small: 8px;
-  --control-icon-size: 36px;
-  --nav-rail-width: 56px;
-  --nav-icon-gap: 12px;
-  --list-row-gap: 12px;
+  --radius-small: 12px;
+  --radius-pill: 999px;
+  --control-icon-size: 38px;
+  --nav-rail-width: 60px;
+  --nav-rail-control-size: 38px;
+  --nav-rail-control-radius: var(--radius-small);
+  --nav-icon-gap: 10px;
+  --nav-rail-hover: var(--color-gray-100);
+  --nav-rail-selected: color-mix(in srgb, var(--color-black) 8%, transparent);
+  --list-row-gap: 10px;
   --list-row-padding: 10px 12px;
-  --font-family: 'OpenAI Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --material-thin: rgb(255 255 255 / 72%);
+  --material-regular: rgb(255 255 255 / 84%);
+  --material-thick: rgb(255 255 255 / 94%);
+  --material-blur: 22px;
+  --material-blur-thick: 28px;
+  --chat-content-max: 1040px;
   --xterm-bg: #000000;
   --xterm-fg: #ffffff;
-  --elevation-1: none;
-  --elevation-2: none;
-  --elevation-3: none;
-  --elevation-4: none;
-  --elevation-5: none;
+  --elevation-1: 0 1px 2px rgb(0 0 0 / 5%), 0 6px 18px rgb(0 0 0 / 4%);
+  --elevation-2: 0 8px 24px rgb(0 0 0 / 8%);
+  --elevation-3: 0 12px 32px rgb(0 0 0 / 10%);
+  --elevation-4: 0 18px 48px rgb(0 0 0 / 13%);
+  --elevation-5: 0 24px 64px rgb(0 0 0 / 16%);
 }
 
 * {
@@ -50,7 +62,11 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   font: 15px/1.5 var(--font-family);
+  letter-spacing: 0;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+  text-rendering: optimizeLegibility;
 }
 
 #root {
@@ -61,35 +77,36 @@ button {
   border: 0;
   background: none;
   cursor: pointer;
-  font-family: inherit;
+  font: inherit;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
-  transition: transform var(--motion-fast) var(--motion-snappy), opacity var(--motion-fast) ease, filter var(--motion-fast) ease, background-color var(--motion-fast) ease, color var(--motion-fast) ease;
+  scale: 1;
+  transition: scale var(--motion-fast) var(--motion-snappy), opacity var(--motion-fast) ease, background-color var(--motion-fast) ease, color var(--motion-fast) ease;
 }
 
 button:active:not(:disabled) {
-  transform: scale(0.96);
+  scale: 0.97;
   transition-duration: 80ms;
 }
 
-@media (hover: hover) {
-  button:hover:not(:disabled) {
-    filter: brightness(0.95);
-  }
+button:disabled {
+  cursor: not-allowed;
 }
 
 *:focus-visible {
-  outline: 2px solid var(--color-black);
-  outline-offset: 2px;
-  border-radius: 2px;
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
 }
 
-body,
 input,
 textarea:not(.xterm-helper-textarea),
-button {
+select {
   font-family: var(--font-family);
   font-size: 16px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
 }
 
 .persistence-error {
@@ -105,7 +122,19 @@ button {
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--color-danger) 35%, var(--color-border));
   border-radius: var(--radius-small);
-  background: var(--color-surface);
+  background: var(--material-thick);
+  box-shadow: var(--elevation-2);
   color: var(--color-danger);
   font-size: 13px;
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --color-border: #8a8a90;
+    --color-separator: rgb(0 0 0 / 42%);
+  }
+
+  *:focus-visible {
+    outline-width: 3px;
+  }
 }

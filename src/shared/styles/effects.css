@@ -1,35 +1,58 @@
 /* ===== Glassmorphism Effects ===== */
 .glass-header {
-  background-color: color-mix(in srgb, var(--color-surface) 70%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+  background-color: var(--material-regular);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 55%);
+  backdrop-filter: blur(var(--material-blur)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--material-blur)) saturate(160%);
 }
 
 .glass-input {
-  background-color: color-mix(in srgb, var(--color-surface) 70%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: none;
-  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
+  background-color: var(--material-regular);
+  box-shadow: var(--elevation-1), inset 0 1px 0 rgb(255 255 255 / 58%);
+  backdrop-filter: blur(var(--material-blur)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--material-blur)) saturate(160%);
 }
 
 .glass-btn {
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: none;
-  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
+  box-shadow: var(--elevation-1);
+  backdrop-filter: blur(var(--material-blur)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--material-blur)) saturate(160%);
 }
 
 .glass-btn:not(:disabled) {
-  background-color: color-mix(in srgb, var(--color-black) 75%, transparent);
+  background-color: color-mix(in srgb, var(--color-black) 92%, transparent);
   border: none;
+  box-shadow: 0 8px 20px rgb(29 29 31 / 16%);
 }
 
 .glass-btn:disabled {
-  background-color: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  background-color: var(--material-regular);
   color: var(--color-text-secondary);
-  box-shadow: none;
-  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  box-shadow: var(--elevation-1);
+  border: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass-header,
+  .glass-input,
+  .glass-btn,
+  .glass-btn:disabled {
+    background-color: var(--color-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .glass-header,
+  .glass-input,
+  .glass-btn {
+    border-color: var(--color-text);
+    background-color: var(--color-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }

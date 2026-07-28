@@ -15,6 +15,7 @@ export const jaJP = {
   'persistence.unavailable': 'データ保護のため、ワークスペースストレージが復旧するまで編集を停止しています',
   'common.error': 'エラー',
   'settings.title': '設定',
+  'settings.localStorageNote': 'すべての設定情報は、このデバイス内にのみ保存されます。',
   'settings.baseUrl': 'ベースURL (OpenAI Compatible)',
   'settings.apiKey': 'APIキー',
   'settings.model': 'モデル',

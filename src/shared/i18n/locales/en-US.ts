@@ -15,6 +15,7 @@ export const enUS = {
   'persistence.unavailable': 'Workspace storage is unavailable. Editing is paused to protect your data',
   'common.error': 'Error',
   'settings.title': 'Settings',
+  'settings.localStorageNote': 'All settings are stored only on this device.',
   'settings.baseUrl': 'API endpoint (OpenAI Compatible)',
   'settings.apiKey': 'API key',
   'settings.model': 'Model',

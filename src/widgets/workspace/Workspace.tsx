@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type AnimationEvent, type SyntheticEvent } from 'react';
 import type { TerminalLayout, TerminalTab } from '@/shared/contracts/terminal';
 import { RunBoard } from '@/features/agent-core/RunBoard';
 import type { AgentController, AgentConversationView } from '@/features/agent-core/useAgentV2';
@@ -54,6 +54,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
   const [terminalTab, setTerminalTab] = useState<TerminalTab>('ai');
   const [mobileActive, setMobileActive] = useState<'chat' | TerminalTab>('chat');
   const [layoutState, setLayoutState] = useState<TerminalLayout>('collapsed');
+  const [layoutTransition, setLayoutTransition] = useState<'from-full' | null>(null);
   const scrollPositionsRef = useRef(new Map<string, number>());
   const previousViewKeyRef = useRef('root');
   const { containerRef, isAtBottom, onScroll, scrollToBottom } = useChatAutoScroll([messages, isRunning, streamingContent, streamingReasoning, composerHeight]);
@@ -93,8 +94,10 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
     const onResize = () => { 
       const isMobile = window.innerWidth <= 900;
       if (isMobile && !wasMobile) {
+        setLayoutTransition(null);
         setLayoutState('half');
       } else if (!isMobile && wasMobile) {
+        setLayoutTransition(null);
         setLayoutState('collapsed');
       }
       wasMobile = isMobile;
@@ -103,6 +106,16 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  const changeTerminalLayout = (nextLayout: TerminalLayout) => {
+    const restoreFromFull = layoutState === 'full' && nextLayout !== 'full' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    setLayoutTransition(restoreFromFull ? 'from-full' : null);
+    setLayoutState(nextLayout);
+  };
+
+  const finishLayoutTransition = (event: AnimationEvent<HTMLDivElement>) => {
+    if (event.animationName === 'workspace-model-header-settle') setLayoutTransition(null);
+  };
 
   const handleSubmit = (event?: SyntheticEvent) => {
     event?.preventDefault();
@@ -133,7 +146,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
   };
 
   return (
-    <div className="workspace-container" data-active-tab={mobileActive} data-layout={layoutState}>
+    <div className="workspace-container" data-active-tab={mobileActive} data-layout={layoutState} data-layout-transition={layoutTransition ?? undefined} onAnimationEnd={finishLayoutTransition}>
       <div className="chat-section">
         <ModelSelector model={sunamModel} isOpen={isModelMenuOpen} onToggle={() => setIsModelMenuOpen((open) => !open)} onSelect={(model) => { setSunamModel(model); setIsModelMenuOpen(false); }} {...(onMobileSidebarToggle ? { onMobileSidebarToggle } : {})} />
         <ChatMessageList messages={messages} isRunning={isRunning} containerRef={containerRef} onScroll={handleChatScroll} bottomInset={(isSubagentView ? 68 : composerHeight) + 16} streamingContent={streamingContent} streamingReasoning={streamingReasoning} />
@@ -141,7 +154,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
       </div>
       <div className="terminal-section">
         <Suspense fallback={<div className="motion-fade-in workspace-lazy-state" />}>
-          <DualTerminal runtime={runtime} webcontainer={webcontainer} onReady={() => setIsTerminalReady(true)} activeTab={terminalTab} onTabChange={selectTerminalTab} layoutState={layoutState} onLayoutChange={setLayoutState} activeContainerId={activeContainerId} activeContainerName={activeContainer?.name ?? null} activeSessionId={activeSessionId} rootDir={activeContainerId ? getContainerRoot(activeContainerId) : '/'} isRestarting={isRestarting} onForceRestart={forceRestart} />
+          <DualTerminal runtime={runtime} webcontainer={webcontainer} onReady={() => setIsTerminalReady(true)} activeTab={terminalTab} onTabChange={selectTerminalTab} layoutState={layoutState} onLayoutChange={changeTerminalLayout} activeContainerId={activeContainerId} activeContainerName={activeContainer?.name ?? null} activeSessionId={activeSessionId} rootDir={activeContainerId ? getContainerRoot(activeContainerId) : '/'} isRestarting={isRestarting} onForceRestart={forceRestart} />
         </Suspense>
       </div>
       {(runtimeError || agentPersistenceError) && <div role="alert" className="workspace-runtime-error motion-notice-in">{runtimeError || agentPersistenceError}</div>}
