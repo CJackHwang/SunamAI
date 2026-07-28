@@ -212,3 +212,24 @@ Added hierarchical router-only indexes, split aggregate frontend and guide specs
 ### Status
 
 [OK] **Completed**
+
+
+## Session 10: Apple design frontend refinement
+
+**Date**: 2026-07-28
+**Task**: Apple design frontend refinement
+**Branch**: `main`
+
+### Summary
+
+Refined the desktop and mobile frontend with shared Apple-inspired materials, motion, navigation rail geometry, local configuration messaging, file-manager styling, intrinsic task-tool disclosures, and a 12/16/28px interactive surface radius scale; full check:all passed.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `15e2415` | (see git log) |
+
+### Status
+
+[OK] **Completed**
