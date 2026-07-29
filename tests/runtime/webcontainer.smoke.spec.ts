@@ -252,6 +252,27 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(mobileNavigation.getByRole('button')).toHaveCount(5);
   await mobileNavigation.getByRole('button', { name: '对话' }).click();
   await expect(page.locator('.workspace-container')).toHaveAttribute('data-active-tab', 'chat');
+  await expect(composer).toHaveCSS('backdrop-filter', 'blur(22px) saturate(1.6)');
+  const ordinaryMobileMaterial = await composer.evaluate((element) => {
+    const styles = getComputedStyle(element);
+    return { borderColor: styles.borderTopColor, backdrop: styles.backdropFilter };
+  });
+  expect(ordinaryMobileMaterial.borderColor).not.toBe('rgb(0, 0, 0)');
+  expect(ordinaryMobileMaterial.backdrop).toBe('blur(22px) saturate(1.6)');
+  await page.emulateMedia({ forcedColors: 'active' });
+  await expect(composer).toHaveCSS('backdrop-filter', 'none');
+  const forcedMaterial = await composer.evaluate((element) => {
+    const styles = getComputedStyle(element);
+    return { borderStyle: styles.borderTopStyle, backgroundColor: styles.backgroundColor };
+  });
+  expect(forcedMaterial.borderStyle).toBe('solid');
+  expect(forcedMaterial.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+  await page.emulateMedia({ forcedColors: 'none' });
+  await composer.focus();
+  await mobileNavigation.getByRole('button', { name: '终端' }).click();
+  await page.waitForTimeout(100);
+  expect(await page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'))).toBe(false);
+  await mobileNavigation.getByRole('button', { name: '对话' }).click();
   await page.locator('.mobile-sidebar-toggle').click();
   const mobileSidebar = page.locator('.sidebar');
   await expect(mobileSidebar).toHaveClass(/mobile-open/);
@@ -428,7 +449,7 @@ test('real WebContainer cascades parent cancellation into a task child process',
   await composer.press('Enter');
   await page.getByRole('button', { name: '服务' }).click();
   await expect(page.locator('.service-process-row')).toHaveCount(1, { timeout: 100_000 });
-  await page.locator('.chat-submit').click();
+  await page.getByRole('button', { name: '停止主 Agent' }).click();
   await expect(page.locator('.service-process-row')).toHaveCount(0, { timeout: 30_000 });
   await expect.poll(async () => page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {

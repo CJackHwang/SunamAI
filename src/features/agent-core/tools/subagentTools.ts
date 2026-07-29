@@ -20,7 +20,7 @@ export const subagentTools: RegisteredTool[] = [
     },
   }),
   defineTool({
-    name: 'wait_subagents', description: 'Wait for the next previously unreported terminal result among the requested delegated runs. Returns exactly one structured completion report with status, summary, evidence, changed paths, verification records, workspace revision, and usage. Inspect it, then call wait_subagents again for remaining runs. Receiving one result never changes sibling status.',
+    name: 'wait_subagents', description: 'Wait for the next previously unreported lifecycle notification among the requested delegated runs. Returns exactly one structured blocked or terminal report. When status is blocked, answer the child with message_subagent, then wait again for completion. Receiving one notification never changes sibling status.',
     schema: z.object({ run_ids: z.array(z.string().min(1)).min(1).max(6) }), readOnly: false, concurrencySafe: false, dataImpact: 'task', timeoutMs: 5 * 60_000, resultType: 'control',
     async execute(input, context) {
       if (!context.subagents) return { ok: false, content: 'Subagent delegation is unavailable for this run.' };
@@ -46,13 +46,8 @@ export const subagentTools: RegisteredTool[] = [
     },
   }),
   defineTool({
-    name: 'message_subagent', description: 'Send a concise correction or additional fact to an active delegated run.',
+    name: 'message_subagent', description: 'Send a concise correction, decision, or additional fact to an active delegated run. This resumes a child that is waiting after ask_parent.',
     schema: z.object({ run_id: z.string().min(1), message: z.string().min(1).max(2_000) }), readOnly: true, concurrencySafe: true, dataImpact: 'run', timeoutMs: 5_000, resultType: 'control',
     async execute(input, context) { const sent = await context.subagents?.message(input.run_id, input.message) ?? false; return { ok: sent, content: sent ? 'Message delivered.' : 'Subagent is not active.' }; },
-  }),
-  defineTool({
-    name: 'stop_subagent', description: 'Stop a delegated run owned by this root family.',
-    schema: z.object({ run_id: z.string().min(1) }), readOnly: false, concurrencySafe: true, dataImpact: 'run', timeoutMs: 5_000, resultType: 'control',
-    async execute(input, context) { const stopped = await context.subagents?.stop(input.run_id) ?? false; return { ok: stopped, content: stopped ? 'Subagent stop requested.' : 'Subagent is not active.' }; },
   }),
 ];

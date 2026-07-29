@@ -32,8 +32,10 @@ interface QueuedChild {
   writeScope: string[] | undefined;
   controller: AbortController;
   messages: string[];
-  resolve: (notification: SubagentNotification) => void;
-  promise: Promise<SubagentNotification>;
+  notifications: SubagentNotification[];
+  resolveTerminal: () => void;
+  terminalPromise: Promise<void>;
+  terminalSettled: boolean;
   engine?: AgentEngine;
   startedAt?: number;
 }
@@ -41,7 +43,7 @@ interface QueuedChild {
 function statusFor(run: AgentRun): SubagentNotification['status'] {
   if (run.phase === 'completed') return 'completed';
   if (run.phase === 'cancelled') return 'cancelled';
-  if (run.phase === 'awaiting_user') return 'blocked';
+  if (run.phase === 'awaiting_user' || run.phase === 'awaiting_parent') return 'blocked';
   if (run.phase === 'interrupted') return 'interrupted';
   return 'failed';
 }
@@ -50,7 +52,7 @@ export class AgentFamilyCoordinator implements SubagentHost {
   private readonly options: CoordinatorOptions;
   private readonly children = new Map<string, QueuedChild>();
   private readonly queue: QueuedChild[] = [];
-  private readonly reportedRunIds = new Set<string>();
+  private readonly notificationWaiters = new Set<() => void>();
   private activeCount = 0;
   private cleanupPromise: Promise<string[]> | null = null;
 
@@ -80,9 +82,9 @@ export class AgentFamilyCoordinator implements SubagentHost {
       parentRunId: this.options.root.getRun().id, runId, role: input.role, prompt: input.prompt, status: 'queued', createdAt: now, updatedAt: now,
       evidence: [], changedPaths: [], verificationRecords: [],
     };
-    let resolve: (notification: SubagentNotification) => void = () => undefined;
-    const promise = new Promise<SubagentNotification>((done) => { resolve = done; });
-    const child: QueuedChild = { runId, task, writeScope: input.writeScope, controller: new AbortController(), messages: [], resolve, promise };
+    let resolveTerminal: () => void = () => undefined;
+    const terminalPromise = new Promise<void>((resolve) => { resolveTerminal = resolve; });
+    const child: QueuedChild = { runId, task, writeScope: input.writeScope, controller: new AbortController(), messages: [], notifications: [], resolveTerminal, terminalPromise, terminalSettled: false };
     this.children.set(runId, child);
     this.queue.push(child);
     await this.options.store.saveAgentTask(task);
@@ -96,25 +98,35 @@ export class AgentFamilyCoordinator implements SubagentHost {
       if (!child) throw new Error(`Subagent ${runId} does not belong to this root run.`);
       return child;
     });
-    const pendingReports = children.filter((child) => !this.reportedRunIds.has(child.runId));
-    if (!pendingReports.length) throw new Error('Every requested subagent completion has already been reported.');
-    const notification = await Promise.race(pendingReports.map((child) => child.promise));
-    this.reportedRunIds.add(notification.runId);
-    return [notification];
+    while (true) {
+      for (const child of children) {
+        const notification = child.notifications.shift();
+        if (notification) return [notification];
+      }
+      if (children.every((child) => child.terminalSettled)) {
+        throw new Error('Every requested subagent notification has already been reported.');
+      }
+      await new Promise<void>((resolve) => { this.notificationWaiters.add(resolve); });
+    }
   }
 
   async message(runId: string, message: string): Promise<boolean> {
     const child = this.children.get(runId);
-    if (!child || ['completed', 'failed', 'cancelled', 'blocked', 'interrupted'].includes(child.task.status)) return false;
-    if (child.engine) child.engine.messageFromParent(message);
+    if (!child || ['completed', 'failed', 'cancelled', 'interrupted'].includes(child.task.status)) return false;
+    if (child.engine) {
+      const { blockedReason: _blockedReason, ...activeTask } = child.task;
+      child.task = { ...activeTask, status: 'running', updatedAt: Date.now(), summary: `Root Agent guidance: ${message}` };
+      await this.options.store.saveAgentTask(child.task);
+      child.engine.messageFromParent(message);
+    }
     else child.messages.push(message);
     return true;
   }
 
   async stop(runId: string): Promise<boolean> {
     const child = this.children.get(runId);
-    if (!child || ['completed', 'failed', 'cancelled', 'blocked', 'interrupted'].includes(child.task.status)) return false;
-    child.controller.abort(new DOMException('Subagent stopped by parent.', 'AbortError'));
+    if (!child || ['completed', 'failed', 'cancelled', 'interrupted'].includes(child.task.status)) return false;
+    child.controller.abort(new DOMException('Subagent stopped individually.', 'AbortError'));
     const queuedIndex = this.queue.indexOf(child);
     if (queuedIndex >= 0) {
       this.queue.splice(queuedIndex, 1);
@@ -126,10 +138,16 @@ export class AgentFamilyCoordinator implements SubagentHost {
 
   async stopAndWait(runId: string): Promise<boolean> {
     const child = this.children.get(runId);
-    if (!child) return false;
-    await this.stop(runId);
-    await child.promise;
+    if (!child || !await this.stop(runId)) return false;
+    await child.terminalPromise;
     return true;
+  }
+
+  private publish(child: QueuedChild, notification: SubagentNotification): void {
+    child.notifications.push(notification);
+    const waiters = [...this.notificationWaiters];
+    this.notificationWaiters.clear();
+    waiters.forEach((resolve) => resolve());
   }
 
   private pump(): void {
@@ -162,7 +180,8 @@ export class AgentFamilyCoordinator implements SubagentHost {
     ].join('\n');
     const childEvents: AgentEvent[] = [];
     const childBudget = { ...root.budget };
-    const engine = new AgentEngine({
+    let engine: AgentEngine;
+    engine = new AgentEngine({
       runId: child.runId, sessionId: root.sessionId, containerId: root.containerId, persona: this.options.persona, model: this.options.model,
       input: child.task.prompt, initialMessages: [], inheritedSummary, client: this.options.createClient(), runtime: this.options.runtime, store: this.options.store,
       signal: child.controller.signal, onEvent: (event) => { childEvents.push(event); this.options.onEvent(event); }, onRunChange: this.options.onRunChange,
@@ -170,27 +189,52 @@ export class AgentFamilyCoordinator implements SubagentHost {
       familyBudget: new AgentFamilyBudget(childBudget.maxModelTurns, childBudget.maxToolCalls, childBudget.maxDurationMs),
       mutationLease: this.options.root.getMutationLease(),
       lineage: { rootRunId: root.rootRunId ?? root.id, parentRunId: root.id, role: child.task.role, delegatedTaskId: child.task.id, depth: 1, ...(child.writeScope ? { writeScope: child.writeScope } : {}) },
+      onAwaitingParent: async (question) => {
+        child.task = { ...child.task, status: 'blocked', updatedAt: Date.now(), summary: question, blockedReason: question };
+        await this.options.store.saveAgentTask(child.task);
+        const run = engine.getRun();
+        this.publish(child, {
+          runId: run.id,
+          taskId: child.task.taskId,
+          role: child.task.role,
+          status: 'blocked',
+          summary: question,
+          evidence: [...run.task.evidence],
+          changedPaths: [...new Set(this.changedPaths(childEvents))],
+          verificationRecords: [...run.task.verificationEvidence],
+          workspaceRevision: await this.options.runtime.getWorkspaceRevision(root.containerId),
+          usage: { modelTurns: run.modelTurns, toolCalls: run.toolCalls, durationMs: Date.now() - (child.startedAt ?? Date.now()), ...(run.modelUsage ? { estimatedTokens: run.modelUsage.totalTokens } : {}) },
+          blockedReason: question,
+        });
+      },
     });
     child.engine = engine;
     child.messages.forEach((message) => engine.messageFromParent(message));
     await engine.execute();
     const run = engine.getRun();
-    const changedPaths = childEvents.flatMap((event) => {
-      if (event.kind !== 'tool_finished' || !event.result.changedWorkspace) return [];
-      const data = event.result.data;
-      if (Array.isArray(data)) return data.flatMap((item) => item && typeof item === 'object' && 'path' in item ? [String(item.path)] : []);
-      return data && typeof data === 'object' && 'path' in data ? [String(data.path)] : [];
-    });
+    const changedPaths = this.changedPaths(childEvents);
     const notification: SubagentNotification = {
       runId: run.id, taskId: child.task.taskId, role: child.task.role, status: statusFor(run), summary: (run.finalSummary ?? run.error ?? run.summary) || 'Subagent finished without a summary.',
       evidence: [...run.task.evidence], changedPaths: [...new Set(changedPaths)], verificationRecords: [...run.task.verificationEvidence],
       workspaceRevision: await this.options.runtime.getWorkspaceRevision(root.containerId),
       usage: { modelTurns: run.modelTurns, toolCalls: run.toolCalls, durationMs: Date.now() - child.startedAt, ...(run.modelUsage ? { estimatedTokens: run.modelUsage.totalTokens } : {}) },
-      ...(run.phase === 'awaiting_user' || run.phase === 'failed' ? { blockedReason: run.error ?? run.finalSummary ?? 'Subagent could not complete its task.' } : {}),
+      ...(run.phase === 'awaiting_user' || run.phase === 'awaiting_parent' || run.phase === 'failed' ? { blockedReason: run.error ?? run.finalSummary ?? child.task.blockedReason ?? 'Subagent could not complete its task.' } : {}),
     };
-    child.task = { ...child.task, status: notification.status, updatedAt: Date.now(), summary: notification.summary, evidence: notification.evidence, changedPaths: notification.changedPaths, verificationRecords: notification.verificationRecords, usage: notification.usage, ...(notification.blockedReason ? { blockedReason: notification.blockedReason } : {}) };
+    const { blockedReason: _blockedReason, ...finishedTask } = child.task;
+    child.task = { ...finishedTask, status: notification.status, updatedAt: Date.now(), summary: notification.summary, evidence: notification.evidence, changedPaths: notification.changedPaths, verificationRecords: notification.verificationRecords, usage: notification.usage, ...(notification.blockedReason ? { blockedReason: notification.blockedReason } : {}) };
     await this.options.store.saveAgentTask(child.task);
-    child.resolve(notification);
+    child.terminalSettled = true;
+    this.publish(child, notification);
+    child.resolveTerminal();
+  }
+
+  private changedPaths(events: AgentEvent[]): string[] {
+    return events.flatMap((event) => {
+      if (event.kind !== 'tool_finished' || !event.result.changedWorkspace) return [];
+      const data = event.result.data;
+      if (Array.isArray(data)) return data.flatMap((item) => item && typeof item === 'object' && 'path' in item ? [String(item.path)] : []);
+      return data && typeof data === 'object' && 'path' in data ? [String(data.path)] : [];
+    });
   }
 
   private async finishUnexpectedFailure(child: QueuedChild, error: unknown): Promise<void> {
@@ -223,18 +267,22 @@ export class AgentFamilyCoordinator implements SubagentHost {
     };
     try { await this.options.store.saveAgentTask(child.task); }
     catch { /* The parent still needs a terminal notification when persistence is unavailable. */ }
-    child.resolve(notification);
+    child.terminalSettled = true;
+    this.publish(child, notification);
+    child.resolveTerminal();
   }
 
   private async finishQueuedCancellation(child: QueuedChild): Promise<void> {
     const notification: SubagentNotification = { runId: child.runId, taskId: child.task.taskId, role: child.task.role, status: 'cancelled', summary: 'Subagent cancelled before starting.', evidence: [], changedPaths: [], verificationRecords: [], workspaceRevision: await this.options.runtime.getWorkspaceRevision(this.options.root.getRun().containerId), usage: { modelTurns: 0, toolCalls: 0, durationMs: 0 } };
     child.task = { ...child.task, status: 'cancelled', summary: notification.summary, updatedAt: Date.now(), usage: notification.usage };
     await this.options.store.saveAgentTask(child.task);
-    child.resolve(notification);
+    child.terminalSettled = true;
+    this.publish(child, notification);
+    child.resolveTerminal();
   }
 
   async stopAll(): Promise<void> {
     await Promise.all([...this.children.keys()].map((runId) => this.stop(runId)));
-    await Promise.all([...this.children.values()].map((child) => child.promise));
+    await Promise.all([...this.children.values()].map((child) => child.terminalPromise));
   }
 }

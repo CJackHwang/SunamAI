@@ -128,7 +128,7 @@ select {
   font-size: 13px;
 }
 
-@media (prefers-contrast: more) {
+@media (forced-colors: active) {
   :root {
     --color-border: #8a8a90;
     --color-separator: rgb(0 0 0 / 42%);

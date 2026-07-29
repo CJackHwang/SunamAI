@@ -33,6 +33,7 @@ describe('v3 persistence schema guards', () => {
   it('accepts complete workspace, run, checkpoint, resource, task, and stored envelopes', () => {
     expect(isWorkspace({ sessions: [{ id: 's-1', title: 'One', updatedAt: 1, pinned: true, status: 'running' }], containers: [{ id: 'c-1', name: 'One', updatedAt: 1, pinned: false }], activeSessionId: 's-1', activeContainerId: 'c-1' })).toBe(true);
     expect(isRun(run)).toBe(true);
+    expect(isRun({ ...run, phase: 'awaiting_parent' })).toBe(true);
     expect(isRun({ ...run, agentRole: 'task', toolPolicy: { role: 'task', allowedTools: ['read_file', 'apply_patch', 'shell_run'] } })).toBe(true);
     expect(isCheckpoint({ id: 'r-1', runId: 'r-1', sessionId: 's-1', containerId: 'c-1', summary: 'summary', messages: [message], createdAt: 1, eventTailSequence: 2, workspaceRevision: 2, resourceIds: ['res-1'] })).toBe(true);
     expect(isResource({ id: 'res-1', sessionId: 's-1', originatingRunId: 'r-1', name: 'a.txt', kind: 'text', mimeType: 'text/plain', size: 1, sha256: 'hash', createdAt: 1, blob: new Blob(['a']) })).toBe(true);
@@ -40,6 +41,8 @@ describe('v3 persistence schema guards', () => {
     expect(isAgentTask(delegated)).toBe(true);
     expect(isAgentTask({ ...delegated, role: 'task' })).toBe(true);
     expect(isStoredValue({ id: 'r-1', formatVersion: V3_PERSISTENCE_VERSION, updatedAt: 1, payload: run })).toBe(true);
+    expect(isEvent(event('phase_changed', { phase: 'awaiting_parent', detail: 'Waiting for root guidance.' }))).toBe(true);
+    expect(isEvent(event('tool_finished', { toolCall, result: { ok: true, content: 'Need parent input.', stopRun: 'awaiting_parent' } }))).toBe(true);
   });
 
   it('accepts every event variant with its complete payload', () => {
@@ -49,7 +52,7 @@ describe('v3 persistence schema guards', () => {
       event('tool_requested', { toolCall }), event('tool_started', { toolCall }),
       event('tool_finished', { toolCall, result: { ok: true, content: 'done', data: { path: 'a.ts' }, modelContent: message.contentParts, resourceReferences: ['res-1'], changedWorkspace: true, verification: { command: 'npm test', passed: true }, stopRun: 'completed', finalSummary: 'done' } }),
       event('verification', { command: 'npm test', passed: true, detail: 'ok' }), event('model_retry', { attempt: 1, delayMs: 10, error: 'retry' }),
-      event('recovery_hint', { message: 'recover' }), event('context_compacted', { summary: 'compact', fallback: true, beforeTokens: 10, afterTokens: 5, eventTailSequence: 2, workspaceRevision: 2, rehydratedResourceIds: ['res-1'], fallbackReason: 'fallback' }),
+      event('recovery_hint', { message: 'recover' }), event('context_compaction_status', { active: true }), event('context_compacted', { summary: 'compact', fallback: true, beforeTokens: 10, afterTokens: 5, eventTailSequence: 2, workspaceRevision: 2, rehydratedResourceIds: ['res-1'], fallbackReason: 'fallback' }),
       event('checkpoint', { summary: 'checkpoint' }), event('run_finished', { summary: 'finished' }), event('run_failed', { error: 'failed', recoverable: true }),
     ];
     expect(events.every(isEvent)).toBe(true);
@@ -75,7 +78,7 @@ describe('v3 persistence schema guards', () => {
     const invalidEvents = [
       event('message', {}), event('message', { message: { ...message, contentParts: [{ type: 'unknown' }] } }),
       event('message', { message: { ...message, _ui_attachments: [{ name: 'a.txt', size: 1, file: '[Blob omitted]' }] } }),
-      event('tool_finished', { toolCall, result: { ok: 'yes', content: 'bad' } }), event('context_compacted', { summary: 'x', fallback: true, beforeTokens: -1 }),
+      event('tool_finished', { toolCall, result: { ok: 'yes', content: 'bad' } }), event('context_compaction_status', { active: 'yes' }), event('context_compacted', { summary: 'x', fallback: true, beforeTokens: -1 }),
       event('model_retry', { attempt: 0, delayMs: 1, error: 'bad' }), { ...event('checkpoint', { summary: 'x' }), kind: 'unknown' },
     ];
     expect(invalidEvents.every((value) => !isEvent(value))).toBe(true);

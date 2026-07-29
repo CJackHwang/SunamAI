@@ -46,7 +46,7 @@
   }
 }
 
-@media (prefers-contrast: more) {
+@media (forced-colors: active) {
   .glass-header,
   .glass-input,
   .glass-btn {

@@ -19,6 +19,10 @@ Read this leaf when changing keyboard controls, async UI states, dialogs/overlay
 - IME composition never submits;
 - a mounted component reacts when the viewport crosses the breakpoint;
 - long input keeps `overflow-y: auto` while scrollbar chrome is hidden with `scrollbar-width: none` and a WebKit scrollbar rule.
+- while a root Run is active, the textarea and shared action remain enabled with their normal enabled styling; empty input makes that action Stop, while non-empty text makes it Send and queues guidance for the existing Run's next model request;
+- attachments remain disabled during an active root Run, and `RunBoard` does not expose a second root-cancellation command.
+
+Terminal tab changes use the same boundary: at `900px` or less, switching to the terminal must not call xterm `focus()` or open the software keyboard; desktop tab changes may retain automatic focus.
 
 ## Forbidden Behavior
 
@@ -26,6 +30,7 @@ Read this leaf when changing keyboard controls, async UI states, dialogs/overlay
 - Do not use a custom in-app dialog as a replacement for document-level unload confirmation.
 - Do not read responsive keyboard behavior only once at module load.
 - Do not let IME Enter submit or remove the mobile send-button path.
+- Do not add a separate root Stop command to `RunBoard`, disable the running composer, or auto-focus xterm from mobile tab selection.
 
 ## Required Validation
 

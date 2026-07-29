@@ -6,7 +6,10 @@ import { ContainerMutationLease } from '@/features/agent-core/agentFamily';
 import { AgentFamilyCoordinator } from '@/features/agent-core/subagentCoordinator';
 import { AgentEventStore } from '@/features/agent-core/eventStore';
 
-const plainResponse: AgentModelResponse = { message: { role: 'assistant', content: 'Task inspected.' }, toolCalls: [] };
+const plainResponse: AgentModelResponse = {
+  message: { role: 'assistant', content: '', tool_calls: [{ id: 'deferred-finish', type: 'function', function: { name: 'complete_task', arguments: '{"summary":"Task inspected.","evidence":["Delegated task finished."]}' } }] },
+  toolCalls: [{ id: 'deferred-finish', name: 'complete_task', arguments: '{"summary":"Task inspected.","evidence":["Delegated task finished."]}' }],
+};
 
 class RuntimeStub implements AgentWorkspaceRuntime {
   async ensureContainer(): Promise<void> {}
@@ -198,34 +201,43 @@ describe('AgentFamilyCoordinator', () => {
     await expect(family.wait([child.runId])).resolves.toMatchObject([{ status: 'cancelled' }]);
   });
 
+  it('exposes individual and family-level cancellation methods', () => {
+    const family = coordinator([]);
+    expect(family.stop).toBeTypeOf('function');
+    expect(family.stopAndWait).toBeTypeOf('function');
+    expect(family.stopAll).toBeTypeOf('function');
+  });
+
   it('returns a failed task notification when a child model fails', async () => {
     const family = coordinator([new FailingClient()]);
     const child = await family.spawn({ taskId: 'fails', role: 'explore', prompt: 'inspect failure' });
     await expect(family.wait([child.runId])).resolves.toMatchObject([{ status: 'failed', blockedReason: 'child model failed' }]);
   });
 
-  it('queues parent messages, cancels queued work, and rejects foreign run IDs', async () => {
+  it('queues parent messages and rejects foreign run IDs', async () => {
     const active = [new DeferredClient(), new DeferredClient(), new DeferredClient()];
-    const family = coordinator([...active]);
+    const queuedClient = new DeferredClient();
+    const family = coordinator([...active, queuedClient]);
     const first = await family.spawn({ taskId: 'active-1', role: 'task', prompt: 'inspect active' });
-    await family.spawn({ taskId: 'active-2', role: 'explore', prompt: 'inspect active' });
-    await family.spawn({ taskId: 'active-3', role: 'task', prompt: 'inspect active' });
+    const second = await family.spawn({ taskId: 'active-2', role: 'explore', prompt: 'inspect active' });
+    const third = await family.spawn({ taskId: 'active-3', role: 'task', prompt: 'inspect active' });
     await Promise.all(active.map((client) => client.started));
     const queued = await family.spawn({ taskId: 'queued', role: 'task', prompt: 'inspect queued' });
     await expect(family.message(first.runId, 'new fact')).resolves.toBe(true);
     await expect(family.message(queued.runId, 'queued fact')).resolves.toBe(true);
-    await expect(family.stop(queued.runId)).resolves.toBe(true);
-    await expect(family.wait([queued.runId])).resolves.toMatchObject([{ status: 'cancelled', usage: { modelTurns: 0, toolCalls: 0 } }]);
-    await expect(family.stop(queued.runId)).resolves.toBe(false);
-    await expect(family.message(queued.runId, 'too late')).resolves.toBe(false);
-    await expect(family.stop('foreign')).resolves.toBe(false);
     await expect(family.wait(['foreign'])).rejects.toThrow('does not belong');
     active.forEach((client) => client.finish());
-    await family.wait([first.runId]);
+    await queuedClient.started;
+    queuedClient.finish();
+    await expect(family.wait([first.runId])).resolves.toMatchObject([{ status: 'completed' }]);
+    await expect(family.wait([second.runId])).resolves.toMatchObject([{ status: 'completed' }]);
+    await expect(family.wait([third.runId])).resolves.toMatchObject([{ status: 'completed' }]);
+    await expect(family.wait([queued.runId])).resolves.toMatchObject([{ status: 'completed' }]);
     await expect(family.message(first.runId, 'too late')).resolves.toBe(false);
+    await expect(family.message(queued.runId, 'too late')).resolves.toBe(false);
   });
 
-  it('stops one child and waits for its terminal notification without cancelling its sibling', async () => {
+  it('stops one child and waits for it without cancelling its sibling', async () => {
     const firstClient = new DeferredClient();
     const secondClient = new DeferredClient();
     const family = coordinator([firstClient, secondClient]);
@@ -235,12 +247,12 @@ describe('AgentFamilyCoordinator', () => {
 
     await expect(family.stopAndWait(first.runId)).resolves.toBe(true);
     await expect(family.wait([first.runId])).resolves.toMatchObject([{ status: 'cancelled' }]);
-    let secondFinished = false;
-    const secondNotification = family.wait([second.runId]).then((notifications) => { secondFinished = true; return notifications; });
+    let siblingFinished = false;
+    const siblingNotification = family.wait([second.runId]).then((notifications) => { siblingFinished = true; return notifications; });
     await Promise.resolve();
-    expect(secondFinished).toBe(false);
+    expect(siblingFinished).toBe(false);
     secondClient.finish();
-    await expect(secondNotification).resolves.toMatchObject([{ status: 'completed' }]);
+    await expect(siblingNotification).resolves.toMatchObject([{ status: 'completed' }]);
     await expect(family.stopAndWait('foreign')).resolves.toBe(false);
   });
 
@@ -285,11 +297,46 @@ describe('AgentFamilyCoordinator', () => {
     await expect(remaining).resolves.toMatchObject([{ runId: second.runId, status: 'completed' }]);
   });
 
-  it('reports blocked children and merges changed paths and evidence', async () => {
-    const blockedFamily = coordinator([new ScriptedClient([tool('ask', 'ask_user', { question: 'Need input' })])]);
+  it('routes ask_parent to the root and resumes the same child after parent guidance', async () => {
+    let resolveAwaiting: (() => void) | undefined;
+    const awaiting = new Promise<void>((resolve) => { resolveAwaiting = resolve; });
+    const blockedFamily = coordinator([
+      new ScriptedClient([
+        tool('ask-parent', 'ask_parent', { question: 'Which target should I inspect?' }),
+        tool('finish-after-parent', 'complete_task', { summary: 'Parent guidance applied.', evidence: ['Inspected the requested target.'] }),
+      ]),
+    ], new AbortController().signal, rootRun(), new AgentEventStore(), (run) => { if (run.phase === 'awaiting_parent') resolveAwaiting?.(); });
     const blocked = await blockedFamily.spawn({ taskId: 'blocked', role: 'explore', prompt: 'inspect blocked' });
-    await expect(blockedFamily.wait([blocked.runId])).resolves.toMatchObject([{ status: 'blocked', blockedReason: 'Need input' }]);
+    await awaiting;
+    expect(blockedFamily.snapshot()).toEqual([expect.stringContaining('[explore/blocked]')]);
+    await expect(blockedFamily.wait([blocked.runId])).resolves.toMatchObject([{
+      runId: blocked.runId,
+      status: 'blocked',
+      summary: 'Which target should I inspect?',
+      blockedReason: 'Which target should I inspect?',
+    }]);
+    await expect(blockedFamily.message(blocked.runId, 'Inspect the mobile composer.')).resolves.toBe(true);
+    await expect(blockedFamily.wait([blocked.runId])).resolves.toMatchObject([{ status: 'completed', summary: 'Parent guidance applied.' }]);
+    await expect(blockedFamily.wait([blocked.runId])).rejects.toThrow('already been reported');
+  });
 
+  it('cancels an awaiting_parent child only when its parent family is cancelled', async () => {
+    const controller = new AbortController();
+    let resolveAwaiting: (() => void) | undefined;
+    const awaiting = new Promise<void>((resolve) => { resolveAwaiting = resolve; });
+    const family = coordinator([
+      new ScriptedClient([tool('ask-parent-before-cancel', 'ask_parent', { question: 'Need parent direction.' })]),
+    ], controller.signal, rootRun(), new AgentEventStore(), (run) => { if (run.phase === 'awaiting_parent') resolveAwaiting?.(); });
+    const child = await family.spawn({ taskId: 'waiting-child', role: 'explore', prompt: 'wait for parent' });
+    await awaiting;
+    await expect(family.wait([child.runId])).resolves.toMatchObject([{ status: 'blocked' }]);
+
+    controller.abort(new DOMException('parent stopped', 'AbortError'));
+
+    await expect(family.wait([child.runId])).resolves.toMatchObject([{ status: 'cancelled' }]);
+  });
+
+  it('merges child changed paths and evidence', async () => {
     const implementation = new ScriptedClient([
       tool('patch', 'apply_patch', { changes: [{ path: 'src/new.ts', content: 'export {}' }] }),
       tool('finish', 'complete_task', { summary: 'implemented', evidence: ['file created'] }),

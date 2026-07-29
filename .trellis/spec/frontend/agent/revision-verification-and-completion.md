@@ -30,7 +30,7 @@ function evaluateCompletionGate(input: {
 - Shell exit is an explicit revision boundary because filesystem watchers may lag.
 - Verification evidence binds to the post-command revision. Any later parent/child mutation or failed child verification invalidates the pass.
 - Every foreground shell records real exit pass/fail on the post-command revision. Background shell is process progress: it preserves the existing mutation flag but invalidates prior verification; actual revision drift still marks changed/unverified.
-- `complete_task` is the preferred structured path. Every non-empty plain response is also a completion attempt and passes the same plan/revision/verification gates.
+- `complete_task` is the preferred structured path. For the root Agent, every non-empty plain response is also a completion attempt and passes the same plan/revision/verification gates. A depth-one child plain response is non-terminal; only its successful `complete_task` call may complete delegated work.
 - Immediately before completion, flush/read authoritative revision. Rejected plain drafts never enter durable/UI messages; clear transient output, inject one actionable recovery instruction, and continue within existing budgets.
 - Recovery names foreground `shell_run`, a truthful relevant check, exit code 0, final-write ordering, and retry action.
 - Runtime never parses/whitelists command names, scripts, arguments, ports, redirects, or shell composition. The prompt owns relevance, unmasked failure, and re-verification instructions.
@@ -63,7 +63,7 @@ Do not hardcode known verification commands, mask failing exits, project rejecte
 
 ## Required Validation
 
-- Explicit/plain completion share plan/revision ordering; root-only verification; arbitrary command/port/syntax; failure and later-write invalidation; rejected draft absence; actionable recovery; server remains alive; authoritative drift blocks.
+- Explicit/root-plain completion share plan/revision ordering; child plain responses remain active until `complete_task`; root-only verification; arbitrary command/port/syntax; failure and later-write invalidation; rejected draft absence; actionable recovery; server remains alive; authoritative drift blocks.
 - Real runtime tests prove shell-exit revision synchronization where implementation changes the WebContainer boundary.
 
 ## Related Contracts

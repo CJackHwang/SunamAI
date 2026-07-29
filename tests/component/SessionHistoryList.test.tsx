@@ -95,6 +95,21 @@ describe('SessionHistoryList', () => {
     rendered.unmount();
   });
 
+  it.each(['acting', 'awaiting_parent', 'awaiting_user'] as const)('does not expose deletion while a child is unfinished in %s', async (phase) => {
+    const deleteSubagent = vi.fn(async () => true);
+    const awaitingChild = { ...child, phase };
+    const agent = { ...controller(deleteSubagent), childRunsBySession: { session: [awaitingChild] } } as AgentController;
+    const rendered = render(<SessionHistoryList sessions={[{ id: 'session', title: 'Parent', updatedAt: 1 }]} activeSessionId="session" conversationView={{ kind: 'root' }} agent={agent} generatingId={null} editing={null} editInputRef={createRef()} emptyLabel="Empty" deleteLabel="Delete" onSelectSession={vi.fn()} onConversationViewChange={vi.fn()} onOpenSessionContext={vi.fn()} onEditChange={vi.fn()} onEditSubmit={vi.fn()} />);
+    const view = within(rendered.container);
+    const row = view.getByText('task-child-fixed-id').closest<HTMLElement>('.sidebar-subagent-row')!;
+
+    expect(within(row).queryByRole('button', { name: 'task-child-fixed-id' })).not.toBeInTheDocument();
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+    expect(document.body.querySelector('.subagent-context-menu')).not.toBeInTheDocument();
+    expect(deleteSubagent).not.toHaveBeenCalled();
+    rendered.unmount();
+  });
+
   it('keeps the child entry and selected view when durable deletion fails', async () => {
     const user = userEvent.setup();
     const deleteSubagent = vi.fn(async () => false);

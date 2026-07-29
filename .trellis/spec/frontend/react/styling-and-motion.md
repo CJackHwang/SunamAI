@@ -11,6 +11,8 @@ Read this leaf when changing CSS ownership, surface geometry, chat colors/spacin
 - Nested rounded surfaces use `inner radius = outer radius - padding`, using the smaller/dominant padding axis when axes differ.
 - Chat and nested tool surfaces use symmetric padding: message 16px, thinking 10px, tool disclosure 8px, arguments/results 12px. They use background, spacing, and concentric radii rather than borders.
 - User message bubbles use `--color-gray-700` (`#3a3a3a`), not black or near-black.
+- The idle thinking label uses a restrained periodic horizontal text sheen without changing layout. Reduced motion and forced colors remove the sheen and retain readable solid text.
+- Expanded chat tool bodies are bounded to `240px` and scroll internally so long arguments/results do not expand the transcript without limit.
 
 ```css
 :root {
@@ -40,7 +42,7 @@ When `usePresence(value, exitDuration)` retains a component, its duration is at 
 
 - Floating chrome uses the shared `--material-thin`, `--material-regular`, `--material-thick`, `--material-blur`, and `--material-blur-thick` tokens from `src/app/base.css`. Structural regions such as the sidebar remain opaque.
 - Opposing collapsed navigation rails are one structural family: both remain opaque and share `--nav-rail-width`, control size/radius, icon gap, separator weight, and hover/selected tokens. Brand marks may keep their own geometry, but ordinary rail controls do not fork these values.
-- Every translucent surface has a colocated `prefers-reduced-transparency: reduce` solid fallback. Increased contrast uses an opaque surface plus a `--color-text` border; reduced motion replaces spatial entrance/exit with short opacity feedback.
+- Every translucent surface has a colocated `prefers-reduced-transparency: reduce` solid fallback. Only `forced-colors: active` uses the opaque surface plus `--color-text` border fallback; ordinary mobile/PWA rendering and generic increased-contrast preferences retain the standard and `-webkit-` backdrop filters and soft token border. Reduced motion replaces spatial entrance/exit with short opacity feedback.
 - Global press feedback uses the independent `scale` property, not `transform`, so it composes with component-owned translate/rotate transforms.
 - Inline editors nested in a selectable row keep focus visible on the owning row with an inset, concentric ring; suppress the nested input's duplicate rectangular outline.
 - Shared form-control minimum heights are defaults, not density overrides. Pointer-dense desktop rows may explicitly use 36px controls; at `900px` or less, restore a minimum 44px touch target. Familiar commit/cancel actions may use consistent `Check`/`X` icons across breakpoints only when the buttons retain translated `aria-label` and `title` text.
@@ -80,7 +82,7 @@ button:active:not(:disabled) { scale: 0.97; }
 ## Required Validation
 
 - Verify computed styles, browser geometry, or inspected pixel baselines; token names alone are not evidence.
-- Visual changes use applicable component and Playwright visual coverage, including reduced motion, reduced transparency, and increased contrast where material behavior changes.
+- Visual changes use applicable component and Playwright visual coverage, including reduced motion, reduced transparency, ordinary mobile material, and forced-colors where material behavior changes.
 - Use [Test strategy](../quality/test-strategy.md) and [Validation gates](../quality/validation-gates.md).
 
 ## Related Contracts

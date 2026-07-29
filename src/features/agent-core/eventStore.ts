@@ -100,7 +100,7 @@ export class AgentEventStore {
 
   async markInterruptedRuns(sessionId: string): Promise<AgentRun[]> {
     const runs = await this.loadSessionRuns(sessionId);
-    const active = runs.filter((run) => isActiveAgentPhase(run.phase));
+    const active = runs.filter((run) => isActiveAgentPhase(run.phase) || run.phase === 'awaiting_parent');
     const interrupted = active.map((run) => ({ ...run, phase: 'interrupted' as const, updatedAt: Date.now(), error: 'Browser session ended before this run could finish.' }));
     for (const run of interrupted) await this.saveRun(run);
     const tasks = (await this.repository.listSessionAgentTasks(sessionId)).value;

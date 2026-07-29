@@ -7,11 +7,13 @@ import type { Message } from '@/entities/message/types';
 describe('ContextComposer', () => {
   it('leaves context untouched while it remains below the effective token trigger', async () => {
     const complete = vi.fn();
+    const onCompactionStart = vi.fn();
     const messages: Message[] = [{ role: 'user', content: 'short request' }];
-    const result = await new ContextComposer('existing').compactIfNeeded(messages, { complete } as unknown as AgentModelClient, new AbortController().signal);
+    const result = await new ContextComposer('existing').compactIfNeeded(messages, { complete } as unknown as AgentModelClient, new AbortController().signal, { onCompactionStart });
     expect(result).toMatchObject({ compacted: false, fallback: false, summary: 'existing' });
     expect(result.messages).toBe(messages);
     expect(complete).not.toHaveBeenCalled();
+    expect(onCompactionStart).not.toHaveBeenCalled();
   });
 
   it('keeps assistant tool calls and their matching results in one complete group', () => {
@@ -140,12 +142,14 @@ describe('ContextComposer', () => {
       estimateTokens: (value) => Math.ceil(value.length / 4),
       complete: vi.fn(),
     };
-    const result = await new ContextComposer().compactIfNeeded([{ role: 'user', content: 'x'.repeat(80_000) }], client, new AbortController().signal);
+    const onCompactionStart = vi.fn();
+    const result = await new ContextComposer().compactIfNeeded([{ role: 'user', content: 'x'.repeat(80_000) }], client, new AbortController().signal, { onCompactionStart });
     const effective = profile.contextWindowTokens - profile.defaultOutputTokens - profile.summaryReserveTokens - profile.safetyBufferTokens;
     expect(result).toMatchObject({ compacted: true });
     expect(result.afterTokens).toBeLessThanOrEqual(effective);
     expect(result.messages.at(-1)?.content).toContain('oversized recent message clipped');
     expect(client.complete).not.toHaveBeenCalled();
+    expect(onCompactionStart).toHaveBeenCalledOnce();
   });
 
   it('uses the model estimator when clipping oversized Chinese context and fixed request overhead', async () => {

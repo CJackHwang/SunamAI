@@ -42,6 +42,20 @@ export const controlTools: RegisteredTool[] = [
     async execute(input) { return { ok: true, content: input.question, stopRun: 'awaiting_user' }; },
   }),
   defineTool({
+    name: 'ask_parent',
+    description: 'Ask the root Agent for a decision or missing information. This never contacts the end user. It pauses this child until the root Agent sends a follow-up message.',
+    schema: z.object({ question: z.string().min(1).max(1_000) }),
+    readOnly: true,
+    concurrencySafe: false,
+    dataImpact: 'run',
+    timeoutMs: 5_000,
+    resultType: 'control',
+    async execute(input, context) {
+      if (context.agentRole === 'root') return { ok: false, content: 'ask_parent is available only to delegated child agents.' };
+      return { ok: true, content: input.question, stopRun: 'awaiting_parent' };
+    },
+  }),
+  defineTool({
     name: 'complete_task',
     description: 'Finish only after the task contract has evidence.',
     schema: z.object({ summary: z.string().min(1).max(2_000), evidence: z.array(z.string().min(1)).min(1).max(12) }),

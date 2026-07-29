@@ -7,12 +7,13 @@ import { RunBoard } from '@/features/agent-core/RunBoard';
 import type { AgentRun } from '@/features/agent-core/types';
 
 describe('SubagentFooter', () => {
-  it('exposes only the child stop action while running', async () => {
+  it('exposes only the individual child stop action while running', async () => {
     const user = userEvent.setup();
     const onStop = vi.fn();
     const { container } = render(<I18nProvider><SubagentFooter isRunning isAtBottom onStop={onStop} onReturn={vi.fn()} onScrollToBottom={vi.fn()} /></I18nProvider>);
     await user.click(screen.getByRole('button', { name: '停止此子 Agent' }));
     expect(onStop).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: '返回父 Agent' })).not.toBeInTheDocument();
     expect(container.querySelector('textarea, input[type="file"], .task-list-popover')).toBeNull();
   });
 

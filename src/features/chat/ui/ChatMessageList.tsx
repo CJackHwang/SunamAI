@@ -13,9 +13,10 @@ interface ChatMessageListProps {
   bottomInset?: number;
   streamingContent?: string;
   streamingReasoning?: string;
+  isCompacting?: boolean;
 }
 
-export function ChatMessageList({ messages, isRunning, containerRef, onScroll, bottomInset = 100, streamingContent = '', streamingReasoning = '' }: ChatMessageListProps) {
+export function ChatMessageList({ messages, isRunning, containerRef, onScroll, bottomInset = 100, streamingContent = '', streamingReasoning = '', isCompacting = false }: ChatMessageListProps) {
   const { t } = useI18n();
   const toolResults = useMemo(() => {
     const index = new Map<string, Message>();
@@ -26,7 +27,7 @@ export function ChatMessageList({ messages, isRunning, containerRef, onScroll, b
     <div ref={containerRef} onScroll={onScroll} className="chat-message-list" style={{ '--chat-bottom-inset': `${bottomInset}px` } as CSSProperties}>
       {messages.map((message, index) => <ChatMessage key={`${message.role}-${index}`} message={message} toolOutputs={message.tool_calls?.flatMap((tool) => toolResults.get(tool.id) ?? []) ?? []} />)}
       {(streamingContent || streamingReasoning) && <ChatMessage message={{ role: 'assistant', content: streamingContent, reasoning_content: streamingReasoning, _ui_streaming: true }} toolOutputs={[]} />}
-      {isRunning && !streamingContent && !streamingReasoning && <div className="chat-thinking-indicator motion-fade-in">{t('chat.thinking')}</div>}
+      {isRunning && !streamingContent && !streamingReasoning && <div className="chat-thinking-indicator motion-fade-in" role="status">{isCompacting ? t('chat.contextCompacting') : t('chat.thinking')}</div>}
     </div>
   );
 }

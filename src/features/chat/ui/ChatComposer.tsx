@@ -30,6 +30,8 @@ export function ChatComposer({ input, isRunning, isTerminalReady, isAtBottom, ta
   const hasTaskList = Boolean(taskList);
   const hasAttachments = attachments.length > 0;
   const hasAttachmentError = Boolean(attachmentError);
+  const isStopAction = isRunning && !input.trim();
+  const actionLabel = isStopAction ? t('agent.stop') : t('chat.send');
   const resetHeight = (element: HTMLTextAreaElement | null) => { if (element) element.style.height = '44px'; };
   useEffect(() => {
     const updateViewport = () => setIsMobileViewport(window.innerWidth <= MOBILE_WORKSPACE_BREAKPOINT);
@@ -74,8 +76,8 @@ export function ChatComposer({ input, isRunning, isTerminalReady, isAtBottom, ta
         <button type="button" className="chat-attach-btn glass-input" onClick={() => fileInputRef.current?.click()} disabled={isRunning || !isTerminalReady} title={t('chat.attachFiles')} aria-label={t('chat.attachFiles')}><Plus size={20} /></button>
       </div>
       <div className="chat-input-row">
-        <textarea className="input-field glass-input chat-input" rows={1} value={input} onChange={(event) => onInputChange(event.target.value, event.target)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !isMobileViewport) { event.preventDefault(); onSubmit(event); setTimeout(onScrollToBottom, 50); resetHeight(event.currentTarget); } }} disabled={isRunning || !isTerminalReady} placeholder={isTerminalReady ? t('chat.askAnything') : t('chat.booting')} />
-        <button type="button" onClick={(event) => { if (isRunning) onStop(); else { onSubmit(event); setTimeout(onScrollToBottom, 50); resetHeight(event.currentTarget.previousElementSibling as HTMLTextAreaElement); } }} disabled={!isRunning && (!isTerminalReady || (!input.trim() && attachments.length === 0))} className="btn btn-primary glass-btn chat-submit">{isRunning ? <Square size={16} fill="currentColor" /> : <Send size={20} className="chat-send-icon" />}</button>
+        <textarea className="input-field glass-input chat-input" rows={1} value={input} onChange={(event) => onInputChange(event.target.value, event.target)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !isMobileViewport) { event.preventDefault(); onSubmit(event); setTimeout(onScrollToBottom, 50); resetHeight(event.currentTarget); } }} disabled={!isTerminalReady} placeholder={isTerminalReady ? t('chat.askAnything') : t('chat.booting')} />
+        <button type="button" onClick={(event) => { if (isStopAction) onStop(); else { onSubmit(event); setTimeout(onScrollToBottom, 50); resetHeight(event.currentTarget.previousElementSibling as HTMLTextAreaElement); } }} disabled={!isTerminalReady || (!isStopAction && !input.trim() && attachments.length === 0)} className="btn btn-primary glass-btn chat-submit" title={actionLabel} aria-label={actionLabel}>{isStopAction ? <Square size={16} fill="currentColor" /> : <Send size={20} className="chat-send-icon" />}</button>
       </div>
     </div>
   );

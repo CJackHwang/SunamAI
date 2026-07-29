@@ -129,7 +129,7 @@
   }
 }
 
-@media (prefers-contrast: more) {
+@media (forced-colors: active) {
   .settings-modal-content {
     border-color: var(--color-text);
     background-color: var(--color-surface);

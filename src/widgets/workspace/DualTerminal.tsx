@@ -119,6 +119,7 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
   }, [runtime]);
 
   useEffect(() => {
+    if (window.innerWidth <= 900) return;
     const timer = setTimeout(() => { (activeTab === 'user' ? userTermRef.current : aiTermRef.current)?.focus(); }, 50);
     return () => clearTimeout(timer);
   }, [activeTab]);

@@ -203,7 +203,7 @@
   }
 }
 
-@media (prefers-contrast: more) {
+@media (forced-colors: active) {
   .context-menu,
   .avatar-menu {
     border-color: var(--color-text);

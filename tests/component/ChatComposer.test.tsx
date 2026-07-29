@@ -97,4 +97,27 @@ describe('ChatComposer', () => {
     const sendButton = container.querySelector('.glass-btn') as HTMLButtonElement;
     expect(sendButton).toBeEnabled();
   });
+
+  it('uses the shared action for empty-input stop and text guidance while an Agent is running', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onStop = vi.fn();
+    const { rerender } = render(<I18nProvider><ChatComposer input="" isRunning isTerminalReady isAtBottom onInputChange={vi.fn()} onSubmit={onSubmit} onStop={onStop} onScrollToBottom={vi.fn()} /></I18nProvider>);
+    const input = screen.getByPlaceholderText('问 Sunam 任何问题...');
+    expect(input).toBeEnabled();
+    const stop = screen.getByRole('button', { name: '停止主 Agent' });
+    expect(stop).toBeEnabled();
+    await user.click(stop);
+    expect(onStop).toHaveBeenCalledOnce();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    rerender(<I18nProvider><ChatComposer input="Guide the current run" isRunning isTerminalReady isAtBottom onInputChange={vi.fn()} onSubmit={onSubmit} onStop={onStop} onScrollToBottom={vi.fn()} /></I18nProvider>);
+    expect(screen.getByDisplayValue('Guide the current run')).toBeEnabled();
+    const send = screen.getByRole('button', { name: '发送' });
+    expect(send).toBeEnabled();
+    expect(send.querySelector('.chat-send-icon')).not.toBeNull();
+    await user.click(send);
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onStop).toHaveBeenCalledOnce();
+  });
 });

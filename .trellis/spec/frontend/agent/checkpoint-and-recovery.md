@@ -27,6 +27,7 @@ interface AgentCheckpoint {
 - Never overwrite the previous successful checkpoint from the failure path.
 - Cancellation still waits for child/task terminal persistence under the parent-cancellation contract; only failure status persistence is bounded best effort.
 - Resume compares checkpoint revision/tail with current durable/runtime state. Drift creates a notice and a new Run; prior reads and verification are stale.
+- `awaiting_parent` is a live in-memory child coordination state. Browser/session recovery converts it to `interrupted` with the other unfinished phases; it is never recovered as a direct end-user question.
 
 ### Validation And Error Matrix
 

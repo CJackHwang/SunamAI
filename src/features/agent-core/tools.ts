@@ -15,9 +15,9 @@ export type ParsedToolCall = AgentToolCall;
 export class AgentToolRegistry {
   private readonly byName: Map<string, RegisteredTool>;
 
-  constructor(allowedTools?: ReadonlySet<string>) {
+  constructor(allowedTools?: ReadonlySet<string>, hiddenTools?: ReadonlySet<string>) {
     const tools = [...workspaceTools, ...processTools, ...resourceTools, ...subagentTools, ...controlTools];
-    this.byName = new Map(tools.filter((tool) => !allowedTools || allowedTools.has(tool.name)).map((tool) => [tool.name, tool]));
+    this.byName = new Map(tools.filter((tool) => (!allowedTools || allowedTools.has(tool.name)) && !hiddenTools?.has(tool.name)).map((tool) => [tool.name, tool]));
   }
 
   getApiDefinitions(): Array<{ type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }> {

@@ -39,6 +39,7 @@ Check all of these before declaring the change complete:
 - A projector consumes typed/canonical events and never repairs malformed durable data with local casts.
 - New derived state updates on every relevant event and resets on deletion, cancellation, resume, or family change as required.
 - Durable schema changes include backward-read behavior or an explicit clean boundary; UI defaults do not silently become persisted truth.
+- A non-terminal lifecycle notification such as `blocked` must not resolve or reuse the terminal completion promise; model-visible wait queues and lifecycle shutdown promises remain separate contracts.
 
 ## Warning Signs
 

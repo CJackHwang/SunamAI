@@ -1,11 +1,25 @@
 import { createRef } from 'react';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatMessageList } from '@/features/chat/ui/ChatMessageList';
 import { I18nProvider } from '@/shared/i18n';
 
 describe('ChatMessageList', () => {
+  afterEach(cleanup);
+
+  it('shows the periodic thinking indicator and switches its label during active compaction', () => {
+    const props = { messages: [], isRunning: true, containerRef: createRef<HTMLDivElement>(), onScroll: vi.fn() };
+    const { container, rerender } = render(<I18nProvider><ChatMessageList {...props} /></I18nProvider>);
+    const thinking = screen.getByRole('status');
+    expect(thinking).toHaveTextContent('Sunam 正在思考...');
+    expect(thinking).toHaveClass('chat-thinking-indicator');
+
+    rerender(<I18nProvider><ChatMessageList {...props} isCompacting /></I18nProvider>);
+    expect(screen.getByRole('status')).toHaveTextContent('正在自动压缩上下文');
+    expect(container.querySelector('.chat-thinking-indicator')).toBeInTheDocument();
+  });
+
   it('renders the current SSE content as a streaming assistant message', () => {
     const { container } = render(<I18nProvider><ChatMessageList messages={[]} isRunning containerRef={createRef<HTMLDivElement>()} onScroll={vi.fn()} streamingContent="正在逐字输出" /></I18nProvider>);
     expect(screen.getByText('正在逐字输出')).toBeInTheDocument();
@@ -38,6 +52,20 @@ describe('ChatMessageList', () => {
     await user.click(screen.getByText('已完成: workspace_tree'));
 
     expect(disclosure).not.toHaveAttribute('open');
+  });
+
+  it('renders assistant prose with its tool call and bounds expanded tool details', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<I18nProvider><ChatMessageList messages={[
+      { role: 'assistant', content: '先说明结论，再展示工具详情。', tool_calls: [{ id: 'call-prose', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'src/large.ts', line_end: 5000 }) } }] },
+      { role: 'tool', content: 'line\n'.repeat(500), tool_call_id: 'call-prose', name: 'read_file' },
+    ]} isRunning={false} containerRef={createRef<HTMLDivElement>()} onScroll={vi.fn()} /></I18nProvider>);
+
+    expect(screen.getByText('先说明结论，再展示工具详情。')).toBeInTheDocument();
+    await user.click(screen.getByText('已完成: read_file'));
+    const body = container.querySelector('.chat-tool-body') as HTMLElement;
+    expect(body).toBeVisible();
+    expect(body).toHaveClass('chat-tool-body');
   });
 
   it('keeps pending tools labelled as running and ask_user prompts directly visible', () => {

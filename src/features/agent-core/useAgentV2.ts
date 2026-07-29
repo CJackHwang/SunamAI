@@ -14,7 +14,7 @@ import { registerWorkspaceDeletionPreparation } from '@/entities/workspace/delet
 
 type UpdateSessionStatus = (id: string, status: SessionStatus) => void;
 const MESSAGE_WINDOW_SIZE = 250;
-interface ActiveExecution { sessionId: string; containerId: string; controller: AbortController; coordinator: AgentFamilyCoordinator; completion: Promise<void>; }
+interface ActiveExecution { sessionId: string; containerId: string; controller: AbortController; engine: AgentEngine; coordinator: AgentFamilyCoordinator; completion: Promise<void>; }
 interface StreamingState { content: string; reasoning: string; }
 export type AgentConversationView = { kind: 'root' } | { kind: 'subagent'; sessionId: string; runId: string };
 
@@ -74,6 +74,7 @@ export function useAgentV2(
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [streamingByRunId, setStreamingByRunId] = useState<Record<string, StreamingState>>({});
+  const [compactingByRunId, setCompactingByRunId] = useState<Record<string, boolean>>({});
   const [childRunsBySession, setChildRunsBySession] = useState<Record<string, AgentRun[]>>({});
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const [hasOlderEvents, setHasOlderEvents] = useState(false);
@@ -140,8 +141,19 @@ export function useAgentV2(
 
   const appendEvent = useCallback((event: AgentEvent) => {
     if (event.transient) {
-      if (event.kind === 'assistant_delta' && event.sessionId === sessionRef.current) {
+      // Live state is keyed by Run so a newly-created session cannot drop its
+      // first transient events before React commits the active-session update.
+      if (event.kind === 'assistant_delta') {
         setStreamingByRunId((previous) => ({ ...previous, [event.runId]: { content: event.content, reasoning: event.reasoningContent } }));
+      }
+      if (event.kind === 'context_compaction_status') {
+        setCompactingByRunId((previous) => {
+          if (event.active) return { ...previous, [event.runId]: true };
+          if (!previous[event.runId]) return previous;
+          const next = { ...previous };
+          delete next[event.runId];
+          return next;
+        });
       }
       return;
     }
@@ -207,6 +219,7 @@ export function useAgentV2(
       setEvents((previous) => previous.filter((event) => !removed.has(event.runId)));
       setChildRunsBySession((previous) => Object.fromEntries(Object.entries(previous).map(([key, value]) => [key, value.filter((run) => !removed.has(run.id))])));
       setStreamingByRunId((previous) => Object.fromEntries(Object.entries(previous).filter(([runId]) => !removed.has(runId))));
+      setCompactingByRunId((previous) => Object.fromEntries(Object.entries(previous).filter(([runId]) => !removed.has(runId))));
     };
     const coordinator = new AgentFamilyCoordinator({
       root: engine, createClient, runtime, store: storeRef.current, signal: controller.signal, persona: sunamModel, model: apiModel, onEvent: appendEvent, onRunChange: updateRun, onChildrenPruned,
@@ -218,8 +231,14 @@ export function useAgentV2(
       .catch((error) => setPersistenceError(toErrorMessage(error)))
       .finally(() => {
         executionsRef.current.delete(runId);
+        setCompactingByRunId((previous) => {
+          if (!previous[runId]) return previous;
+          const next = { ...previous };
+          delete next[runId];
+          return next;
+        });
       });
-    executionsRef.current.set(runId, { sessionId, containerId, controller, coordinator, completion });
+    executionsRef.current.set(runId, { sessionId, containerId, controller, engine, coordinator, completion });
   }, [activeContainerId, activeSessionId, apiKey, apiModel, appendEvent, baseUrl, events, runs, runtime, sunamModel, updateRun]);
 
   const startTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, attachments?: ChatAttachment[]) => {
@@ -261,9 +280,22 @@ export function useAgentV2(
     return false;
   }, []);
 
+  const guideActiveTask = useCallback(async (message: string): Promise<boolean> => {
+    if (!activeSessionId || !message.trim()) return false;
+    const execution = [...executionsRef.current.values()].find((candidate) => candidate.sessionId === activeSessionId && isRootRun(candidate.engine.getRun()));
+    if (!execution) return false;
+    try {
+      return await execution.engine.enqueueUserGuidance(message);
+    } catch (error) {
+      setPersistenceError(toErrorMessage(error));
+      return false;
+    }
+  }, [activeSessionId]);
+
   const deleteSubagent = useCallback(async (sessionId: string, runId: string): Promise<boolean> => {
     try {
-      await stopSubagent(runId);
+      const target = runsRef.current.find((run) => run.id === runId) ?? (await storeRef.current.loadSessionRuns(sessionId)).find((run) => run.id === runId);
+      if (target && (isActiveAgentPhase(target.phase) || target.phase === 'awaiting_user' || target.phase === 'awaiting_parent')) return false;
       const deleted = await storeRef.current.deleteChildRun(runId);
       if (!deleted) return false;
       setRuns((previous) => previous.filter((run) => run.id !== runId));
@@ -275,12 +307,18 @@ export function useAgentV2(
         delete next[runId];
         return next;
       });
+      setCompactingByRunId((previous) => {
+        if (!previous[runId]) return previous;
+        const next = { ...previous };
+        delete next[runId];
+        return next;
+      });
       return true;
     } catch (error) {
       setPersistenceError(toErrorMessage(error));
       return false;
     }
-  }, [stopSubagent]);
+  }, []);
 
   const loadSessionSubagents = useCallback(async (sessionId: string): Promise<AgentRun[]> => {
     try {
@@ -348,8 +386,9 @@ export function useAgentV2(
   const latestRun = rootRuns[0] ?? null;
   const viewedRun = conversationView.kind === 'subagent' ? runs.find((run) => run.id === conversationView.runId) ?? null : activeRun ?? latestRun;
   const streaming = viewedRun ? streamingByRunId[viewedRun.id] : undefined;
+  const isCompacting = Boolean(viewedRun && compactingByRunId[viewedRun.id]);
 
-  return { events, runs, childRunsBySession, messages, activeRun, latestRun, viewedRun, streamingContent: streaming?.content ?? '', streamingReasoning: streaming?.reasoning ?? '', persistenceError, hasOlderEvents: conversationView.kind === 'root' && hasOlderEvents, hasNewerEvents, loadOlderEvents, loadRunEvents, loadSessionSubagents, showNewerEvents, startTask, resumeTask, stopTask, stopSubagent, deleteSubagent };
+  return { events, runs, childRunsBySession, messages, activeRun, latestRun, viewedRun, streamingContent: streaming?.content ?? '', streamingReasoning: streaming?.reasoning ?? '', isCompacting, persistenceError, hasOlderEvents: conversationView.kind === 'root' && hasOlderEvents, hasNewerEvents, loadOlderEvents, loadRunEvents, loadSessionSubagents, showNewerEvents, startTask, guideActiveTask, resumeTask, stopTask, stopSubagent, deleteSubagent };
 }
 
 export type AgentController = ReturnType<typeof useAgentV2>;

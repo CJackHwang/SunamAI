@@ -12,7 +12,7 @@ Read this leaf when changing `sunam-v3` stores, record guards, sanitizers, event
 - Stores are `workspace`, `runs`, `events`, `checkpoints`, `terminalHistory`, `snapshots`, `quarantine`, `resources`, and `agentTasks`.
 - Events are append-only. Stable session and Run pages are capped at 250 records.
 - Checkpoints overwrite by `runId`; one Run cannot accumulate transcript copies.
-- Child deletion atomically removes its Run, Run events, checkpoint, and delegated task while preserving root records and session-scoped resources. Session deletion is the broader family boundary.
+- Terminal child deletion atomically removes its Run, Run events, checkpoint, and delegated task while preserving root records and session-scoped resources. Active, `awaiting_user`, or `awaiting_parent` children reject individual deletion; parent/session cancellation is the broader live-family boundary.
 - Run, Event, Checkpoint, Message, Resource, and delegated-task payloads pass deep guards. Invalid raw values enter quarantine and return an issue.
 - Sanitizers recursively remove Blob, File, ArrayBuffer, data URLs, long Base64, and secrets from Runs/events/checkpoints.
 - Ordinary saves, reset, and session/container deletion share the workspace serialization queue. Deletion cancels/waits for matching Runs, then updates metadata and related records in one transaction.

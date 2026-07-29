@@ -39,12 +39,12 @@ interface WorkspaceProps {
 export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, agent, conversationView, onConversationViewChange }: WorkspaceProps) {
   const { t } = useI18n();
   const { runtime, webcontainer, isReady: isRuntimeReady, error: runtimeError, isRestarting, forceRestart, getContainerRoot } = useWorkspaceRuntime();
-  const { events, runs, messages, activeRun, latestRun, viewedRun, streamingContent, streamingReasoning, persistenceError: agentPersistenceError, hasOlderEvents, hasNewerEvents, loadOlderEvents, loadRunEvents, showNewerEvents, startTask, resumeTask, stopTask, stopSubagent } = agent;
+  const { events, runs, messages, activeRun, latestRun, viewedRun, streamingContent, streamingReasoning, isCompacting, persistenceError: agentPersistenceError, hasOlderEvents, hasNewerEvents, loadOlderEvents, loadRunEvents, showNewerEvents, startTask, guideActiveTask, resumeTask, stopTask, stopSubagent } = agent;
   const sessions = useWorkspaceSelector((state) => state.sessions);
   const containers = useWorkspaceSelector((state) => state.containers);
   const { createSession, createContainer, renameSession } = useWorkspaceActions();
   const isSubagentView = conversationView.kind === 'subagent';
-  const isRunning = isSubagentView ? Boolean(viewedRun && isActiveAgentPhase(viewedRun.phase)) : Boolean(activeRun);
+  const isRunning = isSubagentView ? Boolean(viewedRun && (isActiveAgentPhase(viewedRun.phase) || viewedRun.phase === 'awaiting_parent')) : Boolean(activeRun);
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -119,7 +119,16 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
 
   const handleSubmit = (event?: SyntheticEvent) => {
     event?.preventDefault();
-    if ((!input.trim() && attachments.length === 0) || isRunning || !isTerminalReady || !isRuntimeReady) return;
+    if (!isTerminalReady || !isRuntimeReady) return;
+    if (isRunning) {
+      if (!input.trim()) return;
+      const guidance = input.trim();
+      setInput('');
+      setAttachmentError(null);
+      void guideActiveTask(guidance).then((accepted) => { if (!accepted) setAttachmentError(t('chat.guidanceFailed')); });
+      return;
+    }
+    if (!input.trim() && attachments.length === 0) return;
     let isNewSession = false;
     let sessionId = activeSessionId;
     if (!sessionId) {
@@ -149,7 +158,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
     <div className="workspace-container" data-active-tab={mobileActive} data-layout={layoutState} data-layout-transition={layoutTransition ?? undefined} onAnimationEnd={finishLayoutTransition}>
       <div className="chat-section">
         <ModelSelector model={sunamModel} isOpen={isModelMenuOpen} onToggle={() => setIsModelMenuOpen((open) => !open)} onSelect={(model) => { setSunamModel(model); setIsModelMenuOpen(false); }} {...(onMobileSidebarToggle ? { onMobileSidebarToggle } : {})} />
-        <ChatMessageList messages={messages} isRunning={isRunning} containerRef={containerRef} onScroll={handleChatScroll} bottomInset={(isSubagentView ? 68 : composerHeight) + 16} streamingContent={streamingContent} streamingReasoning={streamingReasoning} />
+        <ChatMessageList messages={messages} isRunning={isRunning} containerRef={containerRef} onScroll={handleChatScroll} bottomInset={(isSubagentView ? 68 : composerHeight) + 16} streamingContent={streamingContent} streamingReasoning={streamingReasoning} isCompacting={isCompacting} />
         {isSubagentView ? <SubagentFooter isRunning={isRunning} isAtBottom={isAtBottom} taskList={viewedRun && viewedRun.task.plan.length > 0 ? <RunBoard run={viewedRun} events={events} liveOutput={streamingContent} /> : undefined} onStop={() => { void stopSubagent(conversationView.runId); }} onReturn={() => onConversationViewChange({ kind: 'root' })} onScrollToBottom={scrollToBottom} /> : <ChatComposer input={input} attachments={attachments} attachmentError={attachmentError} isRunning={Boolean(isRunning)} isTerminalReady={isTerminalReady} isAtBottom={isAtBottom} taskList={<RunBoard run={activeRun ?? latestRun} runs={runs} events={events} liveOutput={streamingContent} {...(isRuntimeReady ? { onResume: () => resumeTask(latestRun) } : {})} onLoadRunEvents={loadRunEvents} />} onFilesSelected={(files) => { void readChatAttachments([...attachments.flatMap((attachment) => attachment.file ?? []), ...files]).then((next) => { setAttachments(next); setAttachmentError(null); }).catch((error) => setAttachmentError(error instanceof Error ? error.message : String(error))); }} onRemoveAttachment={(index) => setAttachments((current) => current.filter((_attachment, candidateIndex) => candidateIndex !== index))} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} onHeightChange={setComposerHeight} />}
       </div>
       <div className="terminal-section">

@@ -37,6 +37,30 @@ class CapturingClient extends ScriptedClient {
   }
 }
 
+class GuidanceClient implements AgentModelClient {
+  readonly calls: Array<Parameters<AgentModelClient['complete']>[0]> = [];
+  readonly firstStarted: Promise<void>;
+  private markFirstStarted: (() => void) | undefined;
+  private resolveFirst: ((response: AgentModelResponse) => void) | undefined;
+
+  constructor() {
+    this.firstStarted = new Promise((resolve) => { this.markFirstStarted = resolve; });
+  }
+
+  async complete(messages: Parameters<AgentModelClient['complete']>[0]): Promise<AgentModelResponse> {
+    this.calls.push(messages);
+    if (this.calls.length === 1) {
+      this.markFirstStarted?.();
+      return new Promise((resolve) => { this.resolveFirst = resolve; });
+    }
+    return tool('guided-finish', 'complete_task', { summary: 'Guidance applied.', evidence: ['Guidance reached the next model turn.'] });
+  }
+
+  finishFirst(response: AgentModelResponse = { message: { role: 'assistant', content: 'Initial answer before guidance.' }, toolCalls: [] }): void {
+    this.resolveFirst?.(response);
+  }
+}
+
 class DeltaOnlyReasoningClient implements AgentModelClient {
   private index = 0;
 
@@ -142,11 +166,42 @@ class TrackingCheckpointStore extends AgentEventStore {
   }
 }
 
+class GuidanceFailingStore extends AgentEventStore {
+  failGuidance = false;
+
+  override async append(event: AgentEvent): Promise<void> {
+    if (this.failGuidance && event.kind === 'message' && event.message.role === 'user' && event.message.content === 'Rejected guidance.') throw new Error('guidance persistence failed');
+    await super.append(event);
+  }
+}
+
+class CompletionPausingStore extends AgentEventStore {
+  readonly finalMessageStarted: Promise<void>;
+  private markFinalMessageStarted: (() => void) | undefined;
+  private releaseFinalMessage: (() => void) | undefined;
+  private readonly finalMessageGate: Promise<void>;
+
+  constructor() {
+    super();
+    this.finalMessageStarted = new Promise((resolve) => { this.markFinalMessageStarted = resolve; });
+    this.finalMessageGate = new Promise((resolve) => { this.releaseFinalMessage = resolve; });
+  }
+
+  override async append(event: AgentEvent): Promise<void> {
+    if (event.kind === 'message' && event.message.role === 'assistant' && event.message.content === 'Atomic completion.') {
+      this.markFinalMessageStarted?.();
+      await this.finalMessageGate;
+    }
+    await super.append(event);
+  }
+
+  release(): void { this.releaseFinalMessage?.(); }
+}
+
 describe('Agent Core v2', () => {
   it('gives explore children read-only tools and task children the complete non-delegating toolset', async () => {
-    const response = { message: { role: 'assistant' as const, content: 'Delegated work complete.' }, toolCalls: [] };
-    const exploreClient = new CapturingClient([response]);
-    const taskClient = new CapturingClient([response]);
+    const exploreClient = new CapturingClient([tool('explore-finish', 'complete_task', { summary: 'Explored.', evidence: ['Files inspected.'] })]);
+    const taskClient = new CapturingClient([tool('task-finish', 'complete_task', { summary: 'Implemented.', evidence: ['Task completed.'] })]);
     const base = { sessionId: 's-role', containerId: 'c-role', persona: 'Sunam 6.9 Pron' as const, model: 'model', input: 'Inspect.', initialMessages: [], runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: () => undefined, onRunChange: () => undefined };
     const explore = new AgentEngine({ ...base, client: exploreClient, lineage: { rootRunId: 'root', parentRunId: 'root', role: 'explore', delegatedTaskId: 'read', depth: 1 } });
     const task = new AgentEngine({ ...base, client: taskClient, lineage: { rootRunId: 'root', parentRunId: 'root', role: 'task', delegatedTaskId: 'work', depth: 1 } });
@@ -155,10 +210,87 @@ describe('Agent Core v2', () => {
 
     const exploreTools = exploreClient.tools.map((tool) => tool.function.name);
     const taskTools = taskClient.tools.map((tool) => tool.function.name);
-    expect(exploreTools).toEqual(expect.arrayContaining(['workspace_tree', 'read_file', 'search_workspace', 'complete_task']));
-    expect(exploreTools).not.toEqual(expect.arrayContaining(['apply_patch', 'shell_run', 'process_list', 'spawn_subagent']));
-    expect(taskTools).toEqual(expect.arrayContaining(['apply_patch', 'materialize_resource', 'shell_run', 'process_list', 'process_stop', 'read_user_terminal', 'complete_task']));
-    expect(taskTools).not.toEqual(expect.arrayContaining(['spawn_subagent', 'wait_subagents', 'message_subagent', 'stop_subagent']));
+    expect(exploreTools).toEqual(expect.arrayContaining(['workspace_tree', 'read_file', 'search_workspace', 'ask_parent', 'complete_task']));
+    expect(exploreTools).not.toEqual(expect.arrayContaining(['ask_user', 'apply_patch', 'shell_run', 'process_list', 'spawn_subagent']));
+    expect(taskTools).toEqual(expect.arrayContaining(['apply_patch', 'materialize_resource', 'shell_run', 'process_list', 'process_stop', 'read_user_terminal', 'ask_parent', 'complete_task']));
+    expect(taskTools).not.toEqual(expect.arrayContaining(['ask_user', 'spawn_subagent', 'wait_subagents', 'message_subagent', 'stop_subagent']));
+  });
+
+  it('keeps child plain responses non-terminal until complete_task is called', async () => {
+    const events: AgentEvent[] = [];
+    const client = new ScriptedClient([
+      { message: { role: 'assistant', content: 'I inspected the task.' }, toolCalls: [] },
+      tool('finish-child', 'complete_task', { summary: 'Child complete.', evidence: ['Inspection finished.'] }),
+    ]);
+    const engine = new AgentEngine({
+      sessionId: 's-child-plain', containerId: 'c-child-plain', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Inspect.', initialMessages: [], client,
+      runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined,
+      lineage: { rootRunId: 'root', parentRunId: 'root', role: 'explore', delegatedTaskId: 'inspect', depth: 1 },
+    });
+
+    await engine.execute();
+
+    expect(engine.getRun()).toMatchObject({ phase: 'completed', modelTurns: 2 });
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'phase_changed', phase: 'acting', detail: expect.stringContaining('plain response') }));
+    expect(events.some((event) => event.kind === 'tool_finished' && event.toolCall.function.name === 'complete_task')).toBe(true);
+  });
+
+  it('queues root guidance for the next model turn without cancelling the current run', async () => {
+    const events: AgentEvent[] = [];
+    const client = new GuidanceClient();
+    const engine = new AgentEngine({ sessionId: 's-guidance', containerId: 'c-guidance', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Start work.', initialMessages: [], client, runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
+    const execution = engine.execute();
+    await client.firstStarted;
+
+    await expect(engine.enqueueUserGuidance('Prioritize mobile behavior.')).resolves.toBe(true);
+    await expect(engine.enqueueUserGuidance('Keep the composer styling unchanged.')).resolves.toBe(true);
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0]?.some((message) => message.content === 'Prioritize mobile behavior.')).toBe(false);
+    client.finishFirst(tool('premature-finish', 'complete_task', { summary: 'Premature completion.', evidence: ['Initial work finished.'] }));
+    await execution;
+
+    expect(client.calls).toHaveLength(2);
+    const nextTurnGuidance = client.calls[1]?.filter((message) => message.role === 'user').slice(-2).map((message) => message.content);
+    expect(nextTurnGuidance).toEqual(['Prioritize mobile behavior.', 'Keep the composer styling unchanged.']);
+    expect(events.filter((event) => event.kind === 'message' && event.message.role === 'user' && event.message.content === 'Prioritize mobile behavior.')).toHaveLength(1);
+    expect(events.some((event) => event.kind === 'message' && event.message.role === 'assistant' && event.message.content === 'Premature completion.')).toBe(false);
+    expect(engine.getRun().phase).toBe('completed');
+  });
+
+  it('rejects failed guidance persistence without leaking it into model context', async () => {
+    const client = new GuidanceClient();
+    const store = new GuidanceFailingStore();
+    const engine = new AgentEngine({ sessionId: 's-guidance-failure', containerId: 'c-guidance-failure', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Start work.', initialMessages: [], client, runtime: new FakeRuntime(), store, signal: new AbortController().signal, onEvent: () => undefined, onRunChange: () => undefined });
+    const execution = engine.execute();
+    await client.firstStarted;
+    store.failGuidance = true;
+
+    await expect(engine.enqueueUserGuidance('Rejected guidance.')).rejects.toThrow('guidance persistence failed');
+    client.finishFirst();
+    await execution;
+
+    expect(client.calls).toHaveLength(2);
+    expect(client.calls[1]?.some((message) => message.content === 'Rejected guidance.')).toBe(false);
+    expect(engine.getRun().phase).toBe('completed');
+  });
+
+  it('rejects guidance once completion wins the atomic race', async () => {
+    const events: AgentEvent[] = [];
+    const store = new CompletionPausingStore();
+    const engine = new AgentEngine({
+      sessionId: 's-guidance-completion-race', containerId: 'c-guidance-completion-race', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Finish atomically.', initialMessages: [],
+      client: new ScriptedClient([tool('atomic-finish', 'complete_task', { summary: 'Atomic completion.', evidence: ['Completion won.'] })]),
+      runtime: new FakeRuntime(), store, signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined,
+    });
+    const execution = engine.execute();
+    await store.finalMessageStarted;
+
+    await expect(engine.enqueueUserGuidance('Too late for this run.')).resolves.toBe(false);
+    store.release();
+    await execution;
+
+    expect(events.some((event) => event.kind === 'message' && event.message.role === 'user' && event.message.content === 'Too late for this run.')).toBe(false);
+    expect(engine.getRun().phase).toBe('completed');
   });
 
   it('preserves reasoning on a final plain assistant message', async () => {
@@ -359,6 +491,7 @@ describe('Agent Core v2', () => {
     expect(engine.getRun()).toMatchObject({ phase: 'failed', modelTurns: 3 });
     expect(events.filter((event) => event.kind === 'recovery_hint' && event.message.includes('oldest 20%'))).toHaveLength(2);
     expect(events).toContainEqual(expect.objectContaining({ kind: 'context_compacted', fallback: true, fallbackReason: 'main_prompt_too_long' }));
+    expect(events.filter((event) => event.kind === 'context_compaction_status').map((event) => event.active)).toEqual([true, false]);
     expect(events.some((event) => event.kind === 'checkpoint')).toBe(true);
   });
 

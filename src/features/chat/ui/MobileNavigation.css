@@ -58,7 +58,7 @@
   }
 }
 
-@media (prefers-contrast: more) {
+@media (forced-colors: active) {
   .mobile-bottom-bar {
     border-top-color: var(--color-text);
     background: var(--color-surface);

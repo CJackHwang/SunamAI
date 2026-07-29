@@ -31,7 +31,7 @@ function isOptionalString(value: unknown): boolean { return value === undefined 
 function isOptionalBoolean(value: unknown): boolean { return value === undefined || typeof value === 'boolean'; }
 function isOptionalNonNegativeInteger(value: unknown): boolean { return value === undefined || Number.isInteger(value) && Number(value) >= 0; }
 
-const AGENT_PHASES = new Set(['preparing', 'planning', 'acting', 'observing', 'verifying', 'awaiting_user', 'cancelling', 'cancelled', 'completed', 'failed', 'interrupted']);
+const AGENT_PHASES = new Set(['preparing', 'planning', 'acting', 'observing', 'verifying', 'awaiting_user', 'awaiting_parent', 'cancelling', 'cancelled', 'completed', 'failed', 'interrupted']);
 const AGENT_ROLES = new Set(['root', 'explore', 'task', 'implement', 'verify']);
 const TASK_STATUSES = new Set(['queued', 'running', 'completed', 'failed', 'cancelled', 'blocked', 'interrupted']);
 
@@ -91,7 +91,7 @@ function isToolResult(value: unknown): boolean {
   if (value.modelContent !== undefined && (!Array.isArray(value.modelContent) || !value.modelContent.every(isContentPart))) return false;
   if (value.resourceReferences !== undefined && !isStringArray(value.resourceReferences)) return false;
   if (value.verification !== undefined && (!isRecord(value.verification) || typeof value.verification.command !== 'string' || typeof value.verification.passed !== 'boolean')) return false;
-  return isOptionalBoolean(value.changedWorkspace) && (value.stopRun === undefined || value.stopRun === 'completed' || value.stopRun === 'awaiting_user')
+  return isOptionalBoolean(value.changedWorkspace) && (value.stopRun === undefined || value.stopRun === 'completed' || value.stopRun === 'awaiting_user' || value.stopRun === 'awaiting_parent')
     && isOptionalString(value.finalSummary);
 }
 
@@ -141,6 +141,7 @@ export function isEvent(value: unknown): value is AgentEvent {
     case 'tool_finished': return isToolCall(value.toolCall) && isToolResult(value.result);
     case 'verification': return typeof value.command === 'string' && typeof value.passed === 'boolean' && typeof value.detail === 'string';
     case 'model_retry': return Number.isInteger(value.attempt) && Number(value.attempt) > 0 && Number.isFinite(value.delayMs) && typeof value.error === 'string';
+    case 'context_compaction_status': return typeof value.active === 'boolean';
     case 'context_compacted': return typeof value.summary === 'string' && typeof value.fallback === 'boolean'
       && isOptionalNonNegativeInteger(value.beforeTokens) && isOptionalNonNegativeInteger(value.afterTokens)
       && isOptionalNonNegativeInteger(value.eventTailSequence) && isOptionalNonNegativeInteger(value.workspaceRevision)

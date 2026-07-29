@@ -1,7 +1,7 @@
 import type { ChatAttachment, Message, ToolCall } from '@/entities/message/types';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 import type { SunamModel } from '@/shared/config/models';
-import { ContextComposer, fitGroupWithinBudget, groupCompleteRounds } from './context';
+import { ContextComposer, fitGroupWithinBudget, groupCompleteRounds, type ContextCompactionResult, type ContextRehydrationState } from './context';
 import { AgentEventEmitter } from './events';
 import type { AgentEventStore } from './eventStore';
 import type { AgentModelClient } from './modelClient';
@@ -9,7 +9,7 @@ import { buildAgentSystemPrompt, createChaosContract } from './prompt';
 import { sanitizeToolTranscript } from './projector';
 import { AgentToolRegistry, type ParsedToolCall, type ToolExecutionContext } from './tools';
 import type { SubagentHost } from './tools/base';
-import type { AgentBudget, AgentEvent, AgentPhase, AgentRole, AgentRun, AgentToolResult, SubagentRole, TaskContract } from './types';
+import { isActiveAgentPhase, type AgentBudget, type AgentEvent, type AgentPhase, type AgentRole, type AgentRun, type AgentToolResult, type SubagentRole, type TaskContract } from './types';
 import { createId } from '@/shared/lib/ids';
 import { isAbortError, isPromptTooLongModelError, retryModelRequest } from './modelRetry';
 import { scheduleToolBatch } from './toolBatchScheduler';
@@ -27,6 +27,13 @@ const DEFAULT_CHECKPOINT_TIMEOUT_MS = 15_000;
 const MAX_FAILURE_PERSISTENCE_MS = 1_500;
 
 const redact = redactSecrets;
+
+interface QueuedUserGuidance {
+  content: string;
+  accepted: boolean;
+  ready: Promise<void>;
+  markReady: () => void;
+}
 
 export interface AgentResumeState {
   sourceRunId: string;
@@ -59,9 +66,10 @@ export interface AgentEngineOptions {
   familyBudget?: AgentFamilyBudget;
   mutationLease?: ContainerMutationLease;
   checkpointTimeoutMs?: number;
+  onAwaitingParent?: (question: string) => Promise<void>;
 }
 
-const CHILD_COMMON_TOOLS = ['workspace_tree', 'read_file', 'search_workspace', 'list_resources', 'read_resource_text', 'read_resource_image', 'update_plan', 'report_progress', 'ask_user', 'complete_task'];
+const CHILD_COMMON_TOOLS = ['workspace_tree', 'read_file', 'search_workspace', 'list_resources', 'read_resource_text', 'read_resource_image', 'update_plan', 'report_progress', 'ask_parent', 'complete_task'];
 const CHILD_TASK_TOOLS = [...CHILD_COMMON_TOOLS, 'apply_patch', 'materialize_resource', 'shell_run', 'process_list', 'process_observe', 'process_input', 'process_stop', 'read_user_terminal'];
 
 function toolsForRole(role: AgentRole): string[] | undefined {
@@ -90,6 +98,11 @@ export class AgentEngine {
   private readonly recentFiles = new Map<string, string>();
   private subagentHost: SubagentHost | undefined;
   private readonly checkpointTimeoutMs: number;
+  private readonly queuedUserGuidance: QueuedUserGuidance[] = [];
+  private completionStarted = false;
+  private parentMessageResolver: (() => void) | undefined;
+  private awaitingParent = false;
+  private parentMessageArrived = false;
 
   constructor(options: AgentEngineOptions) {
     this.options = options;
@@ -106,7 +119,7 @@ export class AgentEngine {
     this.checkpointTimeoutMs = Math.max(10, options.checkpointTimeoutMs ?? DEFAULT_CHECKPOINT_TIMEOUT_MS);
     const role: AgentRole = options.lineage?.role ?? 'root';
     const toolNames = toolsForRole(role);
-    this.registry = new AgentToolRegistry(toolNames ? new Set(toolNames) : undefined);
+    this.registry = new AgentToolRegistry(toolNames ? new Set(toolNames) : undefined, role === 'root' ? new Set(['ask_parent']) : undefined);
     this.run = {
       id,
       sessionId: options.sessionId,
@@ -148,7 +161,32 @@ export class AgentEngine {
 
   getMutationLease(): ContainerMutationLease { return this.mutationLease; }
   setSubagentHost(host: SubagentHost): void { if ((this.run.depth ?? 0) === 0) this.subagentHost = host; }
-  messageFromParent(message: string): void { this.transcript.push({ role: 'system', content: `Parent coordinator update: ${message}` }); }
+  messageFromParent(message: string): void {
+    this.transcript.push({ role: 'system', content: `Parent coordinator update: ${redact(message)}` });
+    if (!this.awaitingParent) return;
+    if (this.parentMessageResolver) this.parentMessageResolver();
+    else this.parentMessageArrived = true;
+  }
+
+  async enqueueUserGuidance(message: string): Promise<boolean> {
+    if ((this.run.agentRole ?? 'root') !== 'root' || !message.trim() || this.completionStarted || this.executionController.signal.aborted || !isActiveAgentPhase(this.run.phase)) return false;
+    const content = redact(message.trim());
+    let markReady: () => void = () => undefined;
+    const guidance: QueuedUserGuidance = {
+      content,
+      accepted: false,
+      ready: new Promise<void>((resolve) => { markReady = resolve; }),
+      markReady: () => markReady(),
+    };
+    this.queuedUserGuidance.push(guidance);
+    try {
+      await this.emitProjectedMessage({ role: 'user', content, _ui_displayContent: content });
+      guidance.accepted = true;
+      return true;
+    } finally {
+      guidance.markReady();
+    }
+  }
 
   private async updateRun(): Promise<void> {
     this.run.updatedAt = Date.now();
@@ -168,14 +206,66 @@ export class AgentEngine {
     await this.emitter.emit('phase_changed', { phase, ...(detail ? { detail } : {}) });
   }
 
-  private async emitMessage(message: Message): Promise<void> {
+  private async emitProjectedMessage(message: Message): Promise<Message> {
     const safeMessage = canonicalizeMessage({
       ...message,
       content: redact(message.content),
       ...(message.contentParts ? { contentParts: message.contentParts.map((part) => part.type === 'text' ? { ...part, text: redact(part.text) } : part) } : {}),
     });
-    this.transcript.push(safeMessage);
     await this.emitter.emit('message', { message: safeMessage });
+    return safeMessage;
+  }
+
+  private async emitMessage(message: Message): Promise<void> {
+    const safeMessage = await this.emitProjectedMessage(message);
+    this.transcript.push(safeMessage);
+  }
+
+  private async flushUserGuidance(): Promise<void> {
+    while (this.queuedUserGuidance.length) {
+      const guidance = this.queuedUserGuidance[0]!;
+      await guidance.ready;
+      this.queuedUserGuidance.shift();
+      if (guidance.accepted) this.transcript.push({ role: 'user', content: guidance.content, _ui_displayContent: guidance.content });
+    }
+  }
+
+  private beginCompletion(): boolean {
+    if (this.queuedUserGuidance.length) return false;
+    this.completionStarted = true;
+    return true;
+  }
+
+  private async waitForParentMessage(): Promise<void> {
+    if (this.executionController.signal.aborted) throw this.executionController.signal.reason;
+    if (this.parentMessageArrived) {
+      this.parentMessageArrived = false;
+      return;
+    }
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        this.parentMessageResolver = undefined;
+        this.executionController.signal.removeEventListener('abort', onAbort);
+      };
+      const onAbort = () => { cleanup(); reject(this.executionController.signal.reason); };
+      this.parentMessageResolver = () => { cleanup(); resolve(); };
+      this.executionController.signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  private async compactContext(state: ContextRehydrationState): Promise<ContextCompactionResult> {
+    let started = false;
+    try {
+      return await this.context.compactIfNeeded(this.transcript, this.options.client, this.executionController.signal, {
+        ...state,
+        onCompactionStart: async () => {
+          started = true;
+          await this.emitter.emit('context_compaction_status', { active: true, transient: true });
+        },
+      });
+    } finally {
+      if (started) await this.emitter.emit('context_compaction_status', { active: false, transient: true });
+    }
   }
 
   private updateTask(updater: (current: TaskContract) => TaskContract): void {
@@ -403,9 +493,9 @@ export class AgentEngine {
     const remaining = this.run.budget.maxToolCalls - this.run.toolCalls;
     if (calls.length > remaining) throw new Error(`Agent run tool-call budget cannot execute this batch (${calls.length} requested, ${Math.max(0, remaining)} remaining).`);
     this.familyBudget.reserveToolCalls(calls.length);
-    const terminalIndexes = calls.flatMap((call, index) => call.name === 'complete_task' || call.name === 'ask_user' ? [index] : []);
+    const terminalIndexes = calls.flatMap((call, index) => call.name === 'complete_task' || call.name === 'ask_user' || call.name === 'ask_parent' ? [index] : []);
     if (terminalIndexes.length > 1 || terminalIndexes.some((index) => index !== calls.length - 1)) {
-      const message = 'Tool batch rejected: complete_task or ask_user must be the single terminal control call at the end of a batch. No requested side effects were executed.';
+      const message = 'Tool batch rejected: complete_task, ask_user, or ask_parent must be the single terminal control call at the end of a batch. No requested side effects were executed.';
       const rejected: Array<{ call: ParsedToolCall; result: AgentToolResult }> = [];
       for (const call of calls) rejected.push(await this.rejectOne(call, message));
       return rejected;
@@ -451,6 +541,7 @@ export class AgentEngine {
 
       while (true) {
         this.assertBudget();
+        await this.flushUserGuidance();
         const workspaceRevision = await this.options.runtime.getWorkspaceRevision(this.options.containerId);
         const system = buildAgentSystemPrompt({ containerId: this.options.containerId, task: this.task, chaos: this.run.chaos, summary: this.context.getSummary(), agentRole: this.run.agentRole ?? 'root' });
         const estimate = this.options.client.estimateTokens?.bind(this.options.client) ?? ((value: string) => Math.ceil(value.length / 4));
@@ -469,7 +560,7 @@ export class AgentEngine {
           onSummaryRequest: () => { this.assertBudget(); this.familyBudget.consumeModelTurn(); this.run.modelTurns += 1; },
           onSummaryUsage: (usage: AgentRun['modelUsage']) => this.recordModelUsage(usage),
         };
-        const compacted = await this.context.compactIfNeeded(this.transcript, this.options.client, this.executionController.signal, contextState);
+        const compacted = await this.compactContext(contextState);
         if (compacted.compacted) {
           this.transcript = compacted.messages;
           await this.emitter.emit('context_compacted', {
@@ -498,7 +589,7 @@ export class AgentEngine {
           } catch (error) {
             if (!isPromptTooLongModelError(error)) throw error;
             if (promptAttempt === 3) {
-              const fallback = await this.context.compactIfNeeded(this.transcript, this.options.client, this.executionController.signal, { ...contextState, forceCompaction: true, deterministicOnly: true });
+              const fallback = await this.compactContext({ ...contextState, forceCompaction: true, deterministicOnly: true });
               this.transcript = fallback.messages;
               await this.emitter.emit('context_compacted', {
                 summary: fallback.summary, fallback: true, beforeTokens: fallback.beforeTokens, afterTokens: fallback.afterTokens,
@@ -539,7 +630,22 @@ export class AgentEngine {
             await this.finish(terminal.content, 'awaiting_user');
             return;
           }
+          if (terminal?.stopRun === 'awaiting_parent') {
+            await this.emitMessage({ role: 'assistant', content: terminal.content });
+            this.awaitingParent = true;
+            await this.options.onAwaitingParent?.(terminal.content);
+            await this.phase('awaiting_parent', 'Waiting for a root Agent response.');
+            await this.waitForParentMessage();
+            this.awaitingParent = false;
+            await this.phase('observing', 'Root Agent guidance received.');
+            continue;
+          }
           if (terminal?.stopRun === 'completed') {
+            if (!this.beginCompletion()) {
+              this.transcript.push({ role: 'system', content: 'Completion was deferred because new user guidance is queued. Apply that guidance on the next model turn before completing.' });
+              await this.phase('observing', 'Processing queued user guidance before completion.');
+              continue;
+            }
             await this.emitMessage({ role: 'assistant', content: terminal.finalSummary ?? terminal.content });
             await this.finish(terminal.finalSummary ?? terminal.content);
             return;
@@ -548,12 +654,40 @@ export class AgentEngine {
           continue;
         }
         if (response.message.content.trim()) {
+          if ((this.run.agentRole ?? 'root') !== 'root') {
+            await this.emitMessage({
+              role: 'assistant',
+              content: response.message.content,
+              ...(response.message.reasoning_content ? { reasoning_content: response.message.reasoning_content } : {}),
+            });
+            this.transcript.push({ role: 'system', content: 'Child runs do not finish through plain responses. Continue the delegated task, call ask_parent for root coordination when blocked, or call complete_task with evidence when finished.' });
+            await this.phase('acting', 'Child plain response recorded; delegated work remains active.');
+            continue;
+          }
+          if (this.queuedUserGuidance.length) {
+            await this.emitMessage({
+              role: 'assistant',
+              content: response.message.content,
+              ...(response.message.reasoning_content ? { reasoning_content: response.message.reasoning_content } : {}),
+            });
+            await this.phase('observing', 'Processing queued user guidance before completion.');
+            continue;
+          }
           const gate = await evaluateCompletionGate({ task: this.task, agentRole: this.run.agentRole ?? 'root', runtime: this.options.runtime, containerId: this.options.containerId });
           this.updateTask(() => gate.task);
           if (!gate.ok) {
             await this.emitter.emit('assistant_delta', { content: '', reasoningContent: '', transient: true });
             this.transcript.push({ role: 'system', content: `Recovery required: ${gate.message}` });
             await this.phase(gate.phase, 'Model attempted completion before satisfying the task gates.');
+            continue;
+          }
+          if (!this.beginCompletion()) {
+            await this.emitMessage({
+              role: 'assistant',
+              content: response.message.content,
+              ...(response.message.reasoning_content ? { reasoning_content: response.message.reasoning_content } : {}),
+            });
+            await this.phase('observing', 'Processing queued user guidance before completion.');
             continue;
           }
           await this.emitMessage({

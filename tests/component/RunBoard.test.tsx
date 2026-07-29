@@ -13,6 +13,16 @@ const interruptedRun: AgentRun = {
 };
 
 describe('RunBoard', () => {
+  it('does not expose a separate root cancellation action', async () => {
+    const user = userEvent.setup();
+    const rendered = render(<I18nProvider><RunBoard run={{ ...interruptedRun, phase: 'acting' }} events={[]} /></I18nProvider>);
+    const view = within(rendered.container);
+
+    await user.click(view.getByRole('button', { name: /任务列表/ }));
+    expect(view.queryByRole('button', { name: '停止主 Agent' })).not.toBeInTheDocument();
+    rendered.unmount();
+  });
+
   it('surfaces an interrupted Run, proof state, and checkpoint resume action', async () => {
     const user = userEvent.setup();
     const onResume = vi.fn();

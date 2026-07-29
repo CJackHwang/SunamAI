@@ -20,14 +20,17 @@ describe('AgentEventStore', () => {
     const store = new AgentEventStore(repository);
     const sessionId = `v3-${Date.now()}`;
     const active = run(`r-${Date.now()}`, sessionId);
+    const awaitingParent = { ...run(`r-awaiting-${Date.now()}`, sessionId), phase: 'awaiting_parent' as const, depth: 1, parentRunId: active.id, rootRunId: active.id, agentRole: 'explore' as const };
     await store.append({ id: `${active.id}:1`, kind: 'run_started', sessionId, runId: active.id, sequence: 1, createdAt: 1, run: active });
     await store.append({ id: `${active.id}:2`, kind: 'message', sessionId, runId: active.id, sequence: 2, createdAt: 2, message: { role: 'user', content: 'persisted message' } });
     await store.saveCheckpoint({ id: `cp-${active.id}`, runId: active.id, sessionId, containerId: 'c-1', summary: 'resume here', messages: [{ role: 'user', content: 'persisted message' }], createdAt: 3 });
+    await store.saveRun(awaitingParent);
     await store.saveAgentTask({ id: 'active-task', taskId: 'active-task', sessionId, rootRunId: active.id, parentRunId: active.id, runId: 'child-active', role: 'explore', prompt: 'inspect', status: 'running', createdAt: 1, updatedAt: 1, evidence: [], changedPaths: [], verificationRecords: [] });
     expect(await store.loadSessionEvents(sessionId)).toHaveLength(2);
     expect((await store.latestCheckpoint(active.id))?.summary).toBe('resume here');
     const recovered = await store.markInterruptedRuns(sessionId);
     expect(recovered.find((candidate) => candidate.id === active.id)?.phase).toBe('interrupted');
+    expect(recovered.find((candidate) => candidate.id === awaitingParent.id)?.phase).toBe('interrupted');
     expect(await store.listAgentTasks(active.id)).toEqual([expect.objectContaining({ id: 'active-task', status: 'interrupted' })]);
   });
 

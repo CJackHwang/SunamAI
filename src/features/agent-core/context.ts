@@ -21,6 +21,7 @@ export interface ContextRehydrationState {
   fixedRequestTokens?: number;
   forceCompaction?: boolean;
   deterministicOnly?: boolean;
+  onCompactionStart?: () => void | Promise<void>;
   onSummaryRequest?: () => void;
   onSummaryUsage?: (usage: ModelTokenUsage | undefined) => void;
 }
@@ -283,6 +284,7 @@ export class ContextComposer {
     if (!state.forceCompaction && beforeTokens < Math.floor(effectiveTokens * COMPACTION_TRIGGER_RATIO)) {
       return { messages, compacted: false, fallback: false, summary: this.summary, beforeTokens, afterTokens: beforeTokens, rehydratedResourceIds: [] };
     }
+    await state.onCompactionStart?.();
 
     const micro = microCompact(messages, estimate);
     const groups = groupCompleteRounds(micro.messages, estimate);

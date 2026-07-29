@@ -61,13 +61,16 @@ describe('AgentToolRegistry', () => {
     expect(prompt).toContain('Do not guess OS PIDs or kill by port');
     expect(prompt).toContain('Use `explore` for independent read-only investigation and `task` for work that may edit files');
     expect(prompt).toContain('issue every `spawn_subagent` call before `wait_subagents`');
-    expect(prompt).toContain('Each `wait_subagents` call returns one completed child report');
+    expect(prompt).toContain('Each `wait_subagents` call returns one blocked or terminal child report');
+    expect(prompt).toContain('reply through `message_subagent`');
     expect(prompt).toContain('real root `/home/workspace/c-1`');
     expect(prompt).toContain('A relative directory such as `story-project` is created directly under the shared root');
 
     const childPrompt = buildAgentSystemPrompt({ containerId: 'c-1', task: getTask(), chaos: createChaosContract('Sunam 6.9 Pron'), summary: '', agentRole: 'task' });
     expect(childPrompt).toContain('Verification does not gate child completion');
     expect(childPrompt).toContain('child-local plan');
+    expect(childPrompt).toContain('call `ask_parent`');
+    expect(childPrompt).toContain('plain response never completes a child');
     expect(childPrompt).toContain('/home/workspace/c-1');
     expect(childPrompt).not.toContain('After making changes, you MUST use `shell_run`');
   });
@@ -106,6 +109,10 @@ describe('AgentToolRegistry', () => {
     expect((await registry.execute({ id: 'resource-verify', name: 'shell_run', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground' }) }, context)).verification?.passed).toBe(true);
     expect((await registry.execute({ id: '10', name: 'report_progress', arguments: JSON.stringify({ message: 'progress' }) }, context)).content).toBe('progress');
     expect((await registry.execute({ id: '11', name: 'ask_user', arguments: JSON.stringify({ question: 'Need input?' }) }, context)).stopRun).toBe('awaiting_user');
+    expect((await registry.execute({ id: 'ask-parent-root', name: 'ask_parent', arguments: JSON.stringify({ question: 'Need parent?' }) }, context)).ok).toBe(false);
+    context.agentRole = 'task';
+    expect((await registry.execute({ id: 'ask-parent-child', name: 'ask_parent', arguments: JSON.stringify({ question: 'Need parent?' }) }, context)).stopRun).toBe('awaiting_parent');
+    context.agentRole = 'root';
     expect((await registry.execute({ id: '12', name: 'complete_task', arguments: JSON.stringify({ summary: 'done', evidence: ['test'] }) }, context)).stopRun).toBe('completed');
     expect(runtime.runShell).toHaveBeenCalled();
   });
@@ -293,7 +300,7 @@ describe('AgentToolRegistry', () => {
     expect((await registry.execute({ id: 'explore-scope', name: 'spawn_subagent', arguments: '{"task_id":"read","role":"explore","prompt":"read","write_scope":["src"]}' }, context)).content).toContain('input validation failed');
     expect((await registry.execute({ id: 'wait', name: 'wait_subagents', arguments: '{"run_ids":["child-1"]}' }, context)).data).toEqual([notification]);
     expect((await registry.execute({ id: 'message', name: 'message_subagent', arguments: '{"run_id":"child-1","message":"focus"}' }, context)).ok).toBe(true);
-    expect((await registry.execute({ id: 'stop', name: 'stop_subagent', arguments: '{"run_id":"child-1"}' }, context)).ok).toBe(true);
+    expect((await registry.execute({ id: 'stop', name: 'stop_subagent', arguments: '{"run_id":"child-1"}' }, context)).ok).toBe(false);
 
     context.agentRole = 'task';
     expect((await registry.execute({ id: 'background', name: 'shell_run', arguments: '{"command":"npm run dev","mode":"background"}' }, context)).ok).toBe(true);

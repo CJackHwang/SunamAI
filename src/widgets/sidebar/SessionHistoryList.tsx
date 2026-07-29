@@ -67,11 +67,12 @@ function SessionHistoryGroup({ session, activeSessionId, conversationView, child
       <div className="sidebar-session-children">{childRuns.map((run) => {
         const id = run.delegatedTaskId ?? run.id;
         const selected = conversationView.kind === 'subagent' && conversationView.runId === run.id;
-        return <div key={run.id} className={`sidebar-subagent-row list-row ${selected ? 'active' : ''}`} title={id} onClick={() => { onSelectSession(session.id); onConversationViewChange({ kind: 'subagent', sessionId: session.id, runId: run.id }); }} onContextMenu={(event) => onOpenChildMenu(event, run, session.id)}>
+        const isUnfinished = isActiveAgentPhase(run.phase) || run.phase === 'awaiting_parent' || run.phase === 'awaiting_user';
+        return <div key={run.id} className={`sidebar-subagent-row list-row ${selected ? 'active' : ''}`} title={id} onClick={() => { onSelectSession(session.id); onConversationViewChange({ kind: 'subagent', sessionId: session.id, runId: run.id }); }} {...(!isUnfinished ? { onContextMenu: (event: MouseEvent<HTMLDivElement>) => onOpenChildMenu(event, run, session.id) } : {})}>
           <Bot size={15} />
           <span className="sidebar-subagent-label"><strong>{normalizeSubagentRole(run.agentRole)}</strong><span>{id}</span></span>
-          {isActiveAgentPhase(run.phase) ? <Loader2 size={13} className="animate-spin sidebar-running" /> : <span className={`sidebar-status-dot ${run.phase === 'completed' ? 'success' : 'danger'}`} />}
-          <button className="item-action" onClick={(event) => { event.stopPropagation(); onOpenChildMenu(event, run, session.id); }} aria-label={id}><MoreHorizontal size={14} /></button>
+          {isUnfinished ? <Loader2 size={13} className="animate-spin sidebar-running" /> : <span className={`sidebar-status-dot ${run.phase === 'completed' ? 'success' : 'danger'}`} />}
+          {!isUnfinished && <button className="item-action" onClick={(event) => { event.stopPropagation(); onOpenChildMenu(event, run, session.id); }} aria-label={id}><MoreHorizontal size={14} /></button>}
         </div>;
       })}</div>
     </details> : <div className={`sidebar-item list-row sidebar-session-summary sidebar-session-static ${isEditing ? 'is-editing' : ''}`} role="button" tabIndex={0} onClick={selectRoot} onKeyDown={selectRootFromKeyboard} onContextMenu={(event) => onOpenSessionContext(event, session.id)}>{rowContent}{trailing}</div>}

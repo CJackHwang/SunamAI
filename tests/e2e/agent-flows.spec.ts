@@ -8,6 +8,11 @@ function toolCalls(calls: Array<{ id: string; name: string; arguments: Record<st
   return sse({ tool_calls: calls.map((call, index) => ({ index, id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } })) });
 }
 
+function proseAndToolCalls(content: string, calls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>): string {
+  const toolDelta = { choices: [{ delta: { tool_calls: calls.map((call, index) => ({ index, id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } })) } }] };
+  return `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\ndata: ${JSON.stringify(toolDelta)}\n\ndata: [DONE]\n\n`;
+}
+
 async function openConfigured(page: import('@playwright/test').Page, baseUrl: string) {
   await page.addInitScript(({ url }) => {
     localStorage.clear();
@@ -54,23 +59,65 @@ test('image attachment automatically falls back when the configured model reject
 test('automatic compaction handles an oversized prompt without user controls', async ({ page }) => {
   test.setTimeout(120_000);
   const baseUrl = 'https://compact-e2e.invalid/v1';
+  let markCompactionStarted: () => void = () => undefined;
+  let releaseCompaction: () => void = () => undefined;
+  const compactionStarted = new Promise<void>((resolve) => { markCompactionStarted = resolve; });
+  const compactionGate = new Promise<void>((resolve) => { releaseCompaction = resolve; });
+  let markSecondMainStarted: () => void = () => undefined;
+  let releaseSecondMain: () => void = () => undefined;
+  const secondMainStarted = new Promise<void>((resolve) => { markSecondMainStarted = resolve; });
+  const secondMainGate = new Promise<void>((resolve) => { releaseSecondMain = resolve; });
+  let streamTurn = 0;
   await page.route(`${baseUrl}/chat/completions`, async (route) => {
-    const body = route.request().postDataJSON() as { stream?: boolean };
+    const body = route.request().postDataJSON() as { stream?: boolean; messages?: Array<{ content?: unknown }> };
+    const isSemanticCompaction = JSON.stringify(body.messages ?? []).includes('Create a compact factual continuation record');
+    if (isSemanticCompaction) {
+      markCompactionStarted();
+      await compactionGate;
+      await route.fulfill({ contentType: 'text/event-stream', body: sse({ content: 'Compact continuation facts.' }) });
+      return;
+    }
     if (!body.stream) {
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Compact test' } }] }) });
       return;
     }
-    await route.fulfill({ contentType: 'text/event-stream', body: toolCalls([
+    streamTurn += 1;
+    if (streamTurn === 1) {
+      await route.fulfill({ contentType: 'text/event-stream', body: toolCalls([
+        { id: 'prepare-history', name: 'report_progress', arguments: { message: 'Preparing compaction history.' } },
+      ]) });
+      return;
+    }
+    if (streamTurn === 2) {
+      markSecondMainStarted();
+      await secondMainGate;
+      await route.fulfill({ contentType: 'text/event-stream', body: proseAndToolCalls('历史分析：'.repeat(20_000), [
+        { id: 'progress-before-compaction', name: 'report_progress', arguments: { message: 'Preparing the next model turn.' } },
+      ]) });
+      return;
+    }
+    await route.fulfill({ contentType: 'text/event-stream', body: proseAndToolCalls('压缩后正文与工具同时显示。', [
       { id: 'plan', name: 'update_plan', arguments: { items: [{ id: 'compact', title: 'Compact and finish', status: 'completed' }] } },
       { id: 'complete', name: 'complete_task', arguments: { summary: 'Oversized prompt handled.', evidence: ['Automatic context compaction completed.'] } },
     ]) });
   });
   const composer = await openConfigured(page, baseUrl);
-  await composer.fill(`实现自动压缩验证：${'长上下文'.repeat(30_000)}`);
+  await composer.fill('实现自动压缩验证。');
   await composer.press('Enter');
+  await secondMainStarted;
+  await composer.fill('继续，并在下一轮压缩旧上下文。');
+  await page.getByRole('button', { name: '发送' }).click();
+  releaseSecondMain();
+  await compactionStarted;
+  await expect(page.getByRole('status')).toHaveText('正在自动压缩上下文');
+  releaseCompaction();
   await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph')
     .filter({ hasText: /^Oversized prompt handled\.$/ }))
     .toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText('压缩后正文与工具同时显示。')).toBeVisible();
+  await page.getByText('已完成: update_plan').click();
+  await expect(page.locator('.chat-tool-body').first()).toHaveCSS('max-height', '240px');
+  await expect(page.locator('.chat-tool-body').first()).toHaveCSS('overflow', 'auto');
   await page.locator('.task-list-summary').click();
   await expect(page.locator('.task-list-compaction')).toContainText('上下文已自动压缩');
   await expect(page.locator('.task-list-compaction')).toContainText(/\d+ → \d+ tokens/);
@@ -149,9 +196,72 @@ test('a user cancellation aborts the active model request and closes the run', a
   const composer = await openConfigured(page, baseUrl);
   await composer.fill('Stop');
   await composer.press('Enter');
-  await expect(page.locator('.chat-submit')).toBeEnabled();
-  await page.locator('.chat-submit').click();
+  await expect(composer).toBeEnabled();
+  await expect(page.getByRole('button', { name: '停止主 Agent' })).toBeEnabled();
+  await page.getByRole('button', { name: '停止主 Agent' }).click();
   await expect(page.locator('.task-list-phase')).toHaveText('cancelled', { timeout: 60_000 });
+});
+
+test('running composer keeps its normal style and queues guidance into the next model turn', async ({ page }) => {
+  test.setTimeout(120_000);
+  const baseUrl = 'https://guidance-e2e.invalid/v1';
+  let releaseFirst: () => void = () => undefined;
+  let markFirstStarted: () => void = () => undefined;
+  const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const modelTranscripts: string[] = [];
+  await page.route(`${baseUrl}/chat/completions`, async (route) => {
+    const body = route.request().postDataJSON() as { stream?: boolean; messages?: Array<{ role: string; content: unknown }> };
+    if (!body.stream) {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Guidance flow' } }] }) });
+      return;
+    }
+    modelTranscripts.push(JSON.stringify(body.messages ?? []));
+    if (modelTranscripts.length === 1) {
+      markFirstStarted();
+      await firstGate;
+      await route.fulfill({ contentType: 'text/event-stream', body: toolCalls([{ id: 'progress', name: 'report_progress', arguments: { message: 'Initial action finished.' } }]) });
+      return;
+    }
+    if (!modelTranscripts.at(-1)?.includes('Prioritize the mobile composer.')) throw new Error('Guidance did not reach the next model turn.');
+    await route.fulfill({ contentType: 'text/event-stream', body: toolCalls([{ id: 'guided-complete', name: 'complete_task', arguments: { summary: 'Guidance applied.', evidence: ['Mobile composer guidance applied on the next turn.'] } }]) });
+  });
+
+  const composer = await openConfigured(page, baseUrl);
+  await composer.fill('Start a task and wait for guidance.');
+  const send = page.locator('.chat-submit');
+  await expect(send).toBeEnabled();
+  await expect(send).toHaveCSS('opacity', '1');
+  const normalStyles = await page.locator('.chat-input-row').evaluate((row) => {
+    const input = getComputedStyle(row.querySelector('textarea')!);
+    const button = getComputedStyle(row.querySelector('button')!);
+    return { inputBackground: input.backgroundColor, inputColor: input.color, buttonBackground: button.backgroundColor, buttonColor: button.color, buttonOpacity: button.opacity };
+  });
+  await composer.press('Enter');
+  await firstStarted;
+  await expect(composer).toBeEnabled();
+  await expect(send).toHaveAttribute('aria-label', '停止主 Agent');
+  await expect(send).toHaveCSS('opacity', '1');
+  const thinking = page.getByRole('status');
+  await expect(thinking).toHaveText('Sunam 正在思考...');
+  await expect(thinking).toHaveCSS('animation-name', 'thinking-text-sheen');
+  await expect(thinking).toHaveCSS('animation-duration', '3.6s');
+  await composer.fill('Prioritize the mobile composer.');
+  await expect(send).toBeEnabled();
+  await expect(send).toHaveAttribute('aria-label', '发送');
+  await expect.poll(async () => page.locator('.chat-input-row').evaluate((row) => {
+    const input = getComputedStyle(row.querySelector('textarea')!);
+    const button = getComputedStyle(row.querySelector('button')!);
+    return { inputBackground: input.backgroundColor, inputColor: input.color, buttonBackground: button.backgroundColor, buttonColor: button.color, buttonOpacity: button.opacity };
+  })).toEqual(normalStyles);
+  await send.click();
+  await expect(page.locator('.chat-message[data-role="user"]', { hasText: 'Prioritize the mobile composer.' })).toBeVisible();
+  releaseFirst();
+
+  await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph').filter({ hasText: /^Guidance applied\.$/ })).toBeVisible({ timeout: 60_000 });
+  expect(modelTranscripts).toHaveLength(2);
+  expect(modelTranscripts[0]).not.toContain('Prioritize the mobile composer.');
+  expect(modelTranscripts[1]).toContain('Prioritize the mobile composer.');
 });
 
 test('a failed session keeps its status indicator separate from the action slot', async ({ page }) => {
@@ -253,74 +363,76 @@ test('the root agent delegates, waits, and renders a structured child run', asyn
   await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph').filter({ hasText: /^Delegation complete\.$/ })).toBeVisible();
 });
 
-test('stopping one child leaves its sibling and parent running', async ({ page }) => {
+test('a child asks only its parent, resumes from parent guidance, and completes explicitly', async ({ page }) => {
   test.setTimeout(120_000);
-  const baseUrl = 'https://subagent-stop-e2e.invalid/v1';
-  let releaseFirst!: () => void;
-  let releaseSecond!: () => void;
-  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
-  const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve; });
+  const baseUrl = 'https://subagent-parent-e2e.invalid/v1';
   let rootTurn = 0;
+  let childTurn = 0;
+  let childTools: string[] = [];
+  const rootTranscripts: string[] = [];
+  let rootReceivedBlocked = false;
   await page.route(`${baseUrl}/chat/completions`, async (route) => {
-    const body = route.request().postDataJSON() as { stream?: boolean; messages?: Array<{ role: string; content: unknown }> };
+    const body = route.request().postDataJSON() as { stream?: boolean; tools?: Array<{ function?: { name?: string } }>; messages?: Array<{ role: string; content: unknown }> };
     if (!body.stream) {
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Parallel delegation' } }] }) });
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Parent coordination' } }] }) });
       return;
     }
     const lastUser = [...(body.messages ?? [])].reverse().find((message) => message.role === 'user');
     const text = String(lastUser?.content ?? '');
-    if (text.includes('Hold child one.')) {
-      await firstGate;
-      await route.fulfill({ contentType: 'text/event-stream', body: toolCalls([{ id: 'first-complete', name: 'complete_task', arguments: { summary: 'First finished.', evidence: ['first'] } }]) }).catch(() => undefined);
-      return;
-    }
-    if (text.includes('Hold child two.')) {
-      await secondGate;
-      await route.fulfill({ contentType: 'text/event-stream', body: toolCalls([{ id: 'second-complete', name: 'complete_task', arguments: { summary: 'Second finished.', evidence: ['second'] } }]) }).catch(() => undefined);
+    if (text.includes('Ask the parent which target to inspect.')) {
+      childTurn += 1;
+      childTools = (body.tools ?? []).flatMap((tool) => tool.function?.name ? [tool.function.name] : []);
+      if (childTurn === 1) {
+        await route.fulfill({ contentType: 'text/event-stream', body: toolCalls([{ id: 'ask-parent', name: 'ask_parent', arguments: { question: 'Which target should I inspect?' } }]) });
+      } else {
+        const transcript = JSON.stringify(body.messages ?? []);
+        if (!transcript.includes('Inspect the mobile composer.')) throw new Error('Child did not receive parent guidance.');
+        await route.fulfill({ contentType: 'text/event-stream', body: toolCalls([{ id: 'child-complete', name: 'complete_task', arguments: { summary: 'Parent-guided inspection complete.', evidence: ['Inspected the mobile composer.'] } }]) });
+      }
       return;
     }
     rootTurn += 1;
+    const transcript = JSON.stringify(body.messages ?? []);
+    rootTranscripts.push(transcript);
+    const runId = transcript.match(/r-child-[0-9a-f-]{20,}/i)?.[0];
     if (rootTurn === 1) {
       await route.fulfill({ contentType: 'text/event-stream', body: toolCalls([
-        { id: 'spawn-first', name: 'spawn_subagent', arguments: { task_id: 'first', role: 'explore', prompt: 'Hold child one.' } },
-        { id: 'spawn-second', name: 'spawn_subagent', arguments: { task_id: 'second', role: 'task', prompt: 'Hold child two.' } },
+        { id: 'parent-plan', name: 'update_plan', arguments: { items: [{ id: 'coordinate', title: 'Coordinate parent-guided child', status: 'in_progress' }] } },
+        { id: 'spawn-child', name: 'spawn_subagent', arguments: { task_id: 'parent-guided', role: 'explore', prompt: 'Ask the parent which target to inspect.' } },
       ]) });
       return;
     }
-    if (rootTurn === 2 || rootTurn === 3) {
-      const runIds = [...new Set(JSON.stringify(body.messages ?? []).match(/r-child-[0-9a-f-]{20,}/gi) ?? [])];
-      if (runIds.length !== 2) throw new Error('Parallel subagent fixture did not receive both child IDs.');
-      await route.fulfill({ contentType: 'text/event-stream', body: toolCalls([{ id: `wait-next-${rootTurn}`, name: 'wait_subagents', arguments: { run_ids: runIds } }]) });
+    if (!runId) throw new Error('Parent coordination fixture did not receive the child ID.');
+    if (rootTurn === 2 || rootTurn === 4) {
+      await route.fulfill({ contentType: 'text/event-stream', body: toolCalls([{ id: `wait-${rootTurn}`, name: 'wait_subagents', arguments: { run_ids: [runId] } }]) });
       return;
     }
-    await route.fulfill({ contentType: 'text/event-stream', body: toolCalls([{ id: 'root-complete', name: 'complete_task', arguments: { summary: 'Parent stayed alive.', evidence: ['second child completed'] } }]) });
+    if (rootTurn === 3) {
+      rootReceivedBlocked = (body.messages ?? []).some((message) => typeof message.content === 'string' && message.content.includes('Which target should I inspect?') && message.content.includes('"status":"blocked"'));
+      if (!rootReceivedBlocked) throw new Error('Root did not receive the child blocker.');
+      await route.fulfill({ contentType: 'text/event-stream', body: toolCalls([{ id: 'guide-child', name: 'message_subagent', arguments: { run_id: runId, message: 'Inspect the mobile composer.' } }]) });
+      return;
+    }
+    await route.fulfill({ contentType: 'text/event-stream', body: toolCalls([
+      { id: 'parent-plan-done', name: 'update_plan', arguments: { items: [{ id: 'coordinate', title: 'Coordinate parent-guided child', status: 'completed' }] } },
+      { id: 'root-complete', name: 'complete_task', arguments: { summary: 'Parent coordination complete.', evidence: ['Child completed after parent guidance.'] } },
+    ]) });
   });
 
   const composer = await openConfigured(page, baseUrl);
-  await composer.fill('Run two independent children and wait for both.');
+  await composer.fill('Delegate an explorer that must ask its parent for the target, answer it, and wait for explicit completion.');
   await composer.press('Enter');
-  await expect(page.locator('.sidebar-subagent-row')).toHaveCount(2, { timeout: 60_000 });
+  await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph').filter({ hasText: /^Parent coordination complete\.$/ })).toBeVisible({ timeout: 60_000 });
+  expect(childTools).toContain('ask_parent');
+  expect(childTools).not.toContain('ask_user');
+  expect(rootReceivedBlocked).toBe(true);
+  await expect(page.locator('.chat-message[data-role="user"]', { hasText: 'Which target should I inspect?' })).toHaveCount(0);
   await page.locator('.sidebar-session-summary').click();
-  const childRows = page.locator('.sidebar-subagent-row');
-  await expect(childRows.getByText('explore', { exact: true })).toHaveCount(1);
-  await expect(childRows.getByText('task', { exact: true })).toHaveCount(1);
-  await childRows.first().click();
-  if ((await page.locator('.chat-message[data-role="user"]').textContent())?.includes('Hold child two.')) await childRows.nth(1).click();
-  await expect(page.locator('.chat-message[data-role="user"]')).toContainText('Hold child one.');
-  await page.locator('.sidebar-subagent-row:not(.active)').click();
-  await expect(page.locator('.chat-message[data-role="user"]')).toContainText('Hold child two.');
-  await expect(page.locator('.chat-message[data-role="user"]')).not.toContainText('Hold child one.');
-  await page.locator('.sidebar-subagent-row:not(.active)').click();
-  await expect(page.locator('.chat-message[data-role="user"]')).toContainText('Hold child one.');
-  await expect(page.locator('.chat-message[data-role="user"]')).not.toContainText('Hold child two.');
-  await page.getByRole('button', { name: '停止此子 Agent' }).click();
-  releaseFirst();
+  await page.locator('.sidebar-subagent-row').click();
   await expect(page.getByRole('button', { name: '返回父 Agent' })).toBeVisible();
-  await expect(page.locator('.sidebar-session-summary .sidebar-running')).toBeVisible();
-  await expect(page.locator('.sidebar-subagent-row:not(.active) .sidebar-running')).toBeVisible();
-  releaseSecond();
-  await page.getByRole('button', { name: '返回父 Agent' }).click();
-  await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph').filter({ hasText: /^Parent stayed alive\.$/ })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('button', { name: /停止.*子 Agent/ })).toHaveCount(0);
+  await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph').filter({ hasText: /^Which target should I inspect\?$/ })).toBeVisible();
+  await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph').filter({ hasText: /^Parent-guided inspection complete\.$/ })).toBeVisible();
 });
 
 test('a new root family prunes terminal children from the previous round', async ({ page }) => {
