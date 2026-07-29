@@ -11,7 +11,7 @@ Read this leaf when changing CSS ownership, surface geometry, chat colors/spacin
 - Nested rounded surfaces use `inner radius = outer radius - padding`, using the smaller/dominant padding axis when axes differ.
 - Chat and nested tool surfaces use symmetric padding: message 16px, thinking 10px, tool disclosure 8px, arguments/results 12px. They use background, spacing, and concentric radii rather than borders.
 - User message bubbles use `--color-gray-700` (`#3a3a3a`), not black or near-black.
-- The idle thinking label uses a restrained periodic horizontal text sheen without changing layout. Reduced motion and forced colors remove the sheen and retain readable solid text.
+- The idle thinking label uses a restrained horizontal white text sheen without changing layout. One cycle is one non-repeating sweep across a `250%` background from one symmetric off-text position (`100%`) to the other (`0%`), fast enough for a short status label. Remember that percentage `background-position` offsets are calculated from `container size - background image size`; they are not literal percentages of the text width. Set the resting background position explicitly, keep the white band fully offscreen at both ends, and use only an invisible end-of-cycle discrete reset so the `100%` frame exactly matches the next `0%` frame. Do not repeat the gradient tile or encode repeated sweep ranges that create two flashes followed by a dwell. Reduced motion and forced colors remove the sheen and retain readable solid text.
 - Expanded chat tool bodies are bounded to `240px` and scroll internally so long arguments/results do not expand the transcript without limit.
 
 ```css
@@ -35,6 +35,8 @@ Use motion tokens by role:
 - small transforms/direct manipulation: `--motion-fast` or `--motion-base` with `--motion-snappy`/`--motion-spring`;
 - panels, intrinsic size, grid rows, sidebars, sheets: `--motion-slow` with `--motion-sheet`;
 - exits: `--motion-exit`, normally shorter than entrance.
+
+Keyed vertical lists that reorder after pin/unpin use shared FLIP motion rather than feature-specific CSS positions. Owners provide stable `data-reorder-key` IDs and an order signature. Suppress the first measurement, animate the moved row and displaced siblings, cancel/replace in-flight animations from their current visual rectangles, clean up on unmount, and bypass spatial motion under reduced motion.
 
 When `usePresence(value, exitDuration)` retains a component, its duration is at least the longest responsive exit animation. A 240ms mobile sheet must not use a 160ms desktop-menu lifetime.
 

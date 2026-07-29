@@ -14,6 +14,7 @@ Keep native `<details>/<summary>` semantics. When intrinsic dimensions jump, the
 - Reduced motion or missing `Element.animate` changes state immediately.
 - If the nearest scroll owner was already at bottom, use direct `scrollTop = scrollHeight` correction during the user-triggered animation; wheel/touch input stops correction.
 - Cancel animations, frames, and temporary listeners on rapid reversal and unmount.
+- Programmatic disclosure changes use the same idempotent animation owner as summary clicks (currently `setDisclosureExpanded(next)` from `useIntrinsicDisclosure`); do not mutate `open` in a second owner.
 
 Controls available while collapsed live outside the hidden body:
 
@@ -25,6 +26,10 @@ Controls available while collapsed live outside the hidden body:
 ```
 
 Render disclosure only when expandable content exists. Preload lightweight child summaries, not transcripts, to decide whether the row has a disclosure. Rows reserve the same trailing action slot. Returning from a selected child to root preserves the open list on first activation; later root activations toggle normally.
+
+The active session distinguishes completed historical-child preload from later child-ID additions. Historical children remain collapsed after preload. Each genuinely new child opens the active session through the shared disclosure animation; if the user collapsed after an earlier child, a later new child may reopen it. Inactive sessions do not auto-open.
+
+> **Boolean-attribute test gotcha**: an open disclosure serializes as `open=""`, so `getAttribute('open')` returns an empty string even when present. Browser tests use `toHaveAttribute('open', '')` or `hasAttribute('open')`, then wait for `data-animating` to clear before clicking descendants.
 
 All resource/action menus use `shared/ui/ActionMenu`. It owns the `document.body` portal, overlay, 240ms presence, viewport clamping, menu semantics, danger state, separators, and close-after-action behavior. Callers provide typed items and business callbacks.
 
@@ -55,7 +60,7 @@ All resource/action menus use `shared/ui/ActionMenu`. It owns the `document.body
 
 ## Required Validation
 
-- Component tests cover default/collapsed state, action availability, toggle, rapid reversal, reduced motion, portal payload retention, roles, disabled items, and Escape/overlay/action closing.
+- Component tests cover default/collapsed state, historical preload suppression, live-child auto-open/reopen, action availability, toggle, rapid reversal, reduced motion, portal payload retention, roles, disabled items, and Escape/overlay/action closing.
 - Browser tests prove intrinsic animation starts/settles, desktop menus stay in viewport, and mobile sheets are bottom-aligned/full-width for single- and multi-action callers.
 
 ## Related Contracts

@@ -32,17 +32,23 @@ Examples:
 
 ### High-frequency scroll ownership
 
-Streaming chat updates must separate automatic following from user-requested animation:
+Streaming chat updates use one owner with `following`, `detached`, and `returning` modes. Automatic following and user-requested return motion are separate paths:
 
 ```ts
 // Automatic token/layout updates: correct before paint and do not queue animations.
-if (followsBottomRef.current) container.scrollTop = container.scrollHeight;
+if (modeRef.current === 'following') {
+  container.scrollTop = container.scrollHeight - container.clientHeight;
+}
 
-// Explicit user action only: animation is intentional here.
-container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+// Explicit return only: each frame reads the current target because streaming can grow it.
+const liveTarget = container.scrollHeight - container.clientHeight;
+container.scrollTop += (liveTarget - container.scrollTop) * easedStep;
 ```
 
-- Store the current follow intent in a ref updated synchronously by the scroll handler; React state may mirror it for button visibility.
+- Store the current mode in a ref updated synchronously by scroll/input handlers; React state mirrors bottom-control visibility only. Keep those contracts independent: the viewport may be `detached` while the shortcut remains hidden within one quarter of the viewport height from the bottom.
+- Upward wheel, touch, pointer/scrollbar, or keyboard intent detaches immediately, even inside a near-bottom threshold. Later tokens must preserve that reading position.
+- Reattach only when the viewport reaches the live edge, a submission explicitly requests follow, or the user activates return-to-bottom.
+- Explicit return-to-bottom uses one cancellable `requestAnimationFrame` loop. Recalculate the target and shortcut visibility on every frame, hide the shortcut once the remaining distance is at most one quarter viewport, decelerate toward the target, apply one exact final correction, and cancel on renewed user input or unmount. Reduced motion jumps directly.
 - Never start a new smooth scroll for every token, message delta, ResizeObserver callback, or composer-height update. Repeated animations fight each other and can flip the bottom detector during intermediate frames.
 - Do not animate reserved bottom padding independently from the correction owner. If scrollHeight changes across CSS transition frames, the hook cannot anchor each intermediate height without reintroducing churn.
 - Observe the explicit rows that contribute reserved height. Avoid observing an ancestor whose overlay/expanded body animates but is intentionally excluded from the reservation.
@@ -66,7 +72,7 @@ Convert caught values with `toErrorMessage` when details are safe and useful. Us
 
 ## Required Validation
 
-- Hook tests cover cleanup, stale async completion, external-store equality, and scroll-owner behavior when applicable.
+- Hook tests cover cleanup, stale async completion, external-store equality, and scroll-owner behavior when applicable. Scroll tests assert near-edge upward detachment, quarter-viewport shortcut visibility while detached/returning, dynamic target growth, input cancellation, submission reattachment, final settle, and reduced motion.
 - Use [Test strategy](../quality/test-strategy.md) and [Validation gates](../quality/validation-gates.md).
 
 ## Related Contracts
