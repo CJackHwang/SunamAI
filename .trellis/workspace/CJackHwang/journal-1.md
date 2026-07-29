@@ -233,3 +233,24 @@ Refined the desktop and mobile frontend with shared Apple-inspired materials, mo
 ### Status
 
 [OK] **Completed**
+
+
+## Session 11: Mobile PWA guidance and subagent lifecycle
+
+**Date**: 2026-07-29
+**Task**: Mobile PWA guidance and subagent lifecycle
+**Branch**: `main`
+
+### Summary
+
+Fixed mobile PWA materials and terminal focus, restored shared root send/stop guidance and isolated child stopping, added parent-only child coordination, compaction status, thinking sheen, and bounded tool details; full check:all passed.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4c15c16` | (see git log) |
+
+### Status
+
+[OK] **Completed**
