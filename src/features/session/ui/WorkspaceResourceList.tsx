@@ -1,6 +1,7 @@
 import type { ComponentType, MouseEvent, RefObject } from 'react';
 import { Loader2, MoreHorizontal, Pin } from 'lucide-react';
 import type { Container, Session } from '@/entities/workspace/types';
+import { useListReorderAnimation } from '@/shared/ui/useListReorderAnimation';
 
 type Resource = Session | Container;
 interface WorkspaceResourceListProps {
@@ -19,12 +20,13 @@ interface WorkspaceResourceListProps {
 }
 
 export function WorkspaceResourceList({ items, activeId, isCollapsed, emptyLabel, generatingId, editing, icon: Icon, onSelect, onOpenContext, onEditChange, onEditSubmit, editInputRef }: WorkspaceResourceListProps) {
+  const listRef = useListReorderAnimation(items.map((item) => item.id).join('\u0000'));
   if (isCollapsed) return null;
-  return <div className="sidebar-list">{items.length === 0 ? <div className="sidebar-empty">{emptyLabel}</div> : items.map((item) => {
+  return <div ref={listRef} className="sidebar-list">{items.length === 0 ? <div className="sidebar-empty">{emptyLabel}</div> : items.map((item) => {
     const label = 'title' in item ? item.title : item.name;
     const status = 'status' in item ? item.status : undefined;
     const isEditing = editing?.id === item.id;
-    return <div key={item.id} className={`sidebar-item list-row ${activeId === item.id ? 'active' : ''} ${isEditing ? 'is-editing' : ''}`} onClick={() => onSelect(item.id)} onContextMenu={(event) => onOpenContext(event, item.id)}>
+    return <div key={item.id} data-reorder-key={item.id} className={`sidebar-item list-row ${activeId === item.id ? 'active' : ''} ${isEditing ? 'is-editing' : ''}`} onClick={() => onSelect(item.id)} onContextMenu={(event) => onOpenContext(event, item.id)}>
       {item.pinned ? <Pin size={16} fill="currentColor" className="sidebar-resource-icon" /> : <Icon size={16} className="sidebar-resource-icon" />}
       {isEditing ? <input ref={editInputRef} className="item-text sidebar-item-input" value={editing.text} onChange={(event) => onEditChange(item.id, event.target.value)} onBlur={onEditSubmit} onKeyDown={(event) => event.key === 'Enter' && onEditSubmit()} onClick={(event) => event.stopPropagation()} /> : <span className="item-text">{label}</span>}
       {generatingId === item.id && <Loader2 size={14} className="animate-spin sidebar-generating" />}

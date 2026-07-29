@@ -5,7 +5,7 @@ import type { AgentController, AgentConversationView } from '@/features/agent-co
 import { isActiveAgentPhase } from '@/features/agent-core/types';
 import { useChatAutoScroll } from '@/features/chat/hooks/useChatAutoScroll';
 import { ChatComposer } from '@/features/chat/ui/ChatComposer';
-import { ChatMessageList } from '@/features/chat/ui/ChatMessageList';
+import { ChatMessageList, type UserMessageEntranceRequest } from '@/features/chat/ui/ChatMessageList';
 import { MobileNavigation } from '@/features/chat/ui/MobileNavigation';
 import { ModelSelector } from '@/features/chat/ui/ModelSelector';
 import { SubagentFooter } from '@/features/chat/ui/SubagentFooter';
@@ -55,9 +55,11 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
   const [mobileActive, setMobileActive] = useState<'chat' | TerminalTab>('chat');
   const [layoutState, setLayoutState] = useState<TerminalLayout>('collapsed');
   const [layoutTransition, setLayoutTransition] = useState<'from-full' | null>(null);
+  const [userMessageEntrance, setUserMessageEntrance] = useState<UserMessageEntranceRequest | null>(null);
+  const userMessageEntranceIdRef = useRef(0);
   const scrollPositionsRef = useRef(new Map<string, number>());
   const previousViewKeyRef = useRef('root');
-  const { containerRef, isAtBottom, onScroll, scrollToBottom } = useChatAutoScroll([messages, isRunning, streamingContent, streamingReasoning, composerHeight]);
+  const { containerRef, isAtBottom, onScroll, scrollToBottom, followLatest } = useChatAutoScroll([messages, isRunning, streamingContent, streamingReasoning, composerHeight]);
   const activeContainer = containers.find((container) => container.id === activeContainerId) ?? null;
   const viewKey = isSubagentView ? conversationView.runId : 'root';
 
@@ -123,9 +125,16 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
     if (isRunning) {
       if (!input.trim()) return;
       const guidance = input.trim();
+      const entranceRequestId = ++userMessageEntranceIdRef.current;
+      setUserMessageEntrance({ id: entranceRequestId, previousLastMessage: messages.at(-1) ?? null });
+      followLatest();
       setInput('');
       setAttachmentError(null);
-      void guideActiveTask(guidance).then((accepted) => { if (!accepted) setAttachmentError(t('chat.guidanceFailed')); });
+      void guideActiveTask(guidance).then((accepted) => {
+        if (accepted) return;
+        setUserMessageEntrance((current) => current?.id === entranceRequestId ? null : current);
+        setAttachmentError(t('chat.guidanceFailed'));
+      });
       return;
     }
     if (!input.trim() && attachments.length === 0) return;
@@ -143,6 +152,8 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
       void generateTitle(prompt, { apiKey, baseUrl, model: apiModel }).then((title) => { if (title) renameSession(sessionId!, title); }).catch((error) => setAttachmentError(toErrorMessage(error)));
     }
     const containerId = activeContainerId ?? createContainer();
+    setUserMessageEntrance({ id: ++userMessageEntranceIdRef.current, previousLastMessage: messages.at(-1) ?? null });
+    followLatest();
     startTask(prompt, sessionId, containerId, attachments);
     setInput('');
     setAttachments([]);
@@ -158,7 +169,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
     <div className="workspace-container" data-active-tab={mobileActive} data-layout={layoutState} data-layout-transition={layoutTransition ?? undefined} onAnimationEnd={finishLayoutTransition}>
       <div className="chat-section">
         <ModelSelector model={sunamModel} isOpen={isModelMenuOpen} onToggle={() => setIsModelMenuOpen((open) => !open)} onSelect={(model) => { setSunamModel(model); setIsModelMenuOpen(false); }} {...(onMobileSidebarToggle ? { onMobileSidebarToggle } : {})} />
-        <ChatMessageList messages={messages} isRunning={isRunning} containerRef={containerRef} onScroll={handleChatScroll} bottomInset={(isSubagentView ? 68 : composerHeight) + 16} streamingContent={streamingContent} streamingReasoning={streamingReasoning} isCompacting={isCompacting} />
+        <ChatMessageList messages={messages} isRunning={isRunning} containerRef={containerRef} onScroll={handleChatScroll} bottomInset={(isSubagentView ? 68 : composerHeight) + 16} streamingContent={streamingContent} streamingReasoning={streamingReasoning} isCompacting={isCompacting} {...(userMessageEntrance ? { userMessageEntrance, onUserMessageEntranceConsumed: (requestId: number) => setUserMessageEntrance((current) => current?.id === requestId ? null : current) } : {})} />
         {isSubagentView ? <SubagentFooter isRunning={isRunning} isAtBottom={isAtBottom} taskList={viewedRun && viewedRun.task.plan.length > 0 ? <RunBoard run={viewedRun} events={events} liveOutput={streamingContent} /> : undefined} onStop={() => { void stopSubagent(conversationView.runId); }} onReturn={() => onConversationViewChange({ kind: 'root' })} onScrollToBottom={scrollToBottom} /> : <ChatComposer input={input} attachments={attachments} attachmentError={attachmentError} isRunning={Boolean(isRunning)} isTerminalReady={isTerminalReady} isAtBottom={isAtBottom} taskList={<RunBoard run={activeRun ?? latestRun} runs={runs} events={events} liveOutput={streamingContent} {...(isRuntimeReady ? { onResume: () => resumeTask(latestRun) } : {})} onLoadRunEvents={loadRunEvents} />} onFilesSelected={(files) => { void readChatAttachments([...attachments.flatMap((attachment) => attachment.file ?? []), ...files]).then((next) => { setAttachments(next); setAttachmentError(null); }).catch((error) => setAttachmentError(error instanceof Error ? error.message : String(error))); }} onRemoveAttachment={(index) => setAttachments((current) => current.filter((_attachment, candidateIndex) => candidateIndex !== index))} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} onHeightChange={setComposerHeight} />}
       </div>
       <div className="terminal-section">

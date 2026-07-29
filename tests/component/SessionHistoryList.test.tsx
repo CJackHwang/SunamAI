@@ -1,7 +1,7 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createRef } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentController, AgentConversationView } from '@/features/agent-core/useAgentV2';
 import type { AgentRun } from '@/features/agent-core/types';
 import { SessionHistoryList } from '@/widgets/sidebar/SessionHistoryList';
@@ -18,6 +18,29 @@ function controller(deleteSubagent = vi.fn(async () => true), loadSessionSubagen
 }
 
 describe('SessionHistoryList', () => {
+  afterEach(cleanup);
+
+  it('keeps historical children collapsed, then opens for each newly created active child', async () => {
+    const liveChild = { ...child, id: 'live-child', delegatedTaskId: 'live-task', createdAt: 3 };
+    const laterChild = { ...child, id: 'later-child', delegatedTaskId: 'later-task', createdAt: 4 };
+    const initialAgent = controller();
+    const baseProps = { sessions: [{ id: 'session', title: 'Parent', updatedAt: 1 }], activeSessionId: 'session', conversationView: { kind: 'root' as const }, generatingId: null, editing: null, editInputRef: createRef<HTMLInputElement>(), emptyLabel: 'Empty', deleteLabel: 'Delete', onSelectSession: vi.fn(), onConversationViewChange: vi.fn(), onOpenSessionContext: vi.fn(), onEditChange: vi.fn(), onEditSubmit: vi.fn() };
+    const rendered = render(<SessionHistoryList {...baseProps} agent={initialAgent} />);
+    await waitFor(() => expect(initialAgent.loadSessionSubagents).toHaveBeenCalledWith('session'));
+    const details = rendered.container.querySelector('details')!;
+    expect(details).not.toHaveAttribute('open');
+
+    rendered.rerender(<SessionHistoryList {...baseProps} agent={{ ...initialAgent, childRunsBySession: { session: [child, liveChild] } } as AgentController} />);
+    await waitFor(() => expect(details).toHaveAttribute('open'));
+    expect(details).toHaveAttribute('data-expanded', 'true');
+
+    details.open = false;
+    details.dataset.expanded = 'false';
+    rendered.rerender(<SessionHistoryList {...baseProps} agent={{ ...initialAgent, childRunsBySession: { session: [child, liveChild, laterChild] } } as AgentController} />);
+    await waitFor(() => expect(details).toHaveAttribute('open'));
+    expect(screen.getByText('later-task')).toBeInTheDocument();
+  });
+
   it('preloads child presence, expands only a child-bearing session, and selects an immutable child conversation', async () => {
     const user = userEvent.setup();
     const onView = vi.fn<(view: AgentConversationView) => void>();

@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from 'react';
 import { Bot, ChevronDown, History, Loader2, MoreHorizontal, Pin, Trash2 } from 'lucide-react';
 import type { AgentController, AgentConversationView } from '@/features/agent-core/useAgentV2';
 import { isActiveAgentPhase, normalizeSubagentRole, type AgentRun } from '@/features/agent-core/types';
 import type { Session } from '@/entities/workspace/types';
 import { useIntrinsicDisclosure } from '@/shared/ui/useIntrinsicDisclosure';
+import { useListReorderAnimation } from '@/shared/ui/useListReorderAnimation';
 import { ActionMenu } from '@/shared/ui/ActionMenu';
 
 interface SessionHistoryListProps {
@@ -25,12 +26,20 @@ interface SessionHistoryListProps {
 
 interface ChildMenu { run: AgentRun; sessionId: string; x: number; y: number; }
 
-function SessionHistoryGroup({ session, activeSessionId, conversationView, childRuns, generatingId, editing, editInputRef, onSelectSession, onConversationViewChange, onOpenSessionContext, onEditChange, onEditSubmit, onOpenChildMenu }: Omit<SessionHistoryListProps, 'sessions' | 'agent' | 'deleteLabel' | 'emptyLabel'> & { session: Session; childRuns: AgentRun[]; onOpenChildMenu: (event: MouseEvent, run: AgentRun, sessionId: string) => void }) {
-  const { disclosureRef, toggleDisclosure } = useIntrinsicDisclosure({ contentSelector: '.sidebar-session-children' });
+function SessionHistoryGroup({ session, activeSessionId, conversationView, childRuns, childrenLoaded, generatingId, editing, editInputRef, onSelectSession, onConversationViewChange, onOpenSessionContext, onEditChange, onEditSubmit, onOpenChildMenu }: Omit<SessionHistoryListProps, 'sessions' | 'agent' | 'deleteLabel' | 'emptyLabel'> & { session: Session; childRuns: AgentRun[]; childrenLoaded: boolean; onOpenChildMenu: (event: MouseEvent, run: AgentRun, sessionId: string) => void }) {
+  const { disclosureRef, setDisclosureExpanded, toggleDisclosure } = useIntrinsicDisclosure({ contentSelector: '.sidebar-session-children' });
+  const knownChildIdsRef = useRef<Set<string> | null>(null);
   const isActive = activeSessionId === session.id;
   const isEditing = editing?.id === session.id;
   const hasChildren = childRuns.length > 0;
   const isViewingChild = conversationView.kind === 'subagent' && conversationView.sessionId === session.id;
+  useLayoutEffect(() => {
+    if (!childrenLoaded) return;
+    const nextChildIds = new Set(childRuns.map((run) => run.id));
+    const knownChildIds = knownChildIdsRef.current;
+    knownChildIdsRef.current = nextChildIds;
+    if (knownChildIds && activeSessionId === session.id && childRuns.some((run) => !knownChildIds.has(run.id))) setDisclosureExpanded(true);
+  }, [activeSessionId, childRuns, childrenLoaded, session.id, setDisclosureExpanded]);
   const statusIndicator = generatingId === session.id
     ? <Loader2 size={14} className="animate-spin sidebar-generating" />
     : session.status === 'running'
@@ -59,7 +68,7 @@ function SessionHistoryGroup({ session, activeSessionId, conversationView, child
     {statusIndicator && <span className="sidebar-session-status">{statusIndicator}</span>}
     {hasChildren && <ChevronDown size={14} className="sidebar-session-chevron" />}
   </span> : null;
-  return <div className={`sidebar-session-group ${isActive ? 'active' : ''}`}>
+  return <div className={`sidebar-session-group ${isActive ? 'active' : ''}`} data-reorder-key={session.id}>
     {hasChildren ? <details ref={disclosureRef} className="sidebar-session-disclosure" data-expanded="false">
       <summary className={`sidebar-item list-row sidebar-session-summary ${isEditing ? 'is-editing' : ''}`} onClick={selectRootOrToggle} onContextMenu={(event) => onOpenSessionContext(event, session.id)}>
         {rowContent}{trailing}
@@ -82,16 +91,27 @@ function SessionHistoryGroup({ session, activeSessionId, conversationView, child
 
 export function SessionHistoryList(props: SessionHistoryListProps) {
   const [childMenu, setChildMenu] = useState<ChildMenu | null>(null);
-  const loadedSessionIdsRef = useRef(new Set<string>());
+  const [loadedSessionIds, setLoadedSessionIds] = useState(() => new Set<string>());
+  const requestedSessionIdsRef = useRef(new Set<string>());
+  const visibleSessionIdsRef = useRef(new Set<string>());
+  const listRef = useListReorderAnimation(props.sessions.map((session) => session.id).join('\u0000'));
   const loadSessionSubagents = props.agent.loadSessionSubagents;
   useEffect(() => {
     const visibleSessionIds = new Set(props.sessions.map((session) => session.id));
+    visibleSessionIdsRef.current = visibleSessionIds;
     for (const sessionId of visibleSessionIds) {
-      if (loadedSessionIdsRef.current.has(sessionId)) continue;
-      loadedSessionIdsRef.current.add(sessionId);
-      void loadSessionSubagents(sessionId);
+      if (requestedSessionIdsRef.current.has(sessionId)) continue;
+      requestedSessionIdsRef.current.add(sessionId);
+      void loadSessionSubagents(sessionId).then(() => {
+        if (!visibleSessionIdsRef.current.has(sessionId)) return;
+        setLoadedSessionIds((current) => current.has(sessionId) ? current : new Set([...current, sessionId]));
+      });
     }
-    for (const sessionId of loadedSessionIdsRef.current) if (!visibleSessionIds.has(sessionId)) loadedSessionIdsRef.current.delete(sessionId);
+    for (const sessionId of requestedSessionIdsRef.current) if (!visibleSessionIds.has(sessionId)) requestedSessionIdsRef.current.delete(sessionId);
+    setLoadedSessionIds((current) => {
+      const next = new Set([...current].filter((sessionId) => visibleSessionIds.has(sessionId)));
+      return next.size === current.size ? current : next;
+    });
   }, [loadSessionSubagents, props.sessions]);
-  return <><div className="sidebar-list">{props.sessions.length === 0 ? <div className="sidebar-empty">{props.emptyLabel}</div> : props.sessions.map((session) => <SessionHistoryGroup key={session.id} {...props} session={session} childRuns={props.agent.childRunsBySession[session.id] ?? []} onOpenChildMenu={(event, run, sessionId) => { event.preventDefault(); event.stopPropagation(); setChildMenu({ run, sessionId, x: event.clientX, y: event.clientY }); }} />)}</div><ActionMenu menu={childMenu} ariaLabel={props.deleteLabel} className="sidebar-context-menu subagent-context-menu" onClose={() => setChildMenu(null)} items={(target) => [{ id: 'delete', label: props.deleteLabel, icon: Trash2, danger: true, onSelect: () => { void props.agent.deleteSubagent(target.sessionId, target.run.id).then((deleted) => { if (deleted && props.conversationView.kind === 'subagent' && props.conversationView.runId === target.run.id) props.onConversationViewChange({ kind: 'root' }); }); } }]} /></>;
+  return <><div ref={listRef} className="sidebar-list">{props.sessions.length === 0 ? <div className="sidebar-empty">{props.emptyLabel}</div> : props.sessions.map((session) => <SessionHistoryGroup key={session.id} {...props} session={session} childRuns={props.agent.childRunsBySession[session.id] ?? []} childrenLoaded={loadedSessionIds.has(session.id)} onOpenChildMenu={(event, run, sessionId) => { event.preventDefault(); event.stopPropagation(); setChildMenu({ run, sessionId, x: event.clientX, y: event.clientY }); }} />)}</div><ActionMenu menu={childMenu} ariaLabel={props.deleteLabel} className="sidebar-context-menu subagent-context-menu" onClose={() => setChildMenu(null)} items={(target) => [{ id: 'delete', label: props.deleteLabel, icon: Trash2, danger: true, onSelect: () => { void props.agent.deleteSubagent(target.sessionId, target.run.id).then((deleted) => { if (deleted && props.conversationView.kind === 'subagent' && props.conversationView.runId === target.run.id) props.onConversationViewChange({ kind: 'root' }); }); } }]} /></>;
 }

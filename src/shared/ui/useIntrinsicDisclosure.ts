@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MouseEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, type MouseEvent, type RefObject } from 'react';
 
 interface IntrinsicDisclosureOptions {
   contentSelector: string;
@@ -11,6 +11,7 @@ const CONTENT_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 export function useIntrinsicDisclosure(options: IntrinsicDisclosureOptions): {
   disclosureRef: RefObject<HTMLDetailsElement | null>;
+  setDisclosureExpanded: (expanded: boolean) => void;
   toggleDisclosure: (event: MouseEvent<HTMLElement>) => void;
 } {
   const disclosureRef = useRef<HTMLDetailsElement>(null);
@@ -26,13 +27,12 @@ export function useIntrinsicDisclosure(options: IntrinsicDisclosureOptions): {
     stopBottomFollowRef.current?.();
   }, []);
 
-  const toggleDisclosure = (event: MouseEvent<HTMLElement>) => {
-    event.preventDefault();
+  const setDisclosureExpanded = useCallback((shouldOpen: boolean) => {
     const disclosure = disclosureRef.current;
     if (!disclosure) return;
+    if ((disclosure.dataset.expanded === 'true') === shouldOpen) return;
 
     const startBox = disclosure.getBoundingClientRect();
-    const shouldOpen = disclosure.dataset.expanded !== 'true';
     const scrollContainer = optionsRef.current.scrollContainerSelector
       ? disclosure.closest<HTMLElement>(optionsRef.current.scrollContainerSelector)
       : null;
@@ -96,7 +96,13 @@ export function useIntrinsicDisclosure(options: IntrinsicDisclosureOptions): {
       boxAnimationRef.current = null;
       contentAnimationRef.current = null;
     }, { once: true });
-  };
+  }, []);
 
-  return { disclosureRef, toggleDisclosure };
+  const toggleDisclosure = useCallback((event: MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    const disclosure = disclosureRef.current;
+    if (disclosure) setDisclosureExpanded(disclosure.dataset.expanded !== 'true');
+  }, [setDisclosureExpanded]);
+
+  return { disclosureRef, setDisclosureExpanded, toggleDisclosure };
 }

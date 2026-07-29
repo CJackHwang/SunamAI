@@ -1,5 +1,5 @@
 import { createRef } from 'react';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatMessageList } from '@/features/chat/ui/ChatMessageList';
@@ -18,6 +18,32 @@ describe('ChatMessageList', () => {
     rerender(<I18nProvider><ChatMessageList {...props} isCompacting /></I18nProvider>);
     expect(screen.getByRole('status')).toHaveTextContent('正在自动压缩上下文');
     expect(container.querySelector('.chat-thinking-indicator')).toBeInTheDocument();
+  });
+
+  it('animates only the next submitted user bubble and does not replay it', async () => {
+    const previous = { role: 'assistant' as const, content: 'Earlier answer' };
+    const submitted = { role: 'user' as const, content: 'New prompt' };
+    const onEntranceConsumed = vi.fn();
+    const props = { isRunning: true, containerRef: createRef<HTMLDivElement>(), onScroll: vi.fn() };
+    const rendered = render(<I18nProvider><ChatMessageList {...props} messages={[previous]} /></I18nProvider>);
+
+    rendered.rerender(<I18nProvider><ChatMessageList {...props} messages={[previous, submitted]} userMessageEntrance={{ id: 1, previousLastMessage: previous }} onUserMessageEntranceConsumed={onEntranceConsumed} /></I18nProvider>);
+    const bubble = screen.getByText('New prompt').closest('.chat-message')!;
+    expect(bubble).toHaveClass('chat-user-message-sending');
+    expect(onEntranceConsumed).toHaveBeenCalledWith(1);
+
+    fireEvent.animationEnd(bubble, { animationName: 'chat-user-message-send' });
+    await waitFor(() => expect(bubble).not.toHaveClass('chat-user-message-sending'));
+    expect(bubble).not.toHaveClass('motion-fade-in');
+
+    rendered.rerender(<I18nProvider><ChatMessageList {...props} messages={[previous, submitted]} streamingContent="Streaming" /></I18nProvider>);
+    expect(bubble).not.toHaveClass('chat-user-message-sending');
+    expect(onEntranceConsumed).toHaveBeenCalledTimes(1);
+
+    const older = { role: 'user' as const, content: 'Loaded history' };
+    rendered.rerender(<I18nProvider><ChatMessageList {...props} messages={[older, previous, submitted]} /></I18nProvider>);
+    expect(screen.getByText('New prompt').closest('.chat-message')).toBe(bubble);
+    expect(onEntranceConsumed).toHaveBeenCalledTimes(1);
   });
 
   it('renders the current SSE content as a streaming assistant message', () => {

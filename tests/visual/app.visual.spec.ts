@@ -62,8 +62,8 @@ async function openResourceSubagentWorkspace(page: import('@playwright/test').Pa
   if (viewport.width <= 900) {
     await page.locator('.mobile-sidebar-toggle').click();
   }
-  await page.locator('.sidebar-session-summary').click();
-  await expect(page.locator('.sidebar-subagent-row')).toHaveCount(1);
+  await expect(page.locator('.sidebar-session-disclosure')).toHaveAttribute('data-expanded', 'true');
+  await expect(page.locator('.sidebar-subagent-row')).toBeVisible();
   await page.getByRole('button', { name: '新建任务' }).click();
   await expect(page.locator('.sidebar-session-group')).toHaveCount(2);
   const plainSession = page.locator('.sidebar-session-group').filter({ hasNot: page.locator('.sidebar-subagent-row') });

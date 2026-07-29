@@ -245,7 +245,25 @@ test('running composer keeps its normal style and queues guidance into the next 
   const thinking = page.getByRole('status');
   await expect(thinking).toHaveText('Sunam 正在思考...');
   await expect(thinking).toHaveCSS('animation-name', 'thinking-text-sheen');
-  await expect(thinking).toHaveCSS('animation-duration', '3.6s');
+  await expect(thinking).toHaveCSS('animation-duration', '1.8s');
+  await expect(thinking).toHaveCSS('background-repeat', 'no-repeat');
+  await expect(thinking).toHaveCSS('background-size', '250% 100%');
+  const sheenPositions = await thinking.evaluate((element) => {
+    const animation = element.getAnimations()[0];
+    if (!animation) throw new Error('Thinking sheen animation is missing.');
+    animation.pause();
+    return [0, 450, 900, 1_350, 1_790, 1_799, 1_801].map((time) => {
+      animation.currentTime = time;
+      return Number.parseFloat(getComputedStyle(element).backgroundPositionX);
+    });
+  });
+  expect(sheenPositions[0]).toBeCloseTo(100, 0);
+  expect(sheenPositions[1]).toBeCloseTo(75, 0);
+  expect(sheenPositions[2]).toBeCloseTo(50, 0);
+  expect(sheenPositions[3]).toBeCloseTo(25, 0);
+  expect(sheenPositions[4]).toBeCloseTo(0, 0);
+  expect(sheenPositions[5]).toBeCloseTo(0, 0);
+  expect(sheenPositions[6]).toBeCloseTo(100, 0);
   await composer.fill('Prioritize the mobile composer.');
   await expect(send).toBeEnabled();
   await expect(send).toHaveAttribute('aria-label', '发送');
@@ -331,9 +349,12 @@ test('the root agent delegates, waits, and renders a structured child run', asyn
   await expect(page.locator('.task-list-subagent')).toHaveCount(1);
   await expect(page.locator('.task-list-subagent')).toContainText('explore');
   await expect(page.locator('.task-list-subagent')).toContainText('Explorer finished.');
-  await page.locator('.sidebar-session-summary').click();
-  await expect(page.locator('.sidebar-subagent-row')).toHaveCount(1);
-  await page.locator('.sidebar-subagent-row').click();
+  const sidebarDisclosure = page.locator('.sidebar-session-disclosure');
+  const sidebarChild = page.locator('.sidebar-subagent-row');
+  await expect(sidebarDisclosure).toHaveAttribute('open', '');
+  await expect(sidebarDisclosure).not.toHaveAttribute('data-animating');
+  await expect(sidebarChild).toBeVisible();
+  await sidebarChild.click();
   await expect(page.locator('.chat-message[data-role="user"]')).toContainText('Inspect independently.');
   await expect(page.locator('.chat-input, .chat-attach-btn')).toHaveCount(0);
   await expect(page.locator('.task-list-popover')).toHaveCount(1);
@@ -427,8 +448,12 @@ test('a child asks only its parent, resumes from parent guidance, and completes 
   expect(childTools).not.toContain('ask_user');
   expect(rootReceivedBlocked).toBe(true);
   await expect(page.locator('.chat-message[data-role="user"]', { hasText: 'Which target should I inspect?' })).toHaveCount(0);
-  await page.locator('.sidebar-session-summary').click();
-  await page.locator('.sidebar-subagent-row').click();
+  const sidebarDisclosure = page.locator('.sidebar-session-disclosure');
+  const sidebarChild = page.locator('.sidebar-subagent-row');
+  await expect(sidebarDisclosure).toHaveAttribute('open', '');
+  await expect(sidebarDisclosure).not.toHaveAttribute('data-animating');
+  await expect(sidebarChild).toBeVisible();
+  await sidebarChild.click();
   await expect(page.getByRole('button', { name: '返回父 Agent' })).toBeVisible();
   await expect(page.getByRole('button', { name: /停止.*子 Agent/ })).toHaveCount(0);
   await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph').filter({ hasText: /^Which target should I inspect\?$/ })).toBeVisible();
@@ -477,9 +502,13 @@ test('a new root family prunes terminal children from the previous round', async
   await composer.fill('Round two');
   await composer.press('Enter');
   await expect(page.locator('.chat-message[data-role="assistant"] .markdown-paragraph').filter({ hasText: /^Round two complete\.$/ })).toBeVisible({ timeout: 60_000 });
-  await expect(page.locator('.sidebar-subagent-row')).toHaveCount(1);
-  if (!await page.locator('.sidebar-session-disclosure').getAttribute('open')) await page.locator('.sidebar-session-summary').click();
-  await page.locator('.sidebar-subagent-row').click();
+  const sidebarDisclosure = page.locator('.sidebar-session-disclosure');
+  const sidebarChild = page.locator('.sidebar-subagent-row');
+  await expect(sidebarChild).toHaveCount(1);
+  await expect(sidebarDisclosure).toHaveAttribute('open', '');
+  await expect(sidebarDisclosure).not.toHaveAttribute('data-animating');
+  await expect(sidebarChild).toBeVisible();
+  await sidebarChild.click();
   await expect(page.locator('.chat-message[data-role="user"]')).toContainText('Child from round two.');
   await expect(page.locator('.chat-message[data-role="user"]')).not.toContainText('Child from round one.');
 
