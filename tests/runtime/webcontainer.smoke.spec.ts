@@ -252,13 +252,13 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(mobileNavigation.getByRole('button')).toHaveCount(5);
   await mobileNavigation.getByRole('button', { name: '对话' }).click();
   await expect(page.locator('.workspace-container')).toHaveAttribute('data-active-tab', 'chat');
-  await expect(composer).toHaveCSS('backdrop-filter', 'blur(22px) saturate(1.6)');
+  await expect(composer).toHaveCSS('backdrop-filter', 'blur(14px) saturate(1.6)');
   const ordinaryMobileMaterial = await composer.evaluate((element) => {
     const styles = getComputedStyle(element);
     return { borderColor: styles.borderTopColor, backdrop: styles.backdropFilter };
   });
   expect(ordinaryMobileMaterial.borderColor).not.toBe('rgb(0, 0, 0)');
-  expect(ordinaryMobileMaterial.backdrop).toBe('blur(22px) saturate(1.6)');
+  expect(ordinaryMobileMaterial.backdrop).toBe('blur(14px) saturate(1.6)');
   await page.emulateMedia({ forcedColors: 'active' });
   await expect(composer).toHaveCSS('backdrop-filter', 'none');
   const forcedMaterial = await composer.evaluate((element) => {

@@ -1,10 +1,11 @@
 :root {
   --color-bg: #f3f3f5;
   --color-surface: #ffffff;
-  --color-surface-subtle: #f8f8fa;
+  --color-surface-subtle: var(--color-gray-100);
   --color-text: #1d1d1f;
   --color-text-secondary: #68686d;
-  --color-text-tertiary: #8a8a90;
+  --color-text-tertiary: #6e6e75;
+  --color-text-disabled: #8a8a90;
   --color-border: #d9d9de;
   --color-separator: rgb(29 29 31 / 10%);
   --color-black: #1d1d1f;
@@ -15,11 +16,11 @@
   --color-gray-800: #222222;
   --color-primary: #1d1d1f;
   --color-accent: #007aff;
-  --color-success: #10b981;
-  --color-danger: #ef4444;
+  --color-success: #049268;
+  --color-danger: #c6071a;
   --color-link: #0969da;
   --color-code: #d63384;
-  --color-info: #0a84ff;
+  --color-info: #006bd6;
   --radius-large: 28px;
   --radius-medium: 16px;
   --radius-small: 12px;
@@ -48,6 +49,21 @@
   --elevation-3: 0 12px 32px rgb(0 0 0 / 10%);
   --elevation-4: 0 18px 48px rgb(0 0 0 / 13%);
   --elevation-5: 0 24px 64px rgb(0 0 0 / 16%);
+}
+
+@media (max-width: 900px) {
+  :root {
+    --material-blur: 14px;
+    --material-blur-thick: 18px;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --material-thin: rgb(255 255 255 / 90%);
+    --material-regular: rgb(255 255 255 / 94%);
+    --material-thick: rgb(255 255 255 / 98%);
+  }
 }
 
 * {

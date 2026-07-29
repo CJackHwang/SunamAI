@@ -148,8 +148,8 @@
 }
 
 .fm-item.drag-over {
-  background-color: rgba(0, 122, 255, 0.08);
-  outline: 2px dashed rgba(0, 122, 255, 0.4);
+  background-color: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  outline: 2px dashed color-mix(in srgb, var(--color-accent) 40%, transparent);
   outline-offset: -2px;
 }
 
@@ -199,9 +199,9 @@
   content: '';
   position: absolute;
   inset: 8px;
-  border: 2px dashed rgba(0, 122, 255, 0.5);
+  border: 2px dashed color-mix(in srgb, var(--color-accent) 50%, transparent);
   border-radius: var(--radius-medium);
-  background-color: rgba(0, 122, 255, 0.04);
+  background-color: color-mix(in srgb, var(--color-accent) 4%, transparent);
   pointer-events: none;
   animation: fm-drop-pulse 1.2s ease-in-out infinite;
   z-index: 5;
@@ -222,7 +222,7 @@
   pointer-events: none;
   font-size: 15px;
   font-weight: 600;
-  color: rgba(0, 122, 255, 0.8);
+  color: color-mix(in srgb, var(--color-accent) 80%, transparent);
 }
 
 /* ===== New Item Dialog (inline) ===== */
