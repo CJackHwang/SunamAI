@@ -254,3 +254,26 @@ Fixed mobile PWA materials and terminal focus, restored shared root send/stop gu
 ### Status
 
 [OK] **Completed**
+
+
+## Session 12: Polish chat and agent motion
+
+**Date**: 2026-07-30
+**Task**: Polish chat and agent motion
+**Branch**: `main`
+
+### Summary
+
+Polished agent feedback, child disclosure and list reordering, Telegram-style message entrance, resilient streaming auto-scroll, mobile material fallbacks, and user-refined global colors.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dd57c24` | (see git log) |
+| `a72aea7` | (see git log) |
+| `8ecb005` | (see git log) |
+
+### Status
+
+[OK] **Completed**

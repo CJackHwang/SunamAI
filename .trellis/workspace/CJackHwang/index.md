@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
-- **Last Active**: 2026-07-29
+- **Total Sessions**: 12
+- **Last Active**: 2026-07-30
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~256 | Active |
+| `journal-1.md` | ~279 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-07-30 | Polish chat and agent motion | `dd57c24`, `a72aea7`, `8ecb005` | `main` |
 | 11 | 2026-07-29 | Mobile PWA guidance and subagent lifecycle | `4c15c16` | `main` |
 | 10 | 2026-07-28 | Apple design frontend refinement | `15e2415` | `main` |
 | 9 | 2026-07-28 | Restructure Trellis specs for scoped context | `dbe1bab` | `main` |
