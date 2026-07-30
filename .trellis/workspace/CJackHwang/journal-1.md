@@ -277,3 +277,24 @@ Polished agent feedback, child disclosure and list reordering, Telegram-style me
 ### Status
 
 [OK] **Completed**
+
+
+## Session 13: Refresh dependency graph
+
+**Date**: 2026-07-31
+**Task**: Refresh dependency graph
+**Branch**: `main`
+
+### Summary
+
+Refreshed direct and compatible transitive JavaScript dependencies, made Testing Library DOM peer explicit for reproducible npm ci installs, preserved the PWA/Workbox advisory decision, and verified npm run check:all.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `690f198` | (see git log) |
+
+### Status
+
+[OK] **Completed**
