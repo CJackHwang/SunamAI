@@ -154,8 +154,9 @@ Agent 工具批次后的 snapshot/Run/event/checkpoint 同步有独立 watchdog�
 - SSE delta 最多 30 次/秒合并更新，结束强制 flush；未终止 buffer 上限 1 MiB，provider error 结构化上抛。
 - OpenAI-compatible nullable content/reasoning 在 SSE adapter 边界规范化；AgentEngine 保留最终消息的 reasoning，React 只负责投影。
 - Chat 投影一次建立 `tool_call_id → result` 索引，避免逐消息扫描造成 O(n²)。
-- Chat 位于底部时用即时校正跟随流式内容和 composer 保留高度；用户主动返回底部时才使用平滑滚动。工具详情以及 RunBoard 的断点/子任务详情默认折叠，用户触发展开时通过共享 hook 对固有宽高做非线性动画并在需要时保持底部锚定。
-- UI motion 按 fast feedback、spring direct manipulation、sheet layout 和 exit 四类共享 token；React presence 保留时间覆盖对应 CSS 退场时长，所有动效受全局 reduced-motion 约束。
+- 一条 assistant 消息把正文、思考过程和工具调用投影在同一气泡内。`useLayoutSizeAnimation` 与 `shared/ui/motion` 是尺寸动画的唯一复用边界：一次复合布局变化只由最近的外层气泡持有宽高动画，嵌套 disclosure 直接提交最终原生状态，避免折叠与工具插入互相争夺尺寸。大幅横向变化按最高平均速度 `1px/ms` 延长时长，小变化保持空间动效的标准节奏。
+- `useChatAutoScroll` 是聊天滚动的唯一所有者，观察显式 transcript 内容边界。位于底部时即时校正流式内容、Markdown 布局和尺寸动画产生的高度变化；只有用户主动“回到底部”才使用平滑滚动。用户的上滚、触摸、键盘或滚动条意图会立即脱离跟随，布局更新不能把阅读位置误判为用户操作。
+- 思考过程、工具参数与工具结果各自使用相同的 `96px` 内部滚动视口，不叠加外层高度裁剪；工具详情以及 RunBoard 的断点/子任务详情默认折叠。UI motion 按 fast feedback、spring direct manipulation、sheet layout 和 exit 四类共享 token；React presence 保留时间覆盖对应 CSS 退场时长，所有动效受全局 reduced-motion 约束。
 - 初始仅读最近 250 events；上滚自动分页；DOM 固定在当前 250-message 窗口。
 - 子 Agent transcript 仅在 Sidebar 选择对应二级入口后按 run 查询最近 250 events；root 页面不加载或渲染 child 消息。
 - 历史 Markdown 使用 `content-visibility`。只有 5,000-event 基准仍无法满足帧预算时才引入动态高度虚拟列表。
@@ -177,4 +178,4 @@ Agent 工具批次后的 snapshot/Run/event/checkpoint 同步有独立 watchdog�
 
 ## 当前架构基线
 
-2026-07-27，架构边界检查已随本轮完整门禁通过。当前生产构建初始 JS 为 87.39 KiB gzip、总 JS 为 321.21 KiB gzip、`dist` 为 1.38 MiB；核心自动化 41 文件/236 测试，E2E 11/11、视觉 4/4、真实 WebContainer 3/3。生产依赖审计为零，剩余 8 个 high 仅来自开发期 PWA/Workbox 链，并按 [依赖策略](dependency-advisories.md) 跟踪。本轮不声明连续两次完整门禁要求的优化冻结复验。
+2026-07-31，架构边界检查已随一次完整门禁通过。当前生产构建初始 JS 为 87.93 KiB gzip、总 JS 为 327.48 KiB gzip、`dist` 为 1.41 MiB；核心自动化 49 文件/292 测试，E2E 13/13、视觉 4/4、真实 WebContainer 3/3。生产依赖审计返回 `found 0 vulnerabilities`；开发期 PWA/Workbox advisory 仍按 [依赖策略](dependency-advisories.md) 跟踪。本轮不声明连续两次完整门禁要求的优化冻结复验。

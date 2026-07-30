@@ -13,6 +13,7 @@ Sunam 是运行在浏览器中的开源 AI 编程助手。它通过 OpenAI-compa
 - OpenAI-compatible 模型：配置服务地址、API Key 和模型，可从兼容的 `/models` 接口读取模型列表。
 - 浏览器内工作区：WebContainer 提供文件管理、终端、前后台进程、端口服务和可恢复文件快照。
 - 自动上下文管理：按模型 token 窗口自动压缩完整消息/工具组，保留计划、证据、资源引用、工作区版本和最近相关文件，不提供需要用户操作的压缩按钮。
+- 连续流式聊天：正文、思考过程与工具调用在同一消息气泡内连续呈现；共享尺寸动效协调流式扩展、折叠和工具插入，用户上滚后不会被自动跟随打断，并提供 reduced-motion 回退。
 - 资源附件：文本、代码、PNG/JPEG/WebP/GIF 和通用二进制作为本地资源保存；文本按范围读取，图片按需送入视觉模型，其他文件可 materialize 到工作区。
 - 多模态降级：模型明确拒绝视觉输入时自动改用文本与持久资源引用；与视觉无关的 400/422 错误原样上抛，不进行无效二次调用。
 - 子 Agent：根 Agent 在 `explore`（只读探索）与 `task`（完整任务权限、不可递归委派）之间选型，最多三路混合并发；模型执行可并行，实际写入与命令通过容器 lease 串行，父 Agent 负责综合当前工作区版本的证据。
@@ -112,9 +113,9 @@ python3 ./.trellis/scripts/task.py validate <task-id>
 
 首次执行浏览器测试通常需要与当前 Playwright 版本匹配的 Chromium。也可通过 `PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium` 显式使用已有 Chromium/Chrome；测试仍需要权限启动本地预览服务。`check:audit` 需要能访问 npm registry。缺少浏览器、端口权限或网络时必须把对应检查记录为未执行，不能标记为通过。
 
-### 当前优化冻结状态
+### 当前验证状态
 
-2026-07-27 的当前工作区已通过一次完整 `npm run check:all`：42 个测试文件、224 个核心测试，E2E 11/11、视觉 4/4、真实 WebContainer 3/3，生产依赖审计为 0。覆盖率为 statements 90.86%、branches 83.02%、functions 90.04%、lines 95.18%；初始 JS 87.39 KiB gzip、总 JS 320.85 KiB gzip、生产 `dist` 1.38 MiB。本轮不声明需要连续两次门禁的优化冻结复验。
+2026-07-31 的当前工作区已在最新依赖图上通过一次完整 `npm run check:all`：49 个测试文件、292 个核心测试，E2E 13/13、视觉 4/4、真实 WebContainer 3/3，生产依赖审计返回 `found 0 vulnerabilities`。覆盖率为 statements 90.61%、branches 83.16%、functions 90.18%、lines 94.71%；初始 JS 87.93 KiB gzip、总 JS 327.48 KiB gzip、生产 `dist` 1.41 MiB。本次验证包含聊天流式尺寸变化、思考过程折叠、工具详情布局和依赖刷新后的构建/浏览器回归；尚未满足连续两次完整门禁才可声明的优化冻结复验。
 
 完整开发依赖审计仍有 8 个 high，全部位于 `vite-plugin-pwa@1.3.0` / `workbox-build@7.4.1` 构建链；npm 提议的 `vite-plugin-pwa@1.2.0` 不支持 Vite 8，因此按 [依赖 advisory 策略](docs/dependency-advisories.md) 作为上游兼容性例外跟踪，不影响生产依赖零漏洞门禁。
 

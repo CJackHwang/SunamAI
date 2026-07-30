@@ -123,8 +123,9 @@
 - [x] tool result projection 使用一次性索引，为 O(n)。
 - [x] 1,000 个 SSE delta 最多 30 次/秒更新，最终文本完全一致；buffer 上限 1 MiB。
 - [x] OpenAI-compatible SSE 的 nullable content/reasoning 字段在边界规范化，思考过程不会因 `content: null` 被整帧丢弃。
-- [x] 聊天自动跟底使用无动画校正，只有用户显式“回到底部”才启用 smooth scroll；任务条和输入区高度变化不重启连续滚动动画。
-- [x] 思考过程使用紧凑的内部滚动区；普通工具调用默认折叠并保留运行/完成状态，`ask_user` 继续直接展示；消息气泡与工具 disclosure 不绘制描边，并使用四边对称 padding、固有宽高非线性动画、底部锚定和 reduced-motion 回退。
+- [x] `useChatAutoScroll` 是聊天滚动的唯一所有者，观察显式 transcript 内容边界；跟随模式使用无动画校正，只有用户显式“回到底部”才启用可取消的 smooth scroll。上滚、触摸、键盘或滚动条意图会立即脱离跟随，任务条、输入区及消息布局高度变化不会重启或误触发滚动动画。
+- [x] 一条 assistant 消息可在同一气泡内连续展示正文、思考过程和工具调用；思考过程会在正文首个 delta 到达时收起，完成后保留原生 disclosure 语义。思考过程、工具参数与工具结果各自使用一致的 `96px` 内部滚动视口，工具外层不再施加第二个高度裁剪。
+- [x] 消息气泡使用共享 `useLayoutSizeAnimation` 与 `shared/ui/motion` 做固有宽高非线性动画；一条复合空间变化只有一个宽高所有者。思考过程收起且工具出现时由外层气泡动画，内层 disclosure 直接提交最终状态；横向扩展平均速度不超过 `1px/ms`，高输出速率下也保持可感知的伸展节奏。消息气泡与工具 disclosure 不绘制描边，保持四边对称 padding 和 reduced-motion 回退。
 - [x] RunBoard 断点和子任务默认折叠，复用工具调用的固有尺寸动画、无描边同心圆角和 reduced-motion；用户消息使用视觉上明确的深灰 `--color-gray-700`（`#3a3a3a`）。
 - [x] 全局 motion token 按反馈/空间/退场角色使用；移动菜单 presence 覆盖完整 sheet exit，模型选择器有退场动画，终端标签不再动画 font-size。
 - [x] 历史 Markdown 使用 `content-visibility`。
@@ -144,6 +145,7 @@ Runtime：真实 WebContainer launch/PID/端口登记、服务面板手动停止
 
 - [x] `npm run check:audit` 证明生产依赖 high/critical 为零。
 - [x] development-only PWA/Workbox advisory 例外按 [策略](dependency-advisories.md) 记录并定期复查。
+- [x] `@testing-library/dom` 作为 React Testing Library 的开发期 peer 显式声明；最新依赖图可由标准 `npm ci` 安装，不依赖隐式 peer 解析或项目级 `legacy-peer-deps` 设置。
 - [x] README 头图不进入 `public`，PWA 不声明无效 asset。
 - [x] 只保留实际使用的 normal 400/500/600/700 与 italic 400 字体；发布目标格式为 WOFF2。
 
@@ -153,15 +155,16 @@ Runtime：真实 WebContainer launch/PID/端口登记、服务面板手动停止
 
 任何缺少 Chromium、网络或转换工具的检查都必须记录为“未执行/外部阻塞”，不能标记为通过。发布说明应列出实际命令、结果和未执行原因。
 
-## 11. 当前工作区验证记录（2026-07-27）
+## 11. 当前工作区验证记录（2026-07-31）
 
 - 功能门禁状态：**通过**。最终代码状态下 `npm run check:all` 完整通过一次，包含 `npm run check`、E2E、visual、runtime 和 production audit；本轮不声明需要连续两次的优化冻结复验。
-- 核心自动化：41 个测试文件、236 个测试全绿。
-- 覆盖率：statements 90.93%、branches 83.22%、functions 89.94%、lines 95.31%。
-- 包体：初始 87.39 KiB gzip、总 JS 321.21 KiB gzip、dist 1.38 MiB；未配置首屏不加载 Agent Core/WebContainer，总 JS 门槛为 350 KiB gzip。
-- Playwright 实际执行结果：E2E 11/11、visual 4/4、runtime 3/3；父子 transcript 隔离、object-root 子 Agent schema、状态槽几何、单 child 停止/删除、旧终态 child 清理和桌面/移动折叠视觉均已验证。
+- 核心自动化：49 个测试文件、292 个测试全绿。
+- 覆盖率：statements 90.61%、branches 83.16%、functions 90.18%、lines 94.71%。
+- 包体：初始 87.93 KiB gzip、总 JS 327.48 KiB gzip、dist 1.41 MiB；未配置首屏不加载 Agent Core/WebContainer，总 JS 门槛为 350 KiB gzip。
+- Playwright 实际执行结果：E2E 13/13、visual 4/4、runtime 3/3；父子 transcript 隔离、object-root 子 Agent schema、状态槽几何、单 child 停止/删除、旧终态 child 清理，以及桌面/移动折叠和聊天流式布局均已验证。
+- 最新依赖图已验证：Vite `8.2.0`、`@vitejs/plugin-react` `6.0.5`、jsdom `30.0.1`、Playwright `1.62.1` 与 Oxlint `1.76.0` 均通过完整门禁；`npm outdated --json` 没有直接依赖更新，`npm ci --dry-run` 可复现安装。
 - Runtime 证据包括：用户终端与 Agent 双向读写同一规范根、容器重命名不改变路径或文件、项目根无 `.jshrc`；桌面切换到移动端后 Agent 后台进程和端口保持；资源 materialize 后 snapshot 仅保留源数据并排除 `node_modules`/dist；父取消会级联停止 task 子任务进程。
-- `npm run check:audit` 返回 `found 0 vulnerabilities`。完整 development audit 仍有 8 个 high，全部属于 `vite-plugin-pwa@1.3.0` / `workbox-build@7.4.1` 构建链；不兼容 Vite 8 的 1.2.0 降级不作为修复，详见 [依赖策略](dependency-advisories.md)。
+- `npm run check:audit` 返回 `found 0 vulnerabilities`。完整 development audit 的 PWA/Workbox advisory 仍按 [依赖策略](dependency-advisories.md) 跟踪；不以不兼容 Vite 8 的降级作为修复。
 - 字体已转换并只保留 WOFF2：normal 400/500/600/700 与 italic 400；README 头图已移出 `public`，无效生产图标和 PWA asset 声明已删除。
 
 因此本轮父子 Agent 会话隔离功能达到发布门禁。后续变更仍需满足本清单，且不得把 development-only advisory 例外扩展到生产依赖；需要重新声明优化冻结时，仍必须连续两次执行完整门禁。

@@ -16,6 +16,8 @@ It runs strict TypeScript, Oxlint, architecture checks, core coverage, productio
 
 Use `npm run check:all` for release-significant changes to Agent execution, context, persistence, resources, WebContainer runtime, subagents, E2E behavior, responsive/visual UI, dependencies, or workflow. Optimization-freeze claims require two consecutive full passes and inspection of new visual baselines.
 
+Dependency refreshes must also prove the generated graph can be installed by default with `npm ci --dry-run`, that `npm ls` has no invalid/missing peer, and that `npm outdated --json` has no direct updates when the task requests current releases. If a direct test package requires a peer at runtime, declare that peer explicitly in `devDependencies`; do not rely on npm's incidental peer auto-installation. A temporary resolver flag may diagnose an unselected optional-peer conflict, but it must never become project `.npmrc` configuration or substitute for the default clean-install proof.
+
 Current thresholds:
 
 - statements/functions/lines at least 85%; branches at least 80%;

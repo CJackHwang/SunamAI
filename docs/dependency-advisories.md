@@ -11,13 +11,13 @@ npm run check:audit
 
 ## Development-only PWA / Workbox 例外
 
-截至 2026-07-26，lockfile 使用 Vite `8.1.5`、`vite-plugin-pwa` `1.3.0`、`workbox-build` `7.4.1` 和 `workbox-window` `7.4.1`。联网执行 `npm audit --json` 的结果为 8 个 high、0 critical，全部位于 development-only PWA/Workbox 构建链：
+截至 2026-07-31，最新依赖刷新后的 lockfile 使用 Vite `8.2.0`、`@vitejs/plugin-react` `6.0.5`、`vite-plugin-pwa` `1.3.0`、`workbox-build` `7.4.1` 和 `workbox-window` `7.4.1`。Vitest DOM 环境已升级到 jsdom `30.0.1`；`@testing-library/dom` `10.4.1` 显式列为开发依赖，使 `npm ci` 不依赖 npm 对 React Testing Library peer 的隐式安装。联网执行 `npm audit --json` 的结果为 8 个 high、0 critical，全部位于 development-only PWA/Workbox 构建链：
 
 - 直接入口：`vite-plugin-pwa` → `workbox-build` → `@trickfilm400/rollup-plugin-off-main-thread` → `ejs` / `jake` / `filelist` / `minimatch` / `brace-expansion`。
 - 当前可识别的底层 advisory：[`GHSA-mh99-v99m-4gvg`](https://github.com/advisories/GHSA-mh99-v99m-4gvg)，`brace-expansion` 可因无界展开导致进程内存耗尽。
 - npm 给出的自动修复是降级到 `vite-plugin-pwa@1.2.0`。该版本 peer dependency 只支持 Vite 3–7；当前 `1.3.0` 才声明支持 Vite 8，因此不能用不兼容降级换取表面上的零 advisory。
 
-同日 `npm run check:audit` 已在两次连续 `npm run check:all` 中实际通过，结果均为 `found 0 vulnerabilities`。这证明 production dependency 的 high/critical 为零；完整开发依赖审计的 8 个 high 仍按本节例外跟踪。
+同日 `npm run check:audit` 实际通过，结果为 `found 0 vulnerabilities`。这证明 production dependency 的 high/critical 为零；完整开发依赖审计的 8 个 high 仍按本节例外跟踪。`npm audit fix --force` 仍只建议将 `vite-plugin-pwa` 降级为不兼容 Vite 8 的 `1.2.0`，因此不采用。当前 revision 的完整门禁记录见 [发布与优化冻结验收](refactor-acceptance.md)；在连续两次完整通过前，不声明优化冻结。
 
 例外范围仅限构建期依赖，并满足以下条件：
 

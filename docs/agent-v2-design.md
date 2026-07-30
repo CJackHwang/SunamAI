@@ -118,6 +118,14 @@ preparing → planning → acting → observing / verifying
 
 RunBoard 仍以树形摘要展示子任务，但断点和子任务详情默认折叠，并复用工具调用的固有尺寸动画和 reduced-motion 回退。RunBoard 只显示当前 revision 的正向已验收状态，不显示未验收徽标。child transcript 永不注入主聊天。v1 不实现 team、mailbox、递归 swarm、teammate 互聊或并行 writer。
 
+### 聊天渲染与动效
+
+一条 assistant 消息把流式正文、思考过程和工具调用作为同一气泡的内容投影，而不是在工具调用到达时替换或吞没正文。思考过程在正文首个 delta 到达时收起；完成后的思考过程与普通工具详情仍可按原生 `<details>/<summary>` 语义展开。
+
+共享的 `useLayoutSizeAnimation` 负责 React 布局边界的固有宽高过渡，`shared/ui/motion` 负责从全局 token 读取时长、曲线和 reduced-motion 行为。一个复合变化只能有一个宽高动画所有者：例如思考过程收起且工具出现时，外层消息气泡测量并动画，内层 disclosure 直接提交最终状态。横向扩展的平均速度最高为 `1px/ms`，防止高输出速率下气泡突然拉伸。思考过程、工具参数和工具结果各自使用一致的 `96px` 内部滚动视口。
+
+`useChatAutoScroll` 单独拥有滚动策略并观察 transcript 内容边界。跟随模式对流式/布局高度做直接校正；用户手势或上滚键盘意图会立即脱离，只有显式回到底部才启动可取消的平滑滚动。因此尺寸动画不会抢占阅读位置，也不会与滚动动画形成第二个状态机。
+
 ## 7. 工具和权限
 
 每个工具必须声明 Zod schema、只读/并发属性、数据影响、超时和结果类型。角色白名单在构造子 Run 时冻结。
@@ -166,8 +174,8 @@ v3 stores：workspace、runs、events、checkpoints、terminalHistory、snapshot
 
 ## 10. 当前实现基线
 
-2026-07-27 的当前工作区已通过一次完整 `npm run check:all`。核心自动化为 41 个测试文件、236 个测试；E2E 11/11、视觉 4/4、真实 WebContainer 3/3。真实 Runtime 已覆盖移动端切换后后台进程和端口保持、资源 materialize 后快照排除生成目录、父 Run 取消级联停止 task 子进程，以及用户终端、Agent 文件工具、Agent shell 与 FileManager 的规范工作区双向可见性。
+2026-07-31 的当前工作区已通过一次完整 `npm run check:all`。核心自动化为 49 个测试文件、292 个测试；E2E 13/13、视觉 4/4、真实 WebContainer 3/3。真实 Runtime 已覆盖移动端切换后后台进程和端口保持、资源 materialize 后快照排除生成目录、父 Run 取消级联停止 task 子进程，以及用户终端、Agent 文件工具、Agent shell 与 FileManager 的规范工作区双向可见性。
 
-当前覆盖率为 statements 90.93%、branches 83.22%、functions 89.94%、lines 95.31%；初始/总 JS 为 87.39/321.21 KiB gzip，生产 `dist` 1.38 MiB，生产依赖 high/critical 为零。本轮功能门禁通过，但不声明需要连续两次完整通过的优化冻结复验；后续功能仍需遵守本设计中的预算、revision、持久化和取消边界。
+当前覆盖率为 statements 90.61%、branches 83.16%、functions 90.18%、lines 94.71%；初始/总 JS 为 87.93/327.48 KiB gzip，生产 `dist` 1.41 MiB，生产依赖审计返回 `found 0 vulnerabilities`。本轮功能门禁通过，但不声明需要连续两次完整通过的优化冻结复验；后续功能仍需遵守本设计中的预算、revision、持久化、取消与聊天动效所有权边界。
 
 自动化门槛和真实浏览器场景见 [发布与优化冻结验收](refactor-acceptance.md)，模块依赖见 [架构说明](architecture.md)。
