@@ -30,6 +30,7 @@ function evaluateCompletionGate(input: {
 - Shell exit is an explicit revision boundary because filesystem watchers may lag.
 - Verification evidence binds to the post-command revision. Any later parent/child mutation or failed child verification invalidates the pass.
 - Every foreground shell records real exit pass/fail on the post-command revision. Background shell is process progress: it preserves the existing mutation flag but invalidates prior verification; actual revision drift still marks changed/unverified.
+- A non-trivial root task requires a recorded plan before completion. A child-local plan is optional: an empty child plan does not block `complete_task`, while every item in a non-empty child plan must be `completed` before the child can finish.
 - `complete_task` is the preferred structured path. For the root Agent, every non-empty plain response is also a completion attempt and passes the same plan/revision/verification gates. A depth-one child plain response is non-terminal; only its successful `complete_task` call may complete delegated work.
 - Immediately before completion, flush/read authoritative revision. Rejected plain drafts never enter durable/UI messages; clear transient output, inject one actionable recovery instruction, and continue within existing budgets.
 - Recovery names foreground `shell_run`, a truthful relevant check, exit code 0, final-write ordering, and retry action.
@@ -44,6 +45,8 @@ function evaluateCompletionGate(input: {
 | Arbitrary foreground command | Record real exit on post-command revision without parsing syntax. |
 | Foreground exits non-zero/times out | Record failure and invalidate prior pass. |
 | Plain completion has unfinished plan/stale verification | Withhold draft, clear transient output, recover actionably. |
+| Child calls `complete_task` without a local plan | Allow completion when its remaining child gates pass. |
+| Child calls `complete_task` with an unfinished local plan | Reject until every existing item is completed. |
 | Background server starts with unchanged revision | Record process progress and allow guarded completion with service alive. |
 | Model uses forced success/unrelated evidence | Prompt/evidence violation; runtime still records actual terminal result. |
 
@@ -63,7 +66,7 @@ Do not hardcode known verification commands, mask failing exits, project rejecte
 
 ## Required Validation
 
-- Explicit/root-plain completion share plan/revision ordering; child plain responses remain active until `complete_task`; root-only verification; arbitrary command/port/syntax; failure and later-write invalidation; rejected draft absence; actionable recovery; server remains alive; authoritative drift blocks.
+- Explicit/root-plain completion share plan/revision ordering; planless child `complete_task` succeeds while an unfinished child plan blocks; child plain responses remain active until `complete_task`; root-only verification; arbitrary command/port/syntax; failure and later-write invalidation; rejected draft absence; actionable recovery; server remains alive; authoritative drift blocks.
 - Real runtime tests prove shell-exit revision synchronization where implementation changes the WebContainer boundary.
 
 ## Related Contracts

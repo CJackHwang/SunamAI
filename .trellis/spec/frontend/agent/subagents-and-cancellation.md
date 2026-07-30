@@ -57,6 +57,7 @@ interface AgentBudget {
 - Parent cancellation cascades to children/processes and waits for terminal persistence before the parent cancellation record.
 - Root Chat/stream/latest Run/RunBoard/status filter depth zero. Child transcripts load on selection, remain read-only, and show only their own plan/RunBoard when non-empty.
 - Root verification gate applies only to root. Children may report changed paths with empty truthful verification records.
+- Child-local plans are optional. A child may complete through `complete_task` with no plan, but once a child plan exists, every item must be completed before `complete_task` succeeds.
 - Children never receive `ask_user`, cannot address the end user, cannot complete from a plain response, and expose `ask_parent` only to delegated roles. The root never receives `ask_parent` in its published tool set.
 - Individual child stopping is absent from model tools but available through the public React controller and the selected running-child footer. It cancels only that child and its owned processes; siblings continue. Active or `awaiting_parent` child deletion still fails closed. Parent/session cancellation, runtime failure safety, unload recovery, and terminal older-family pruning remain authoritative whole-family boundaries.
 
@@ -71,6 +72,8 @@ interface AgentBudget {
 | One requested child completes | Return one new notification; siblings remain unchanged. |
 | Child calls `ask_parent` | Persist `blocked`, return one blocker notification to the root, keep the child execution waiting, and resume the same Run only after `message_subagent`. |
 | Child returns plain assistant text | Persist/project it as child transcript progress and continue; do not mark the Run/task completed. |
+| Child calls `complete_task` with no local plan | Complete when the remaining child gates pass. |
+| Child calls `complete_task` with an unfinished local plan | Reject until every existing plan item is completed. |
 | User stops one active or `awaiting_parent` child | Cancel only that child and its owned processes; leave siblings and the parent alive. |
 | All requested notifications consumed | Reject already-reported instead of replaying stale data. |
 | Child changes files without verification | Allow completion, report paths and empty records; root remains gated. |
@@ -152,12 +155,12 @@ interface SubagentHost {
 ### 5. Good/Base/Bad Cases
 
 - Good: child asks parent, root receives `blocked`, replies, child completes explicitly.
-- Base: child completes directly with `complete_task`; one terminal notification is returned.
+- Base: child completes directly with `complete_task` and no local plan; one terminal notification is returned.
 - Bad: child plain text or direct user question marks delegated work complete.
 
 ### 6. Tests Required
 
-- Unit: role tool lists, child plain-response continuation, blocker then terminal notification, duplicate-report rejection, isolated child stop, and waiting-child parent cancellation.
+- Unit: role tool lists, planless child completion, unfinished child-plan rejection, child plain-response continuation, blocker then terminal notification, duplicate-report rejection, isolated child stop, and waiting-child parent cancellation.
 - Component: active-child Stop/terminal Return footer and no delete action for active/`awaiting_parent` children.
 - E2E: child tools exclude `ask_user`; the root receives blocker JSON, sends `message_subagent`, and observes later explicit completion without a user-facing child prompt.
 

@@ -68,7 +68,8 @@ describe('AgentToolRegistry', () => {
 
     const childPrompt = buildAgentSystemPrompt({ containerId: 'c-1', task: getTask(), chaos: createChaosContract('Sunam 6.9 Pron'), summary: '', agentRole: 'task' });
     expect(childPrompt).toContain('Verification does not gate child completion');
-    expect(childPrompt).toContain('child-local plan');
+    expect(childPrompt).toContain('child-local plan is optional');
+    expect(childPrompt).toContain('every item must be completed before `complete_task`');
     expect(childPrompt).toContain('call `ask_parent`');
     expect(childPrompt).toContain('plain response never completes a child');
     expect(childPrompt).toContain('/home/workspace/c-1');
@@ -279,6 +280,28 @@ describe('AgentToolRegistry', () => {
     context.updateTask((task) => ({ ...task, plan: [{ id: 'blocked', title: 'Blocked', status: 'blocked' }] }));
     expect((await registry.execute({ id: 'blocked', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context)).content).toContain('unfinished or blocked steps');
     expect(getTask().evidence).toEqual(['Failed verification: custom-validator']);
+  });
+
+  it('makes child plans optional without changing root or existing-plan completion gates', async () => {
+    const registry = new AgentToolRegistry();
+    const { context } = createContext();
+
+    const rootWithoutPlan = await registry.execute({ id: 'root-no-plan', name: 'complete_task', arguments: '{"summary":"done","evidence":["root evidence"]}' }, context);
+    expect(rootWithoutPlan.ok).toBe(false);
+    expect(rootWithoutPlan.content).toContain('needs a recorded execution plan');
+
+    context.agentRole = 'task';
+    const childWithoutPlan = await registry.execute({ id: 'child-no-plan', name: 'complete_task', arguments: '{"summary":"done","evidence":["child evidence"]}' }, context);
+    expect(childWithoutPlan.stopRun).toBe('completed');
+
+    context.updateTask((task) => ({ ...task, plan: [{ id: 'child-step', title: 'Finish delegated work', status: 'in_progress' }] }));
+    const childWithUnfinishedPlan = await registry.execute({ id: 'child-unfinished-plan', name: 'complete_task', arguments: '{"summary":"done","evidence":["premature evidence"]}' }, context);
+    expect(childWithUnfinishedPlan.ok).toBe(false);
+    expect(childWithUnfinishedPlan.content).toContain('unfinished or blocked steps');
+
+    context.updateTask((task) => ({ ...task, plan: [{ id: 'child-step', title: 'Finish delegated work', status: 'completed' }] }));
+    const childWithCompletedPlan = await registry.execute({ id: 'child-completed-plan', name: 'complete_task', arguments: '{"summary":"done","evidence":["completed-plan evidence"]}' }, context);
+    expect(childWithCompletedPlan.stopRun).toBe('completed');
   });
 
   it('enforces the two delegated role contract and exposes all parent control tools', async () => {

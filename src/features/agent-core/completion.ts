@@ -13,7 +13,7 @@ export async function evaluateCompletionGate(input: {
   runtime: AgentWorkspaceRuntime;
   containerId: string;
 }): Promise<CompletionGateResult> {
-  if (input.task.requiresPlan && !input.task.plan.length) {
+  if (input.agentRole === 'root' && input.task.requiresPlan && !input.task.plan.length) {
     return { ok: false, task: input.task, message: 'Completion blocked: this non-trivial task needs a recorded execution plan. Call update_plan with the required steps, complete them, then retry completion.', phase: 'planning' };
   }
   if (input.task.plan.some((item) => item.status !== 'completed')) {

@@ -104,7 +104,7 @@
 - [x] child 写入使父旧验证失效；child failed verification 也撤销旧 pass。
 - [x] root complete 时重新读取当前 runtime revision。
 - [x] shell 进程结束显式推进 runtime revision；验证记录不能绑定命令执行前的 revision。
-- [x] `complete_task` 与无工具最终文本共享 plan/revision/verification 门；不合格的文本不会先投影成用户可见完成消息。
+- [x] root 的 `complete_task` 与无工具最终文本共享 plan/revision/verification 门；child 可无 plan 直接用 `complete_task` 完成，但已有 plan 时必须先完成全部步骤。
 - [x] 验证阻断明确给出 `shell_run` foreground、任务相关检查、exit 0、最后写入顺序和重试动作。
 - [x] 后台服务器启动只记录进程进度，不凭空标记 workspace mutation；真实 revision 漂移仍撤销旧验证。
 - [x] 前台验证不限制命令名、脚本名、参数、端口或 shell 组合；自定义检查直接按真实 exit status 记录。

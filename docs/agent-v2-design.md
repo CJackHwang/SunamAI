@@ -37,7 +37,7 @@ preparing → planning → acting → observing / verifying
 计划、证据、当前 revision 验证通过 → completed
 ```
 
-每个 Run 固定 session、container、模型、人格、预算、任务契约和取消域。非简单任务必须记录计划；`complete_task` 是带结构化证据的首选结束路径，但模型的非空普通文本也会作为完成尝试。两条路径共享计划、真实 container revision 和验证门；不满足时普通文本不会先作为最终消息展示。失败验证会撤销旧 pass。
+每个 Run 固定 session、container、模型、人格、预算、任务契约和取消域。root 的非简单任务必须记录计划；child 的本地计划可选，但一旦创建就必须完成全部步骤后才能通过 `complete_task` 退出。`complete_task` 是带结构化证据的首选结束路径，但 root 模型的非空普通文本也会作为完成尝试。两条 root 路径共享计划、真实 container revision 和验证门；不满足时普通文本不会先作为最终消息展示。失败验证会撤销旧 pass。
 
 恢复永远创建新 runId、AbortController 和事件侧链，并记录 `parentRunId`。旧请求、进程、PID 和控制器不会复活。刷新时活动父 Run、子 Run 和 delegated task 都变为 `interrupted`。
 
@@ -51,7 +51,7 @@ preparing → planning → acting → observing / verifying
 6. 最多四路执行并发安全只读工具；`apply_patch`、`materialize_resource` 和 `shell_run` 使用容器级 mutation lease。所有前台 shell 都按真实 exit status 和命令结束后的 revision 记录验证，不解析命令名、脚本、参数、端口或 shell 组合；后台 shell 只记录进程进度并撤销旧 pass。shell 进程结束形成显式 revision 边界。
 7. 工具批次后进入独立 watchdog 约束的同步阶段，flush 工作区、更新任务、保存单一 checkpoint 和事件尾序号。超时/失败先把 Run 投影为可恢复 failed，再做有界的尽力持久化，不能因 snapshot/IndexedDB 悬挂而长期显示运行中；最后成功 checkpoint 保持不变。
 8. 同一工具与参数连续第三次出现时只给一次 recovery guidance；第四次仍重复则立即失败，不把预算耗尽在无效兜底循环中。
-9. 计划和当前 workspace revision 验证满足后才能完成；验证相关性和真实性由系统 prompt 约束，要求选择适合任务的检查、保留失败退出码、禁止用无关成功命令伪造证据，并在后续写入后重新验证。
+9. root 的必需计划以及任何已创建的 child 计划都必须完成；root 还要满足当前 workspace revision 验证才能结束。验证相关性和真实性由系统 prompt 约束，要求选择适合任务的检查、保留失败退出码、禁止用无关成功命令伪造证据，并在后续写入后重新验证。
 
 ## 4. 自动上下文压缩
 

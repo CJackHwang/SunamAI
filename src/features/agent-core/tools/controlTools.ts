@@ -6,7 +6,7 @@ import { evaluateCompletionGate } from '../completion';
 export const controlTools: RegisteredTool[] = [
   defineTool({
     name: 'update_plan',
-    description: 'Maintain a short execution plan. Use it for non-trivial work before editing and whenever progress changes.',
+    description: 'Maintain a short execution plan. Root Agents use it for non-trivial work before editing; child plans are optional, but every item in an existing child plan must be completed before completion.',
     schema: z.object({ items: z.array(z.object({ id: z.string().min(1), title: z.string().min(1), status: z.enum(['pending', 'in_progress', 'completed', 'blocked']) })).min(1).max(8) }),
     readOnly: false,
     concurrencySafe: false,
