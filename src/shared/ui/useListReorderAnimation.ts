@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react';
+import { animateWithMotionPreset, prefersReducedMotion } from './motion';
 
 const REORDER_SELECTOR = '[data-reorder-key]';
-const REORDER_EASING = 'cubic-bezier(0.32, 0.72, 0, 1)';
 
 export function useListReorderAnimation(orderSignature: string): RefObject<HTMLDivElement | null> {
   const listRef = useRef<HTMLDivElement>(null);
@@ -25,20 +25,20 @@ export function useListReorderAnimation(orderSignature: string): RefObject<HTMLD
     for (const animation of animationsRef.current.values()) animation.cancel();
     animationsRef.current.clear();
     const nextRects = measure();
-    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-    if (!reduceMotion) {
+    if (!prefersReducedMotion()) {
       for (const element of elements) {
         const key = element.dataset.reorderKey;
-        if (!key || typeof element.animate !== 'function') continue;
+        if (!key) continue;
         const previous = visualRects.get(key);
         const next = nextRects.get(key);
         if (!previous || !next) continue;
         const deltaY = previous.top - next.top;
         if (Math.abs(deltaY) < 0.5) continue;
-        const animation = element.animate([
+        const animation = animateWithMotionPreset(element, [
           { transform: `translateY(${deltaY}px)` },
           { transform: 'translateY(0)' },
-        ], { duration: 360, easing: REORDER_EASING });
+        ], 'spatial');
+        if (!animation) continue;
         animationsRef.current.set(key, animation);
         animation.addEventListener('finish', () => {
           if (animationsRef.current.get(key) === animation) animationsRef.current.delete(key);

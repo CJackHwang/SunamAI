@@ -17,11 +17,13 @@ function isWithinScrollShortcutThreshold(container: HTMLElement): boolean {
 
 export function useChatAutoScroll(dependencies: unknown[]) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const modeRef = useRef<FollowMode>('following');
   const returnFrameRef = useRef<number | null>(null);
   const lastScrollTopRef = useRef(0);
   const touchYRef = useRef<number | null>(null);
   const shortcutHiddenRef = useRef(true);
+  const pointerActiveRef = useRef(false);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
   const setShortcutHidden = useCallback((hidden: boolean) => {
@@ -56,6 +58,30 @@ export function useChatAutoScroll(dependencies: unknown[]) {
     }
     setShortcutHidden(true);
   }, [cancelReturn, setShortcutHidden]);
+
+  const correctFollowingPosition = useCallback(() => {
+    const container = containerRef.current;
+    if (container && modeRef.current === 'following') {
+      container.scrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+      lastScrollTopRef.current = container.scrollTop;
+      setShortcutHidden(true);
+    }
+  }, [setShortcutHidden]);
+
+  const restorePosition = useCallback((scrollTop?: number) => {
+    const container = containerRef.current;
+    if (!container) return;
+    cancelReturn();
+    container.scrollTop = scrollTop ?? Math.max(0, container.scrollHeight - container.clientHeight);
+    lastScrollTopRef.current = container.scrollTop;
+    if (distanceFromBottom(container) <= LIVE_EDGE_PX) {
+      modeRef.current = 'following';
+      setShortcutHidden(true);
+    } else {
+      modeRef.current = 'detached';
+      updateShortcutVisibility(container);
+    }
+  }, [cancelReturn, setShortcutHidden, updateShortcutVisibility]);
 
   const scrollToBottom = useCallback(() => {
     const container = containerRef.current;
@@ -102,8 +128,12 @@ export function useChatAutoScroll(dependencies: unknown[]) {
     lastScrollTopRef.current = currentTop;
     const liveEdgeDistance = distanceFromBottom(container);
     if (modeRef.current === 'returning') return;
-    if (movedUp) {
+    if (movedUp && pointerActiveRef.current) {
       detach();
+      return;
+    }
+    if (movedUp && modeRef.current === 'following') {
+      correctFollowingPosition();
       return;
     }
     if (liveEdgeDistance <= LIVE_EDGE_PX) {
@@ -111,9 +141,12 @@ export function useChatAutoScroll(dependencies: unknown[]) {
       setShortcutHidden(true);
       return;
     }
-    if (modeRef.current !== 'detached') modeRef.current = 'detached';
+    if (modeRef.current === 'following') {
+      correctFollowingPosition();
+      return;
+    }
     updateShortcutVisibility(container);
-  }, [detach, setShortcutHidden, updateShortcutVisibility]);
+  }, [correctFollowingPosition, detach, setShortcutHidden, updateShortcutVisibility]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -140,7 +173,14 @@ export function useChatAutoScroll(dependencies: unknown[]) {
     container.addEventListener('touchstart', onTouchStart, { passive: true });
     container.addEventListener('touchmove', onTouchMove, { passive: true });
     container.addEventListener('touchend', cancelForDirectInput, { passive: true });
-    container.addEventListener('pointerdown', cancelForDirectInput, { passive: true });
+    const onPointerDown = () => {
+      pointerActiveRef.current = true;
+      cancelForDirectInput();
+    };
+    const onPointerEnd = () => { pointerActiveRef.current = false; };
+    container.addEventListener('pointerdown', onPointerDown, { passive: true });
+    window.addEventListener('pointerup', onPointerEnd, { passive: true });
+    window.addEventListener('pointercancel', onPointerEnd, { passive: true });
     container.addEventListener('keydown', onKeyDown);
     return () => {
       cancelReturn();
@@ -148,10 +188,25 @@ export function useChatAutoScroll(dependencies: unknown[]) {
       container.removeEventListener('touchstart', onTouchStart);
       container.removeEventListener('touchmove', onTouchMove);
       container.removeEventListener('touchend', cancelForDirectInput);
-      container.removeEventListener('pointerdown', cancelForDirectInput);
+      container.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerEnd);
+      window.removeEventListener('pointercancel', onPointerEnd);
       container.removeEventListener('keydown', onKeyDown);
     };
   }, [cancelReturn, detach]);
+
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      const container = containerRef.current;
+      if (!container) return;
+      if (modeRef.current === 'following') correctFollowingPosition();
+      else if (modeRef.current === 'detached') updateShortcutVisibility(container);
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [correctFollowingPosition, updateShortcutVisibility]);
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -164,5 +219,5 @@ export function useChatAutoScroll(dependencies: unknown[]) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...dependencies]);
 
-  return { containerRef, isAtBottom, onScroll, scrollToBottom, followLatest };
+  return { containerRef, contentRef, isAtBottom, onScroll, scrollToBottom, followLatest, restorePosition };
 }

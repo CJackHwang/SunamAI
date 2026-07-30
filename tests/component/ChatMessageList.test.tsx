@@ -5,8 +5,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatMessageList } from '@/features/chat/ui/ChatMessageList';
 import { I18nProvider } from '@/shared/i18n';
 
+const animateDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'animate');
+
+function fakeAnimation(): Animation {
+  return { addEventListener: vi.fn(), cancel: vi.fn() } as unknown as Animation;
+}
+
 describe('ChatMessageList', () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    if (animateDescriptor) Object.defineProperty(Element.prototype, 'animate', animateDescriptor);
+    else Reflect.deleteProperty(Element.prototype, 'animate');
+  });
 
   it('shows the periodic thinking indicator and switches its label during active compaction', () => {
     const props = { messages: [], isRunning: true, containerRef: createRef<HTMLDivElement>(), onScroll: vi.fn() };
@@ -56,8 +67,77 @@ describe('ChatMessageList', () => {
   it('streams reasoning before answer content is available', () => {
     const { container } = render(<I18nProvider><ChatMessageList messages={[]} isRunning containerRef={createRef<HTMLDivElement>()} onScroll={vi.fn()} streamingReasoning="正在分析附件" /></I18nProvider>);
     expect(screen.getByText('正在分析附件')).toBeInTheDocument();
-    expect(container.querySelector('.thinking-process.streaming')).toBeInTheDocument();
+    expect(container.querySelector('.thinking-process.streaming')).toHaveAttribute('open');
     expect(screen.queryByText('Sunam 正在思考...')).not.toBeInTheDocument();
+  });
+
+  it('collapses reasoning as soon as answer streaming starts', () => {
+    const props = { messages: [], isRunning: true, containerRef: createRef<HTMLDivElement>(), onScroll: vi.fn(), streamingReasoning: '分析完成' };
+    const rendered = render(<I18nProvider><ChatMessageList {...props} /></I18nProvider>);
+    const disclosure = screen.getByText('思考过程').closest('details')!;
+    expect(disclosure).toHaveAttribute('open');
+
+    rendered.rerender(<I18nProvider><ChatMessageList {...props} streamingContent="回答已经开始" /></I18nProvider>);
+
+    expect(rendered.container.querySelector('.chat-message.streaming')).toBeInTheDocument();
+    expect(disclosure).not.toHaveAttribute('open');
+  });
+
+  it('keeps reasoning, prose, and streaming tools in one bubble', () => {
+    const toolCall = { id: 'call-live', type: 'function' as const, function: { name: 'read_file', arguments: '{"path":"src/app.ts"}' } };
+    const { container } = render(<I18nProvider><ChatMessageList messages={[]} isRunning containerRef={createRef<HTMLDivElement>()} onScroll={vi.fn()} streamingKey="run:model-1" streamingReasoning="先定位相关文件" streamingContent="我先保留这段正文。" streamingToolCalls={[toolCall]} /></I18nProvider>);
+
+    const bubbles = container.querySelectorAll('.chat-message');
+    expect(bubbles).toHaveLength(1);
+    expect(bubbles[0]).toHaveTextContent('先定位相关文件');
+    expect(bubbles[0]).toHaveTextContent('我先保留这段正文。');
+    expect(bubbles[0]).toHaveTextContent('执行中: read_file');
+  });
+
+  it('uses one outer size owner when reasoning collapses as a tool appears', () => {
+    const requestFrame = vi.spyOn(window, 'requestAnimationFrame');
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this.classList.contains('chat-message')) {
+        const reasoningOpen = this.querySelector('.thinking-process')?.hasAttribute('open') ?? false;
+        const hasTool = Boolean(this.querySelector('.chat-tool'));
+        const height = reasoningOpen ? 140 : hasTool ? 88 : 56;
+        return { x: 0, y: 0, top: 0, right: 240, bottom: height, left: 0, width: 240, height, toJSON: () => ({}) };
+      }
+      const height = this instanceof HTMLDetailsElement && this.open ? 84 : 36;
+      return { x: 0, y: 0, top: 0, right: 208, bottom: height, left: 0, width: 208, height, toJSON: () => ({}) };
+    });
+    const animate = vi.fn(function (this: Element) { return fakeAnimation(); });
+    Object.defineProperty(Element.prototype, 'animate', { configurable: true, value: animate });
+    const props = { messages: [], isRunning: true, containerRef: createRef<HTMLDivElement>(), onScroll: vi.fn(), streamingKey: 'run:model-1', streamingReasoning: '分析完成' };
+    const rendered = render(<I18nProvider><ChatMessageList {...props} /></I18nProvider>);
+    const bubble = rendered.container.querySelector('.chat-message')!;
+    expect(rendered.container.querySelector('.thinking-process')).toHaveAttribute('open');
+    animate.mockClear();
+
+    const toolCall = { id: 'call-live', type: 'function' as const, function: { name: 'read_file', arguments: '{"path":"src/app.ts"}' } };
+    rendered.rerender(<I18nProvider><ChatMessageList {...props} streamingContent="正文开始" streamingToolCalls={[toolCall]} /></I18nProvider>);
+
+    expect(rendered.container.querySelector('.thinking-process')).not.toHaveAttribute('open');
+    expect(screen.getByText('执行中: read_file')).toBeInTheDocument();
+    expect(animate).toHaveBeenCalledTimes(1);
+    expect(animate.mock.instances[0]).toBe(bubble);
+    expect(animate).toHaveBeenCalledWith([
+      { width: '240px', height: '140px' },
+      { width: '240px', height: '88px' },
+    ], expect.objectContaining({ duration: 360, fill: 'both' }));
+    expect(requestFrame).not.toHaveBeenCalled();
+  });
+
+  it('preserves the bubble node when a streaming tool call becomes persisted', () => {
+    const toolCall = { id: 'call-live', type: 'function' as const, function: { name: 'read_file', arguments: '{"path":"src/app.ts"}' } };
+    const props = { isRunning: true, containerRef: createRef<HTMLDivElement>(), onScroll: vi.fn() };
+    const rendered = render(<I18nProvider><ChatMessageList {...props} messages={[]} streamingKey="run:model-1" streamingReasoning="分析完成" streamingContent="正文继续保留" streamingToolCalls={[toolCall]} /></I18nProvider>);
+    const streamingBubble = screen.getByText('正文继续保留').closest('.chat-message');
+
+    rendered.rerender(<I18nProvider><ChatMessageList {...props} messages={[{ role: 'assistant', content: '正文继续保留', reasoning_content: '分析完成', tool_calls: [toolCall] }]} messageKeys={['run:model-1']} /></I18nProvider>);
+
+    expect(screen.getByText('正文继续保留').closest('.chat-message')).toBe(streamingBubble);
+    expect(screen.getByText('执行中: read_file')).toBeInTheDocument();
   });
 
   it('renders completed tool calls collapsed by default and expands their details on demand', async () => {

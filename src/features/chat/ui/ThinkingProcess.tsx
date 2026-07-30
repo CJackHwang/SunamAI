@@ -1,14 +1,25 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { useI18n } from '@/shared/i18n';
+import { useIntrinsicDisclosure } from '@/shared/ui/useIntrinsicDisclosure';
 
-export function ThinkingProcess({ content, streaming = false }: { content: string; streaming?: boolean }) {
+interface ThinkingProcessProps {
+  content: string;
+  streaming?: boolean;
+}
+
+export function ThinkingProcess({ content, streaming = false }: ThinkingProcessProps) {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
+  const { disclosureRef, setDisclosureExpanded, toggleDisclosure } = useIntrinsicDisclosure({ contentSelector: '.thinking-content', scrollContainerSelector: '.chat-message-list' });
+  useLayoutEffect(() => {
+    setDisclosureExpanded(streaming, { animate: false, followScroll: false });
+  }, [setDisclosureExpanded, streaming]);
   useEffect(() => { if (containerRef.current) containerRef.current.scrollTop = containerRef.current.scrollHeight; }, [content]);
   return (
-    <div className={`thinking-process ${streaming ? 'streaming' : ''}`}>
-      <div className="thinking-title">{t('chat.thinkingProcess')}</div>
+    <details ref={disclosureRef} className={`thinking-process ${streaming ? 'streaming' : ''}`} data-expanded="false">
+      <summary className="thinking-title" onClick={toggleDisclosure}><span>{t('chat.thinkingProcess')}</span><ChevronDown size={14} className="thinking-chevron" /></summary>
       <div ref={containerRef} className="thinking-content">{content}</div>
-    </div>
+    </details>
   );
 }

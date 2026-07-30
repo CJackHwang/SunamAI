@@ -39,7 +39,7 @@ interface WorkspaceProps {
 export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, agent, conversationView, onConversationViewChange }: WorkspaceProps) {
   const { t } = useI18n();
   const { runtime, webcontainer, isReady: isRuntimeReady, error: runtimeError, isRestarting, forceRestart, getContainerRoot } = useWorkspaceRuntime();
-  const { events, runs, messages, activeRun, latestRun, viewedRun, streamingContent, streamingReasoning, isCompacting, persistenceError: agentPersistenceError, hasOlderEvents, hasNewerEvents, loadOlderEvents, loadRunEvents, showNewerEvents, startTask, guideActiveTask, resumeTask, stopTask, stopSubagent } = agent;
+  const { events, runs, messages, messageKeys, activeRun, latestRun, viewedRun, streamingKey, streamingContent, streamingReasoning, streamingToolCalls, isCompacting, persistenceError: agentPersistenceError, hasOlderEvents, hasNewerEvents, loadOlderEvents, loadRunEvents, showNewerEvents, startTask, guideActiveTask, resumeTask, stopTask, stopSubagent } = agent;
   const sessions = useWorkspaceSelector((state) => state.sessions);
   const containers = useWorkspaceSelector((state) => state.containers);
   const { createSession, createContainer, renameSession } = useWorkspaceActions();
@@ -59,7 +59,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
   const userMessageEntranceIdRef = useRef(0);
   const scrollPositionsRef = useRef(new Map<string, number>());
   const previousViewKeyRef = useRef('root');
-  const { containerRef, isAtBottom, onScroll, scrollToBottom, followLatest } = useChatAutoScroll([messages, isRunning, streamingContent, streamingReasoning, composerHeight]);
+  const { containerRef, contentRef, isAtBottom, onScroll, scrollToBottom, followLatest, restorePosition } = useChatAutoScroll([messages, isRunning, streamingContent, streamingReasoning, streamingToolCalls, composerHeight]);
   const activeContainer = containers.find((container) => container.id === activeContainerId) ?? null;
   const viewKey = isSubagentView ? conversationView.runId : 'root';
 
@@ -72,9 +72,9 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
     if (!container) return;
     scrollPositionsRef.current.set(previousViewKeyRef.current, container.scrollTop);
     const nextPosition = scrollPositionsRef.current.get(viewKey);
-    container.scrollTop = nextPosition ?? container.scrollHeight;
+    restorePosition(nextPosition);
     previousViewKeyRef.current = viewKey;
-  }, [containerRef, viewKey]);
+  }, [containerRef, restorePosition, viewKey]);
   const handleChatScroll = () => {
     onScroll();
     const container = containerRef.current;
@@ -169,7 +169,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
     <div className="workspace-container" data-active-tab={mobileActive} data-layout={layoutState} data-layout-transition={layoutTransition ?? undefined} onAnimationEnd={finishLayoutTransition}>
       <div className="chat-section">
         <ModelSelector model={sunamModel} isOpen={isModelMenuOpen} onToggle={() => setIsModelMenuOpen((open) => !open)} onSelect={(model) => { setSunamModel(model); setIsModelMenuOpen(false); }} {...(onMobileSidebarToggle ? { onMobileSidebarToggle } : {})} />
-        <ChatMessageList messages={messages} isRunning={isRunning} containerRef={containerRef} onScroll={handleChatScroll} bottomInset={(isSubagentView ? 68 : composerHeight) + 16} streamingContent={streamingContent} streamingReasoning={streamingReasoning} isCompacting={isCompacting} {...(userMessageEntrance ? { userMessageEntrance, onUserMessageEntranceConsumed: (requestId: number) => setUserMessageEntrance((current) => current?.id === requestId ? null : current) } : {})} />
+        <ChatMessageList messages={messages} messageKeys={messageKeys} isRunning={isRunning} containerRef={containerRef} contentRef={contentRef} onScroll={handleChatScroll} bottomInset={(isSubagentView ? 68 : composerHeight) + 16} streamingContent={streamingContent} streamingReasoning={streamingReasoning} streamingToolCalls={streamingToolCalls} {...(streamingKey ? { streamingKey } : {})} isCompacting={isCompacting} {...(userMessageEntrance ? { userMessageEntrance, onUserMessageEntranceConsumed: (requestId: number) => setUserMessageEntrance((current) => current?.id === requestId ? null : current) } : {})} />
         {isSubagentView ? <SubagentFooter isRunning={isRunning} isAtBottom={isAtBottom} taskList={viewedRun && viewedRun.task.plan.length > 0 ? <RunBoard run={viewedRun} events={events} liveOutput={streamingContent} /> : undefined} onStop={() => { void stopSubagent(conversationView.runId); }} onReturn={() => onConversationViewChange({ kind: 'root' })} onScrollToBottom={scrollToBottom} /> : <ChatComposer input={input} attachments={attachments} attachmentError={attachmentError} isRunning={Boolean(isRunning)} isTerminalReady={isTerminalReady} isAtBottom={isAtBottom} taskList={<RunBoard run={activeRun ?? latestRun} runs={runs} events={events} liveOutput={streamingContent} {...(isRuntimeReady ? { onResume: () => resumeTask(latestRun) } : {})} onLoadRunEvents={loadRunEvents} />} onFilesSelected={(files) => { void readChatAttachments([...attachments.flatMap((attachment) => attachment.file ?? []), ...files]).then((next) => { setAttachments(next); setAttachmentError(null); }).catch((error) => setAttachmentError(error instanceof Error ? error.message : String(error))); }} onRemoveAttachment={(index) => setAttachments((current) => current.filter((_attachment, candidateIndex) => candidateIndex !== index))} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} onHeightChange={setComposerHeight} />}
       </div>
       <div className="terminal-section">

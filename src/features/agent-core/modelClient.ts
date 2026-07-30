@@ -26,7 +26,7 @@ export interface AgentModelClient {
   complete(messages: Message[], options: {
     signal: AbortSignal;
     tools: LLMToolDefinition[];
-    onDelta: (message: Pick<Message, 'content' | 'reasoning_content'>) => void;
+    onDelta: (message: Pick<Message, 'content' | 'reasoning_content' | 'tool_calls'>) => void;
   }): Promise<AgentModelResponse>;
 }
 
@@ -88,13 +88,17 @@ export class OpenAIChatModelClient implements AgentModelClient {
     }));
   }
 
-  async complete(messages: Message[], options: { signal: AbortSignal; tools: LLMToolDefinition[]; onDelta: (message: Pick<Message, 'content' | 'reasoning_content'>) => void }): Promise<AgentModelResponse> {
+  async complete(messages: Message[], options: { signal: AbortSignal; tools: LLMToolDefinition[]; onDelta: (message: Pick<Message, 'content' | 'reasoning_content' | 'tool_calls'>) => void }): Promise<AgentModelResponse> {
     const hasVision = messages.some((message) => canonicalContentParts(message).some((part) => part.type === 'image_resource'));
     const invoke = async (includeVision: boolean) => callLLM(await this.mapContent(messages, includeVision), {
         ...this.config,
         signal: options.signal,
         tools: options.tools,
-        onUpdate: (partial) => options.onDelta({ content: partial.content, ...(partial.reasoning_content ? { reasoning_content: partial.reasoning_content } : {}) }),
+        onUpdate: (partial) => options.onDelta({
+          content: partial.content,
+          ...(partial.reasoning_content ? { reasoning_content: partial.reasoning_content } : {}),
+          ...(partial.tool_calls ? { tool_calls: partial.tool_calls } : {}),
+        }),
       });
     let response: Awaited<ReturnType<typeof callLLM>>;
     try {

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildChatRequest, callLLM } from '@/shared/api/llm';
 import { consumeChatStream } from '@/shared/api/sse';
 import { listModels } from '@/shared/api/models';
-import { OpenAIChatModelClient, estimateTextTokens, profileForModel } from '@/features/agent-core/modelClient';
+import { OpenAIChatModelClient, estimateTextTokens, profileForModel, type AgentModelClient } from '@/features/agent-core/modelClient';
 import { V3PersistenceRepository } from '@/entities/persistence/v3Repository';
 import { clearV3Database } from '../helpers/persistenceDatabase';
 import { Blob as NodeBlob } from 'node:buffer';
@@ -87,6 +87,19 @@ describe('LLM protocol', () => {
     await expect(callLLM([{ role: 'user', content: 'stream' }], { apiKey: 'key', baseUrl: 'https://api.test', onUpdate: (partial) => updates.push(partial.content) })).resolves.toMatchObject({ content: 'streamed' });
     expect(updates).toContain('streamed');
     await expect(callLLM([], { apiKey: 'key', baseUrl: 'https://api.test', onUpdate: () => undefined })).rejects.toThrow('No readable stream available');
+  });
+
+  it('forwards streaming tool-call drafts through the model client', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response([
+      'data: {"choices":[{"delta":{"content":"正文保留","tool_calls":[{"index":0,"id":"call-live","type":"function","function":{"name":"read_file","arguments":"{\\"path\\":\\"src/app.ts\\"}"}}]}}]}\n',
+      'data: [DONE]\n',
+    ].join('\n'), { status: 200 })));
+    const updates: Array<Parameters<AgentModelClient['complete']>[1]['onDelta'] extends (message: infer T) => void ? T : never> = [];
+    const client = new OpenAIChatModelClient({ apiKey: 'key', baseUrl: 'https://stream-tools.test/v1', model: 'model' }, 'session');
+
+    await client.complete([], { signal: new AbortController().signal, tools: [], onDelta: (message) => updates.push(message) });
+
+    expect(updates.at(-1)).toMatchObject({ content: '正文保留', tool_calls: [{ id: 'call-live', function: { name: 'read_file' } }] });
   });
 
   it('propagates provider errors for chat and model discovery', async () => {

@@ -26,8 +26,8 @@ interface AgentEventBase { id: string; kind: AgentEventKind; sessionId: string; 
 export type AgentEvent =
   | (AgentEventBase & { kind: 'run_started'; run: AgentRun })
   | (AgentEventBase & { kind: 'phase_changed'; phase: AgentPhase; detail?: string })
-  | (AgentEventBase & { kind: 'message'; message: Message })
-  | (AgentEventBase & { kind: 'assistant_delta'; content: string; reasoningContent: string })
+  | (AgentEventBase & { kind: 'message'; message: Message; streamId?: string })
+  | (AgentEventBase & { kind: 'assistant_delta'; streamId: string; content: string; reasoningContent: string; toolCalls?: ToolCall[] })
   | (AgentEventBase & { kind: 'plan_updated'; task: TaskContract })
   | (AgentEventBase & { kind: 'progress_reported'; message: string })
   | (AgentEventBase & { kind: 'tool_requested'; toolCall: ToolCall })

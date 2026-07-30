@@ -7,12 +7,16 @@ import './ChatLayout.css';
 
 interface ChatMessageListProps {
   messages: Message[];
+  messageKeys?: readonly string[];
   isRunning: boolean;
   containerRef: RefObject<HTMLDivElement | null>;
+  contentRef?: RefObject<HTMLDivElement | null>;
   onScroll: () => void;
   bottomInset?: number;
   streamingContent?: string;
   streamingReasoning?: string;
+  streamingToolCalls?: NonNullable<Message['tool_calls']>;
+  streamingKey?: string;
   isCompacting?: boolean;
   userMessageEntrance?: UserMessageEntranceRequest;
   onUserMessageEntranceConsumed?: (requestId: number) => void;
@@ -25,7 +29,7 @@ export interface UserMessageEntranceRequest {
 
 interface ActiveUserEntrance { requestId: number; message: Message; }
 
-export function ChatMessageList({ messages, isRunning, containerRef, onScroll, bottomInset = 100, streamingContent = '', streamingReasoning = '', isCompacting = false, userMessageEntrance, onUserMessageEntranceConsumed }: ChatMessageListProps) {
+export function ChatMessageList({ messages, messageKeys, isRunning, containerRef, contentRef, onScroll, bottomInset = 100, streamingContent = '', streamingReasoning = '', streamingToolCalls = [], streamingKey, isCompacting = false, userMessageEntrance, onUserMessageEntranceConsumed }: ChatMessageListProps) {
   const { t } = useI18n();
   const [activeUserEntrance, setActiveUserEntrance] = useState<ActiveUserEntrance | null>(null);
   const completedEntranceIdRef = useRef<number | null>(null);
@@ -51,19 +55,25 @@ export function ChatMessageList({ messages, isRunning, containerRef, onScroll, b
       onUserMessageEntranceConsumed?.(userMessageEntrance.id);
     }
   }, [activeUserEntrance?.requestId, messages, onUserMessageEntranceConsumed, userMessageEntrance]);
+  const messageNodes = messages.flatMap((message, index) => {
+    const entranceRequestId = activeUserEntrance?.message === message ? activeUserEntrance.requestId : null;
+    let messageKey = messageKeys?.[index] ?? messageKeysRef.current.get(message);
+    if (!messageKey) {
+      messageKey = `message-${++nextMessageKeyRef.current}`;
+      messageKeysRef.current.set(message, messageKey);
+    }
+    if (streamingKey && messageKey === streamingKey) return [];
+    return [<ChatMessage key={messageKey} message={message} toolOutputs={message.tool_calls?.flatMap((tool) => toolResults.get(tool.id) ?? []) ?? []} userEntrance={entranceRequestId !== null} suppressEntrance={animatedMessagesRef.current.has(message)} {...(entranceRequestId !== null ? { onUserEntranceEnd: () => setActiveUserEntrance((current) => current?.requestId === entranceRequestId && current.message === message ? null : current) } : {})} />];
+  });
+  if (streamingContent || streamingReasoning || streamingToolCalls.length > 0) {
+    messageNodes.push(<ChatMessage key={streamingKey ?? 'streaming-assistant'} message={{ role: 'assistant', content: streamingContent, reasoning_content: streamingReasoning, tool_calls: streamingToolCalls, _ui_streaming: true }} toolOutputs={streamingToolCalls.flatMap((tool) => toolResults.get(tool.id) ?? [])} />);
+  }
   return (
     <div ref={containerRef} onScroll={onScroll} className="chat-message-list" style={{ '--chat-bottom-inset': `${bottomInset}px` } as CSSProperties}>
-      {messages.map((message) => {
-        const entranceRequestId = activeUserEntrance?.message === message ? activeUserEntrance.requestId : null;
-        let messageKey = messageKeysRef.current.get(message);
-        if (!messageKey) {
-          messageKey = `message-${++nextMessageKeyRef.current}`;
-          messageKeysRef.current.set(message, messageKey);
-        }
-        return <ChatMessage key={messageKey} message={message} toolOutputs={message.tool_calls?.flatMap((tool) => toolResults.get(tool.id) ?? []) ?? []} userEntrance={entranceRequestId !== null} suppressEntrance={animatedMessagesRef.current.has(message)} {...(entranceRequestId !== null ? { onUserEntranceEnd: () => setActiveUserEntrance((current) => current?.requestId === entranceRequestId && current.message === message ? null : current) } : {})} />;
-      })}
-      {(streamingContent || streamingReasoning) && <ChatMessage message={{ role: 'assistant', content: streamingContent, reasoning_content: streamingReasoning, _ui_streaming: true }} toolOutputs={[]} />}
-      {isRunning && !streamingContent && !streamingReasoning && <div className="chat-thinking-indicator motion-fade-in" role="status">{isCompacting ? t('chat.contextCompacting') : t('chat.thinking')}</div>}
+      <div ref={contentRef} className="chat-message-list-content">
+        {messageNodes}
+        {isRunning && !streamingContent && !streamingReasoning && streamingToolCalls.length === 0 && <div className="chat-thinking-indicator motion-fade-in" role="status">{isCompacting ? t('chat.contextCompacting') : t('chat.thinking')}</div>}
+      </div>
     </div>
   );
 }

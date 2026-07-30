@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, render, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useChatAutoScroll } from '@/features/chat/hooks/useChatAutoScroll';
 
@@ -33,12 +33,74 @@ describe('useChatAutoScroll', () => {
     expect(container.scrollTop).toBe(1_000);
   });
 
+  it('does not detach when layout anchoring reports an upward scroll without user input', () => {
+    const container = scrollContainer();
+    const rendered = renderScrollHook(container);
+    Object.defineProperty(container, 'scrollHeight', { configurable: true, value: 1_200 });
+    container.scrollTop = 760;
+
+    act(() => rendered.result.current.onScroll());
+
+    expect(container.scrollTop).toBe(1_000);
+    expect(rendered.result.current.isAtBottom).toBe(true);
+  });
+
+  it('does not detach when content growth leaves the old scroll position unchanged', () => {
+    const container = scrollContainer();
+    const rendered = renderScrollHook(container);
+    Object.defineProperty(container, 'scrollHeight', { configurable: true, value: 1_200 });
+
+    act(() => rendered.result.current.onScroll());
+
+    expect(container.scrollTop).toBe(1_000);
+    expect(rendered.result.current.isAtBottom).toBe(true);
+  });
+
+  it('observes the content boundary while preserving following and detached modes', () => {
+    let resizeCallback: ResizeObserverCallback = () => undefined;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { resizeCallback = callback; }
+      observe = observe;
+      disconnect = disconnect;
+      unobserve = vi.fn();
+    });
+    let hook!: ReturnType<typeof useChatAutoScroll>;
+    function Harness() {
+      hook = useChatAutoScroll([]);
+      return <div ref={hook.containerRef}><div ref={hook.contentRef} /></div>;
+    }
+    const rendered = render(<Harness />);
+    const container = rendered.container.firstElementChild as HTMLDivElement;
+    Object.defineProperties(container, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_240 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+
+    act(() => resizeCallback([], {} as ResizeObserver));
+    expect(container.scrollTop).toBe(1_040);
+    expect(observe).toHaveBeenCalledWith(container.firstElementChild);
+
+    act(() => hook.restorePosition(400));
+    Object.defineProperty(container, 'scrollHeight', { configurable: true, value: 1_400 });
+    act(() => resizeCallback([], {} as ResizeObserver));
+
+    expect(container.scrollTop).toBe(400);
+    expect(hook.isAtBottom).toBe(false);
+    rendered.unmount();
+    expect(disconnect).toHaveBeenCalledTimes(1);
+  });
+
   it('detaches on upward movement even inside the old near-bottom threshold', () => {
     const container = scrollContainer();
     const rendered = renderScrollHook(container);
     act(() => rendered.result.current.onScroll());
+    act(() => container.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
     container.scrollTop = 749;
     act(() => rendered.result.current.onScroll());
+    act(() => window.dispatchEvent(new PointerEvent('pointerup')));
     Object.defineProperty(container, 'scrollHeight', { configurable: true, value: 1_200 });
 
     rendered.rerender({ nextRevision: 1 });
@@ -51,8 +113,10 @@ describe('useChatAutoScroll', () => {
     const container = scrollContainer();
     const rendered = renderScrollHook(container);
     act(() => rendered.result.current.onScroll());
+    act(() => container.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
     container.scrollTop = 770;
     act(() => rendered.result.current.onScroll());
+    act(() => window.dispatchEvent(new PointerEvent('pointerup')));
 
     expect(rendered.result.current.isAtBottom).toBe(true);
     Object.defineProperty(container, 'scrollHeight', { configurable: true, value: 1_200 });
@@ -68,8 +132,7 @@ describe('useChatAutoScroll', () => {
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
     const container = scrollContainer();
     const rendered = renderScrollHook(container);
-    container.scrollTop = 200;
-    act(() => rendered.result.current.onScroll());
+    act(() => rendered.result.current.restorePosition(200));
 
     act(() => rendered.result.current.scrollToBottom());
     for (let frame = 0; frame < 100 && frames.length > 0; frame += 1) {
@@ -88,8 +151,7 @@ describe('useChatAutoScroll', () => {
     vi.stubGlobal('cancelAnimationFrame', cancelAnimationFrame);
     const container = scrollContainer();
     const rendered = renderScrollHook(container);
-    container.scrollTop = 200;
-    act(() => rendered.result.current.onScroll());
+    act(() => rendered.result.current.restorePosition(200));
 
     act(() => rendered.result.current.scrollToBottom());
     act(() => container.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
@@ -107,8 +169,7 @@ describe('useChatAutoScroll', () => {
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
     const container = scrollContainer();
     const rendered = renderScrollHook(container);
-    container.scrollTop = 200;
-    act(() => rendered.result.current.onScroll());
+    act(() => rendered.result.current.restorePosition(200));
     act(() => rendered.result.current.scrollToBottom());
 
     for (let frame = 0; frame < 100 && !rendered.result.current.isAtBottom; frame += 1) {
@@ -122,9 +183,8 @@ describe('useChatAutoScroll', () => {
 
   it('reattaches immediately for a submitted message', () => {
     const container = scrollContainer();
-    container.scrollTop = 300;
     const rendered = renderScrollHook(container);
-    act(() => rendered.result.current.onScroll());
+    act(() => rendered.result.current.restorePosition(300));
 
     act(() => rendered.result.current.followLatest());
     Object.defineProperty(container, 'scrollHeight', { configurable: true, value: 1_300 });

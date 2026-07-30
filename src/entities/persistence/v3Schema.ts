@@ -131,8 +131,9 @@ export function isEvent(value: unknown): value is AgentEvent {
   switch (value.kind) {
     case 'run_started': return isRun(value.run);
     case 'phase_changed': return AGENT_PHASES.has(String(value.phase)) && isOptionalString(value.detail);
-    case 'message': return isMessage(value.message);
-    case 'assistant_delta': return typeof value.content === 'string' && typeof value.reasoningContent === 'string';
+    case 'message': return isMessage(value.message) && isOptionalString(value.streamId);
+    case 'assistant_delta': return typeof value.streamId === 'string' && typeof value.content === 'string' && typeof value.reasoningContent === 'string'
+      && (value.toolCalls === undefined || Array.isArray(value.toolCalls) && value.toolCalls.every(isToolCall));
     case 'plan_updated': return isTask(value.task);
     case 'progress_reported':
     case 'recovery_hint': return typeof value.message === 'string';

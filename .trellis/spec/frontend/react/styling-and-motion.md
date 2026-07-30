@@ -11,8 +11,8 @@ Read this leaf when changing CSS ownership, surface geometry, chat colors/spacin
 - Nested rounded surfaces use `inner radius = outer radius - padding`, using the smaller/dominant padding axis when axes differ.
 - Chat and nested tool surfaces use symmetric padding: message 16px, thinking 10px, tool disclosure 8px, arguments/results 12px. They use background, spacing, and concentric radii rather than borders.
 - User message bubbles use `--color-gray-700` (`#3a3a3a`), not black or near-black.
-- The idle thinking label uses a restrained horizontal white text sheen without changing layout. One cycle is one non-repeating sweep across a `250%` background from one symmetric off-text position (`100%`) to the other (`0%`), fast enough for a short status label. Remember that percentage `background-position` offsets are calculated from `container size - background image size`; they are not literal percentages of the text width. Set the resting background position explicitly, keep the white band fully offscreen at both ends, and use only an invisible end-of-cycle discrete reset so the `100%` frame exactly matches the next `0%` frame. Do not repeat the gradient tile or encode repeated sweep ranges that create two flashes followed by a dwell. Reduced motion and forced colors remove the sheen and retain readable solid text.
-- Expanded chat tool bodies are bounded to `240px` and scroll internally so long arguments/results do not expand the transcript without limit.
+- The idle thinking label uses a restrained horizontal white text sheen without changing layout. One `3s` cycle contains the original `1.8s` non-repeating sweep across a `250%` background from one symmetric off-text position (`100%`) to the other (`0%`), followed by a `1.2s` off-text dwell; this lowers loop frequency to `0.6x` without changing highlight travel speed. Remember that percentage `background-position` offsets are calculated from `container size - background image size`; they are not literal percentages of the text width. Set the resting background position explicitly, keep the white band fully offscreen at both ends, and use only an invisible end-of-cycle discrete reset so the `100%` frame exactly matches the next `0%` frame. Do not repeat the gradient tile or encode multiple sweep ranges. Reduced motion and forced colors remove the sheen and retain readable solid text.
+- Thinking content, tool arguments, and tool results share one `96px` detail-viewport limit. Tool argument/result panes each occupy the full disclosure width and scroll independently; the outer body does not apply a second competing height clip.
 
 ```css
 :root {
@@ -35,6 +35,14 @@ Use motion tokens by role:
 - small transforms/direct manipulation: `--motion-fast` or `--motion-base` with `--motion-snappy`/`--motion-spring`;
 - panels, intrinsic size, grid rows, sidebars, sheets: `--motion-slow` with `--motion-sheet`;
 - exits: `--motion-exit`, normally shorter than entrance.
+
+JavaScript-driven Web Animations consume these CSS tokens through the shared `shared/ui/motion` primitives. Do not hard-code a second duration/easing table in a feature hook. Reusable React layout boundaries use `useLayoutSizeAnimation`; disclosure and FLIP owners reuse the same spatial preset and reduced-motion check.
+
+Shared intrinsic-size animation enforces a maximum average width speed of `1px/ms` by extending the spatial preset duration for large horizontal changes. Small changes retain the normal role duration and easing; feature components do not add their own velocity rules.
+
+One visible spatial transition has one size owner. When a parent layout boundary animates a compound update, such as reasoning collapsing while a tool row appears, nested components commit their final intrinsic layout without running another width/height animation. Nested opacity or transform feedback may coexist, but parent and child must not both hold `width` or `height` with `fill: both` for the same transition.
+
+Animated chat rows sit inside one observed transcript-content boundary. The existing scroll owner responds to its geometry changes according to follow mode; `useLayoutSizeAnimation` remains a pure geometry owner and message components do not implement scroll correction.
 
 Keyed vertical lists that reorder after pin/unpin use shared FLIP motion rather than feature-specific CSS positions. Owners provide stable `data-reorder-key` IDs and an order signature. Suppress the first measurement, animate the moved row and displaced siblings, cancel/replace in-flight animations from their current visual rectangles, clean up on unmount, and bypass spatial motion under reduced motion.
 

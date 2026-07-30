@@ -116,8 +116,15 @@ test('automatic compaction handles an oversized prompt without user controls', a
     .toBeVisible({ timeout: 60_000 });
   await expect(page.getByText('压缩后正文与工具同时显示。')).toBeVisible();
   await page.getByText('已完成: update_plan').click();
-  await expect(page.locator('.chat-tool-body').first()).toHaveCSS('max-height', '240px');
-  await expect(page.locator('.chat-tool-body').first()).toHaveCSS('overflow', 'auto');
+  const expandedTool = page.locator('.chat-tool[open]');
+  const argumentsViewport = expandedTool.locator('.chat-tool-arguments');
+  const resultViewport = expandedTool.locator('.chat-tool-result-content');
+  await expect(argumentsViewport).toHaveCSS('max-height', '96px');
+  await expect(resultViewport).toHaveCSS('max-height', '96px');
+  const [argumentsBox, resultBox] = await Promise.all([argumentsViewport.boundingBox(), resultViewport.boundingBox()]);
+  expect(argumentsBox).not.toBeNull();
+  expect(resultBox).not.toBeNull();
+  expect(Math.abs(argumentsBox!.width - resultBox!.width)).toBeLessThan(1);
   await page.locator('.task-list-summary').click();
   await expect(page.locator('.task-list-compaction')).toContainText('上下文已自动压缩');
   await expect(page.locator('.task-list-compaction')).toContainText(/\d+ → \d+ tokens/);
@@ -245,14 +252,14 @@ test('running composer keeps its normal style and queues guidance into the next 
   const thinking = page.getByRole('status');
   await expect(thinking).toHaveText('Sunam 正在思考...');
   await expect(thinking).toHaveCSS('animation-name', 'thinking-text-sheen');
-  await expect(thinking).toHaveCSS('animation-duration', '1.8s');
+  await expect(thinking).toHaveCSS('animation-duration', '3s');
   await expect(thinking).toHaveCSS('background-repeat', 'no-repeat');
   await expect(thinking).toHaveCSS('background-size', '250% 100%');
   const sheenPositions = await thinking.evaluate((element) => {
     const animation = element.getAnimations()[0];
     if (!animation) throw new Error('Thinking sheen animation is missing.');
     animation.pause();
-    return [0, 450, 900, 1_350, 1_790, 1_799, 1_801].map((time) => {
+    return [0, 450, 900, 1_350, 1_800, 2_400, 2_984, 2_999, 3_001].map((time) => {
       animation.currentTime = time;
       return Number.parseFloat(getComputedStyle(element).backgroundPositionX);
     });
@@ -263,7 +270,9 @@ test('running composer keeps its normal style and queues guidance into the next 
   expect(sheenPositions[3]).toBeCloseTo(25, 0);
   expect(sheenPositions[4]).toBeCloseTo(0, 0);
   expect(sheenPositions[5]).toBeCloseTo(0, 0);
-  expect(sheenPositions[6]).toBeCloseTo(100, 0);
+  expect(sheenPositions[6]).toBeCloseTo(0, 0);
+  expect(sheenPositions[7]).toBeCloseTo(0, 0);
+  expect(sheenPositions[8]).toBeCloseTo(100, 0);
   await composer.fill('Prioritize the mobile composer.');
   await expect(send).toBeEnabled();
   await expect(send).toHaveAttribute('aria-label', '发送');

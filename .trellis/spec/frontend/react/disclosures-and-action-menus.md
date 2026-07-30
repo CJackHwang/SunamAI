@@ -15,6 +15,16 @@ Keep native `<details>/<summary>` semantics. When intrinsic dimensions jump, the
 - If the nearest scroll owner was already at bottom, use direct `scrollTop = scrollHeight` correction during the user-triggered animation; wheel/touch input stops correction.
 - Cancel animations, frames, and temporary listeners on rapid reversal and unmount.
 - Programmatic disclosure changes use the same idempotent animation owner as summary clicks (currently `setDisclosureExpanded(next)` from `useIntrinsicDisclosure`); do not mutate `open` in a second owner.
+- Distinguish user-triggered disclosure motion from programmatic layout synchronization. User toggles may own the disclosure's box animation and temporary bottom correction. When an ancestor layout boundary owns the compound size transition, call `setDisclosureExpanded(next, { animate: false, followScroll: false })` so the disclosure commits its final native state before the ancestor measures and does not compete with the chat scroll owner.
+
+The chat reasoning disclosure is expanded only while reasoning itself is streaming. The first assistant content delta ends that state and programmatically collapses the reasoning through `setDisclosureExpanded(false, { animate: false, followScroll: false })`, even though the assistant message remains `_ui_streaming`. The outer message boundary owns that compound size transition. Completed reasoning starts collapsed and remains manually expandable.
+
+```ts
+const reasoningIsStreaming = message._ui_streaming === true && message.content.length === 0;
+```
+
+Component coverage must prove the boundary state where answer content is visible, the assistant message still has its streaming class, and the reasoning `<details>` no longer has `open`.
+It must also prove that reasoning collapse plus tool appearance starts one width/height animation on the outer message boundary and none on the nested disclosure.
 
 Controls available while collapsed live outside the hidden body:
 

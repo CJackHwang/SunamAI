@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, type MouseEvent, type RefObject } from 'react';
+import { animateElementSize, animateWithMotionPreset, prefersReducedMotion, readElementSize } from './motion';
 
 interface IntrinsicDisclosureOptions {
   contentSelector: string;
@@ -6,12 +7,14 @@ interface IntrinsicDisclosureOptions {
   onOpen?: () => void;
 }
 
-const BOX_EASING = 'cubic-bezier(0.32, 0.72, 0, 1)';
-const CONTENT_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
+interface DisclosureUpdateOptions {
+  animate?: boolean;
+  followScroll?: boolean;
+}
 
 export function useIntrinsicDisclosure(options: IntrinsicDisclosureOptions): {
   disclosureRef: RefObject<HTMLDetailsElement | null>;
-  setDisclosureExpanded: (expanded: boolean) => void;
+  setDisclosureExpanded: (expanded: boolean, updateOptions?: DisclosureUpdateOptions) => void;
   toggleDisclosure: (event: MouseEvent<HTMLElement>) => void;
 } {
   const disclosureRef = useRef<HTMLDetailsElement>(null);
@@ -27,12 +30,14 @@ export function useIntrinsicDisclosure(options: IntrinsicDisclosureOptions): {
     stopBottomFollowRef.current?.();
   }, []);
 
-  const setDisclosureExpanded = useCallback((shouldOpen: boolean) => {
+  const setDisclosureExpanded = useCallback((shouldOpen: boolean, updateOptions: DisclosureUpdateOptions = {}) => {
     const disclosure = disclosureRef.current;
     if (!disclosure) return;
     if ((disclosure.dataset.expanded === 'true') === shouldOpen) return;
 
-    const startBox = disclosure.getBoundingClientRect();
+    const shouldAnimate = updateOptions.animate ?? true;
+    const shouldFollowScroll = updateOptions.followScroll ?? shouldAnimate;
+    const startBox = shouldAnimate ? readElementSize(disclosure) : null;
     const scrollContainer = optionsRef.current.scrollContainerSelector
       ? disclosure.closest<HTMLElement>(optionsRef.current.scrollContainerSelector)
       : null;
@@ -41,32 +46,36 @@ export function useIntrinsicDisclosure(options: IntrinsicDisclosureOptions): {
     boxAnimationRef.current?.cancel();
     contentAnimationRef.current?.cancel();
     stopBottomFollowRef.current?.();
+    boxAnimationRef.current = null;
+    contentAnimationRef.current = null;
+    stopBottomFollowRef.current = null;
+    delete disclosure.dataset.animating;
     disclosure.dataset.expanded = String(shouldOpen);
     disclosure.open = shouldOpen;
     if (shouldOpen) optionsRef.current.onOpen?.();
-    const endBox = disclosure.getBoundingClientRect();
+    const endBox = shouldAnimate ? readElementSize(disclosure) : null;
 
-    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-    if (typeof disclosure.animate !== 'function' || reduceMotion) return;
+    if (!startBox || !endBox || prefersReducedMotion()) return;
 
     if (!shouldOpen) disclosure.open = true;
+    const boxAnimation = animateElementSize(disclosure, startBox, endBox);
+    if (!boxAnimation) {
+      disclosure.open = shouldOpen;
+      return;
+    }
     disclosure.dataset.animating = 'true';
-    const boxAnimation = disclosure.animate([
-      { width: `${startBox.width}px`, height: `${startBox.height}px` },
-      { width: `${endBox.width}px`, height: `${endBox.height}px` },
-    ], { duration: shouldOpen ? 420 : 320, easing: BOX_EASING, fill: 'both' });
     const content = disclosure.querySelector<HTMLElement>(optionsRef.current.contentSelector);
-    const contentAnimation = content?.animate(shouldOpen ? [
+    const contentAnimation = content ? animateWithMotionPreset(content, shouldOpen ? [
       { opacity: 0, transform: 'translateY(-6px) scale(0.985)' },
       { opacity: 1, transform: 'translateY(0) scale(1)' },
     ] : [
       { opacity: 1, transform: 'translateY(0) scale(1)' },
       { opacity: 0, transform: 'translateY(-4px) scale(0.99)' },
-    ], { duration: shouldOpen ? 340 : 220, easing: CONTENT_EASING, fill: 'both' }) ?? null;
+    ], shouldOpen ? 'content' : 'exit', 'both') : null;
 
     boxAnimationRef.current = boxAnimation;
     contentAnimationRef.current = contentAnimation;
-    if (scrollContainer && shouldFollowBottom) {
+    if (scrollContainer && shouldFollowBottom && shouldFollowScroll) {
       let frame = 0;
       let following = true;
       const stopFollowing = () => {
@@ -87,6 +96,7 @@ export function useIntrinsicDisclosure(options: IntrinsicDisclosureOptions): {
     }
 
     boxAnimation.addEventListener('finish', () => {
+      if (boxAnimationRef.current !== boxAnimation) return;
       if (!shouldOpen) disclosure.open = false;
       delete disclosure.dataset.animating;
       boxAnimation.cancel();

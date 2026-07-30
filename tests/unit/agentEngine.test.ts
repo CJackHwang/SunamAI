@@ -67,7 +67,7 @@ class DeltaOnlyReasoningClient implements AgentModelClient {
   async complete(_messages: Parameters<AgentModelClient['complete']>[0], options: Parameters<AgentModelClient['complete']>[1]): Promise<AgentModelResponse> {
     this.index += 1;
     if (this.index === 1) {
-      options.onDelta({ content: '', reasoning_content: 'This streamed reasoning must survive.' });
+      options.onDelta({ content: '', reasoning_content: 'This streamed reasoning must survive.', tool_calls: [{ id: 'inspect', type: 'function', function: { name: 'workspace_tree', arguments: '{"max_depth":1}' } }] });
       return tool('inspect', 'workspace_tree', { max_depth: 1 });
     }
     return tool('finish', 'complete_task', { summary: 'Inspected.', evidence: ['Workspace tree inspected.'] });
@@ -386,6 +386,9 @@ describe('Agent Core v2', () => {
     await engine.execute();
     const assistant = events.find((event) => event.kind === 'message' && event.message.role === 'assistant' && event.message.tool_calls?.[0]?.id === 'inspect');
     expect(assistant).toMatchObject({ kind: 'message', message: { reasoning_content: 'This streamed reasoning must survive.' } });
+    const delta = events.find((event) => event.kind === 'assistant_delta' && event.toolCalls?.[0]?.id === 'inspect');
+    expect(delta).toMatchObject({ kind: 'assistant_delta', streamId: expect.stringContaining(':model-'), toolCalls: [{ function: { name: 'workspace_tree' } }] });
+    expect(assistant).toMatchObject({ streamId: (delta as Extract<AgentEvent, { kind: 'assistant_delta' }>).streamId });
   });
 
   it('blocks premature completion, verifies a workspace change, and records a completed Run', async () => {

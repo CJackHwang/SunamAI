@@ -39,7 +39,7 @@ describe('AgentEventStore', () => {
     await clearV3Database();
     const store = new AgentEventStore(repository);
     for (let sequence = 1; sequence <= 260; sequence += 1) await repository.appendEvent({ id: `page:${sequence}`, kind: 'message', sessionId: 'paged', runId: 'page', sequence, createdAt: sequence, message: { role: 'user', content: String(sequence) } });
-    await store.append({ id: 'transient', kind: 'assistant_delta', sessionId: 'paged', runId: 'page', sequence: 261, createdAt: 261, content: 'x', reasoningContent: '', transient: true });
+    await store.append({ id: 'transient', kind: 'assistant_delta', sessionId: 'paged', runId: 'page', sequence: 261, createdAt: 261, streamId: 'page:model-1', content: 'x', reasoningContent: '', transient: true });
     const first = await store.loadSessionEvents('paged');
     expect(first).toHaveLength(250);
     expect(store.hasOlderSessionEvents('paged')).toBe(true);

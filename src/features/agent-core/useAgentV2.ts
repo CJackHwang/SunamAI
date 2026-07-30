@@ -15,7 +15,7 @@ import { registerWorkspaceDeletionPreparation } from '@/entities/workspace/delet
 type UpdateSessionStatus = (id: string, status: SessionStatus) => void;
 const MESSAGE_WINDOW_SIZE = 250;
 interface ActiveExecution { sessionId: string; containerId: string; controller: AbortController; engine: AgentEngine; coordinator: AgentFamilyCoordinator; completion: Promise<void>; }
-interface StreamingState { content: string; reasoning: string; }
+interface StreamingState { streamId: string; content: string; reasoning: string; toolCalls: NonNullable<Message['tool_calls']>; }
 export type AgentConversationView = { kind: 'root' } | { kind: 'subagent'; sessionId: string; runId: string };
 
 function isRootRun(run: AgentRun): boolean { return (run.depth ?? 0) === 0; }
@@ -144,7 +144,15 @@ export function useAgentV2(
       // Live state is keyed by Run so a newly-created session cannot drop its
       // first transient events before React commits the active-session update.
       if (event.kind === 'assistant_delta') {
-        setStreamingByRunId((previous) => ({ ...previous, [event.runId]: { content: event.content, reasoning: event.reasoningContent } }));
+        setStreamingByRunId((previous) => ({
+          ...previous,
+          [event.runId]: {
+            streamId: event.streamId,
+            content: event.content,
+            reasoning: event.reasoningContent,
+            toolCalls: event.toolCalls?.filter((call) => call.id && call.function.name) ?? [],
+          },
+        }));
       }
       if (event.kind === 'context_compaction_status') {
         setCompactingByRunId((previous) => {
@@ -165,7 +173,8 @@ export function useAgentV2(
     }
     if (event.kind === 'message' && event.message.role === 'assistant' && event.sessionId === sessionRef.current) {
       setStreamingByRunId((previous) => {
-        if (!previous[event.runId]) return previous;
+        const streaming = previous[event.runId];
+        if (!streaming || event.streamId && streaming.streamId !== event.streamId) return previous;
         const next = { ...previous };
         delete next[event.runId];
         return next;
@@ -367,20 +376,22 @@ export function useAgentV2(
   }, []);
 
   const viewEvents = useMemo(() => projectConversationEvents(events, runs, conversationView), [conversationView, events, runs]);
-  const allMessages = useMemo(() => projectMessages(viewEvents), [viewEvents]);
+  const allMessageEvents = useMemo(() => viewEvents.filter((event): event is Extract<AgentEvent, { kind: 'message' }> => event.kind === 'message'), [viewEvents]);
   const eventsRef = useRef(events);
   eventsRef.current = events;
-  const messages = useMemo(() => {
-    return selectMessageWindow(allMessages, conversationView.kind === 'root' ? visibleMessageEnd : null);
-  }, [allMessages, conversationView.kind, visibleMessageEnd]);
-  const hasNewerEvents = conversationView.kind === 'root' && visibleMessageEnd !== null && visibleMessageEnd < allMessages.length;
+  const messageEvents = useMemo(() => {
+    return selectMessageWindow(allMessageEvents, conversationView.kind === 'root' ? visibleMessageEnd : null);
+  }, [allMessageEvents, conversationView.kind, visibleMessageEnd]);
+  const messages = useMemo(() => messageEvents.map((event) => event.message), [messageEvents]);
+  const messageKeys = useMemo(() => messageEvents.map((event) => event.streamId ?? event.id), [messageEvents]);
+  const hasNewerEvents = conversationView.kind === 'root' && visibleMessageEnd !== null && visibleMessageEnd < allMessageEvents.length;
   const showNewerEvents = useCallback(() => {
     setVisibleMessageEnd((current) => {
       if (current === null) return null;
-      const next = Math.min(allMessages.length, current + MESSAGE_WINDOW_SIZE);
-      return next >= allMessages.length ? null : next;
+      const next = Math.min(allMessageEvents.length, current + MESSAGE_WINDOW_SIZE);
+      return next >= allMessageEvents.length ? null : next;
     });
-  }, [allMessages.length]);
+  }, [allMessageEvents.length]);
   const rootRuns = useMemo(() => runs.filter(isRootRun), [runs]);
   const activeRun = useMemo(() => rootRuns.find((run) => isActiveAgentPhase(run.phase)) ?? null, [rootRuns]);
   const latestRun = rootRuns[0] ?? null;
@@ -388,7 +399,34 @@ export function useAgentV2(
   const streaming = viewedRun ? streamingByRunId[viewedRun.id] : undefined;
   const isCompacting = Boolean(viewedRun && compactingByRunId[viewedRun.id]);
 
-  return { events, runs, childRunsBySession, messages, activeRun, latestRun, viewedRun, streamingContent: streaming?.content ?? '', streamingReasoning: streaming?.reasoning ?? '', isCompacting, persistenceError, hasOlderEvents: conversationView.kind === 'root' && hasOlderEvents, hasNewerEvents, loadOlderEvents, loadRunEvents, loadSessionSubagents, showNewerEvents, startTask, guideActiveTask, resumeTask, stopTask, stopSubagent, deleteSubagent };
+  return {
+    events,
+    runs,
+    childRunsBySession,
+    messages,
+    messageKeys,
+    activeRun,
+    latestRun,
+    viewedRun,
+    streamingKey: streaming?.streamId,
+    streamingContent: streaming?.content ?? '',
+    streamingReasoning: streaming?.reasoning ?? '',
+    streamingToolCalls: streaming?.toolCalls ?? [],
+    isCompacting,
+    persistenceError,
+    hasOlderEvents: conversationView.kind === 'root' && hasOlderEvents,
+    hasNewerEvents,
+    loadOlderEvents,
+    loadRunEvents,
+    loadSessionSubagents,
+    showNewerEvents,
+    startTask,
+    guideActiveTask,
+    resumeTask,
+    stopTask,
+    stopSubagent,
+    deleteSubagent,
+  };
 }
 
 export type AgentController = ReturnType<typeof useAgentV2>;

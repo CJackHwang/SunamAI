@@ -48,7 +48,7 @@ describe('v3 persistence schema guards', () => {
   it('accepts every event variant with its complete payload', () => {
     const events: AgentEvent[] = [
       event('run_started', { run }), event('phase_changed', { phase: 'planning', detail: 'plan' }), event('message', { message }),
-      event('assistant_delta', { content: 'a', reasoningContent: 'r' }), event('plan_updated', { task }), event('progress_reported', { message: 'progress' }),
+      event('assistant_delta', { streamId: 'r-1:model-1', content: 'a', reasoningContent: 'r', toolCalls: [toolCall] }), event('plan_updated', { task }), event('progress_reported', { message: 'progress' }),
       event('tool_requested', { toolCall }), event('tool_started', { toolCall }),
       event('tool_finished', { toolCall, result: { ok: true, content: 'done', data: { path: 'a.ts' }, modelContent: message.contentParts, resourceReferences: ['res-1'], changedWorkspace: true, verification: { command: 'npm test', passed: true }, stopRun: 'completed', finalSummary: 'done' } }),
       event('verification', { command: 'npm test', passed: true, detail: 'ok' }), event('model_retry', { attempt: 1, delayMs: 10, error: 'retry' }),

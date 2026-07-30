@@ -172,7 +172,10 @@ async function openResourceSubagentWorkspace(page: import('@playwright/test').Pa
   await expect(modelMenu).toHaveClass(/is-exiting/);
   expect(await modelMenu.evaluate((element) => getComputedStyle(element).animationName)).toBe('model-selector-out');
   await expect(modelMenu).toHaveCount(0);
-  await page.locator('.chat-message-list').evaluate((element) => { element.scrollTop = 0; });
+  await page.locator('.chat-message-list').evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 }));
+    element.scrollTop = 0;
+  });
   await expect(attachments).toBeVisible();
 }
 

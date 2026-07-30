@@ -50,8 +50,9 @@ container.scrollTop += (liveTarget - container.scrollTop) * easedStep;
 - Reattach only when the viewport reaches the live edge, a submission explicitly requests follow, or the user activates return-to-bottom.
 - Explicit return-to-bottom uses one cancellable `requestAnimationFrame` loop. Recalculate the target and shortcut visibility on every frame, hide the shortcut once the remaining distance is at most one quarter viewport, decelerate toward the target, apply one exact final correction, and cancel on renewed user input or unmount. Reduced motion jumps directly.
 - Never start a new smooth scroll for every token, message delta, ResizeObserver callback, or composer-height update. Repeated animations fight each other and can flip the bottom detector during intermediate frames.
+- Observe one explicit transcript-content boundary so mounted rows, deferred Markdown layout, disclosures, and shared size animations all report through the same path. Resize notifications perform direct correction only in `following` mode; `detached` readers remain fixed and no second scroll state machine is introduced.
 - Do not animate reserved bottom padding independently from the correction owner. If scrollHeight changes across CSS transition frames, the hook cannot anchor each intermediate height without reintroducing churn.
-- Observe the explicit rows that contribute reserved height. Avoid observing an ancestor whose overlay/expanded body animates but is intentionally excluded from the reservation.
+- Observe the explicit boundary that owns changing content height. Avoid observing the fixed scroll viewport itself or an ancestor whose overlay is intentionally excluded from document flow.
 
 ### External store state
 

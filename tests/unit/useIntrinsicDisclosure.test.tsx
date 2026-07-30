@@ -38,4 +38,23 @@ describe('useIntrinsicDisclosure', () => {
     expect(details).toHaveAttribute('data-expanded', 'false');
     vi.unstubAllGlobals();
   });
+
+  it('lets a parent layout boundary own programmatic size changes', () => {
+    const details = document.createElement('details');
+    details.open = true;
+    details.dataset.expanded = 'true';
+    const animate = vi.fn();
+    details.animate = animate;
+    const rendered = renderHook(() => {
+      const hook = useIntrinsicDisclosure({ contentSelector: '.body', scrollContainerSelector: '.scroll-owner' });
+      hook.disclosureRef.current = details;
+      return hook;
+    });
+
+    act(() => rendered.result.current.setDisclosureExpanded(false, { animate: false, followScroll: false }));
+
+    expect(details).not.toHaveAttribute('open');
+    expect(details).toHaveAttribute('data-expanded', 'false');
+    expect(animate).not.toHaveBeenCalled();
+  });
 });

@@ -206,18 +206,18 @@ export class AgentEngine {
     await this.emitter.emit('phase_changed', { phase, ...(detail ? { detail } : {}) });
   }
 
-  private async emitProjectedMessage(message: Message): Promise<Message> {
+  private async emitProjectedMessage(message: Message, streamId?: string): Promise<Message> {
     const safeMessage = canonicalizeMessage({
       ...message,
       content: redact(message.content),
       ...(message.contentParts ? { contentParts: message.contentParts.map((part) => part.type === 'text' ? { ...part, text: redact(part.text) } : part) } : {}),
     });
-    await this.emitter.emit('message', { message: safeMessage });
+    await this.emitter.emit('message', { message: safeMessage, ...(streamId ? { streamId } : {}) });
     return safeMessage;
   }
 
-  private async emitMessage(message: Message): Promise<void> {
-    const safeMessage = await this.emitProjectedMessage(message);
+  private async emitMessage(message: Message, streamId?: string): Promise<void> {
+    const safeMessage = await this.emitProjectedMessage(message, streamId);
     this.transcript.push(safeMessage);
   }
 
@@ -391,8 +391,9 @@ export class AgentEngine {
     if (this.run.toolCalls >= this.run.budget.maxToolCalls) throw new Error('Agent run exceeded its tool-call budget.');
   }
 
-  private async completeModelRequest(messages: Message[]): Promise<Awaited<ReturnType<AgentModelClient['complete']>> > {
+  private async completeModelRequest(messages: Message[]): Promise<Awaited<ReturnType<AgentModelClient['complete']>> & { streamId: string }> {
     return retryModelRequest(async () => {
+      const streamId = `${this.run.id}:model-${this.run.modelTurns}`;
       let streamedContent = '';
       let streamedReasoning = '';
       const response = await this.options.client.complete(sanitizeToolTranscript(messages), {
@@ -401,12 +402,18 @@ export class AgentEngine {
         onDelta: (message) => {
           streamedContent = message.content;
           streamedReasoning = message.reasoning_content ?? '';
-          void this.emitter.emit('assistant_delta', { content: streamedContent, reasoningContent: streamedReasoning, transient: true });
+          void this.emitter.emit('assistant_delta', {
+            streamId,
+            content: streamedContent,
+            reasoningContent: streamedReasoning,
+            ...(message.tool_calls ? { toolCalls: message.tool_calls } : {}),
+            transient: true,
+          });
         },
       });
       const reasoningContent = response.message.reasoning_content || streamedReasoning;
       this.recordModelUsage(response.usage);
-      return { ...response, message: { ...response.message, content: response.message.content || streamedContent, ...(reasoningContent ? { reasoning_content: reasoningContent } : {}) } };
+      return { ...response, streamId, message: { ...response.message, content: response.message.content || streamedContent, ...(reasoningContent ? { reasoning_content: reasoningContent } : {}) } };
     }, async (attempt, delayMs, error) => this.emitter.emit('model_retry', { attempt, delayMs, error }), this.executionController.signal);
   }
 
@@ -578,7 +585,7 @@ export class AgentEngine {
         const requestSystem = compacted.compacted
           ? buildAgentSystemPrompt({ containerId: this.options.containerId, task: this.task, chaos: this.run.chaos, summary: this.context.getSummary(), agentRole: this.run.agentRole ?? 'root' })
           : system;
-        let response: Awaited<ReturnType<AgentModelClient['complete']>> | undefined;
+        let response: Awaited<ReturnType<typeof this.completeModelRequest>> | undefined;
         for (let promptAttempt = 1; promptAttempt <= 3; promptAttempt += 1) {
           try {
             this.assertBudget();
@@ -609,7 +616,7 @@ export class AgentEngine {
         if (response.toolCalls.length) {
           emptyResponses = 0;
           const assistant: Message = { ...response.message, content: redact(response.message.content), tool_calls: response.toolCalls.map((call) => this.toToolCall(call)) };
-          await this.emitMessage(assistant);
+          await this.emitMessage(assistant, response.streamId);
           await this.phase('acting');
           const results = await this.executeTools(response.toolCalls);
           for (const { call, result } of results) {
@@ -659,7 +666,7 @@ export class AgentEngine {
               role: 'assistant',
               content: response.message.content,
               ...(response.message.reasoning_content ? { reasoning_content: response.message.reasoning_content } : {}),
-            });
+            }, response.streamId);
             this.transcript.push({ role: 'system', content: 'Child runs do not finish through plain responses. Continue the delegated task, call ask_parent for root coordination when blocked, or call complete_task with evidence when finished.' });
             await this.phase('acting', 'Child plain response recorded; delegated work remains active.');
             continue;
@@ -669,14 +676,14 @@ export class AgentEngine {
               role: 'assistant',
               content: response.message.content,
               ...(response.message.reasoning_content ? { reasoning_content: response.message.reasoning_content } : {}),
-            });
+            }, response.streamId);
             await this.phase('observing', 'Processing queued user guidance before completion.');
             continue;
           }
           const gate = await evaluateCompletionGate({ task: this.task, agentRole: this.run.agentRole ?? 'root', runtime: this.options.runtime, containerId: this.options.containerId });
           this.updateTask(() => gate.task);
           if (!gate.ok) {
-            await this.emitter.emit('assistant_delta', { content: '', reasoningContent: '', transient: true });
+            await this.emitter.emit('assistant_delta', { streamId: response.streamId, content: '', reasoningContent: '', transient: true });
             this.transcript.push({ role: 'system', content: `Recovery required: ${gate.message}` });
             await this.phase(gate.phase, 'Model attempted completion before satisfying the task gates.');
             continue;
@@ -686,7 +693,7 @@ export class AgentEngine {
               role: 'assistant',
               content: response.message.content,
               ...(response.message.reasoning_content ? { reasoning_content: response.message.reasoning_content } : {}),
-            });
+            }, response.streamId);
             await this.phase('observing', 'Processing queued user guidance before completion.');
             continue;
           }
@@ -694,7 +701,7 @@ export class AgentEngine {
             role: 'assistant',
             content: response.message.content,
             ...(response.message.reasoning_content ? { reasoning_content: response.message.reasoning_content } : {}),
-          });
+          }, response.streamId);
           await this.finish(response.message.content);
           return;
         }
