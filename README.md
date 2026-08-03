@@ -141,6 +141,7 @@ Sunam 只在当前浏览器配置文件保存数据。无痕窗口、清理站�
 
 - [架构与依赖边界](docs/architecture.md)
 - [Agent Runtime 设计](docs/agent-v2-design.md)
+- [能力库扩展模块开发指南](docs/extension-development.md)
 - [发布与优化冻结验收](docs/refactor-acceptance.md)
 - [依赖 advisory 策略](docs/dependency-advisories.md)
 

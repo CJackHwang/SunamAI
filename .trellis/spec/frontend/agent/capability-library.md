@@ -69,4 +69,5 @@ The engine receives this set (`enabledTools`) and intersects it with per-role ch
 - [Architecture and data flow](./architecture-and-data-flow.md)
 - [Revision, verification, and completion](./revision-verification-and-completion.md)
 - [Persistence and snapshots](./persistence-and-snapshots.md)
+- Developer guide: `docs/extension-development.md`
 - Contracts: `src/shared/contracts/capability.ts`, `src/features/agent-core/capability/*`, `src/features/runtime/CapabilityAwareRuntime.ts`, `src/features/runtime/containerAvailability.ts`
