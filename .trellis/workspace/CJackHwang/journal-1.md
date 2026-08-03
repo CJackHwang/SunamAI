@@ -298,3 +298,24 @@ Refreshed direct and compatible transitive JavaScript dependencies, made Testing
 ### Status
 
 [OK] **Completed**
+
+
+## Session 14: 能力库：Agent 与容器解耦 + 能力模块化
+
+**Date**: 2026-08-03
+**Task**: 能力库：Agent 与容器解耦 + 能力模块化
+**Branch**: `main`
+
+### Summary
+
+完成 capability-library 父子任务（4 任务归档）：能力引擎（契约/注入式注册/模块宿主/CapabilityAwareRuntime/引擎接线/CI）、容器三态与关闭即释放 + boot 失败弹窗 + run 锁、右栏能力库面板 + composer/容器联动 + 移动端启动落点与指示器绑定。多轮 review 加固（dispose 竞态、completion shellAvailable、偏好持久化、受限态 composer 可用、动态岛任务列表）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5ba730e` | (see git log) |
+
+### Status
+
+[OK] **Completed**
