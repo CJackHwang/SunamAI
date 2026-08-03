@@ -171,15 +171,17 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
     setMobileActive(tab);
   };
 
-  // Desktop right column follows the container lifecycle. Mobile: the first (refresh/initial)
-  // boot stays on the chat page; a user-initiated later boot (retry/re-enable) jumps to the
-  // Sunam computer tab so the booting state is perceivable. The bottom-nav indicator tracks
-  // `mobileActive`, so the two never misalign.
+  // Desktop right column follows the container lifecycle. Mobile: the automatic initial
+  // boot (container preference on at page load) stays on the chat page; any other boot —
+  // the user opening the switch after a closed-at-refresh state, or a later retry/re-enable —
+  // is user-initiated and jumps to the Sunam computer tab so the booting state is
+  // perceivable. The bottom-nav indicator tracks `mobileActive`, so they never misalign.
+  const containerOnAtMountRef = useRef(containerAvailable);
   const bootStartedRef = useRef(false);
   useEffect(() => {
     if (containerStarting) {
       setTerminalTab('ai');
-      if (bootStartedRef.current) setMobileActive('ai');
+      if (!containerOnAtMountRef.current || bootStartedRef.current) setMobileActive('ai');
       bootStartedRef.current = true;
     } else if (!containerAvailable) {
       setTerminalTab('capability');

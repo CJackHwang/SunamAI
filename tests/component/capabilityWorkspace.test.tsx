@@ -82,9 +82,14 @@ describe('Workspace in chat-only (restricted container)', () => {
     expect(container.querySelector('.workspace-container')).toHaveAttribute('data-active-tab', 'chat');
   });
 
-  it('keeps the mobile view on the chat page (not the Sunam computer page) while the container is starting', () => {
-    const { container } = renderWorkspace(runtimeValue({ containerStarting: true }));
+  it('stays on the chat page during the automatic initial boot (container was on at load)', () => {
+    const { container } = renderWorkspace(runtimeValue({ containerAvailability: 'enabled', effectiveContainerState: 'enabled', containerStarting: true }));
     expect(container.querySelector('.workspace-container')).toHaveAttribute('data-active-tab', 'chat');
+  });
+
+  it('jumps to the Sunam computer tab on a user-initiated boot after the container was closed at load', () => {
+    const { container } = renderWorkspace(runtimeValue({ containerStarting: true }));
+    expect(container.querySelector('.workspace-container')).toHaveAttribute('data-active-tab', 'ai');
   });
 
   it('shows the container tabs in the bottom nav while the container is starting so the indicator can track the ai page', () => {
