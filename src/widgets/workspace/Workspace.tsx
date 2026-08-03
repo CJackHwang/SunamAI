@@ -18,6 +18,7 @@ import { readChatAttachments } from '@/features/chat/lib/chatAttachments';
 import { useI18n } from '@/shared/i18n';
 import { toErrorMessage } from '@/shared/lib/errors';
 import { isDefaultSessionTitle } from '@/entities/workspace/defaults';
+import { useCapabilityContext } from '@/widgets/capability/CapabilityContext';
 import './Workspace.css';
 
 const DualTerminal = lazy(() => import('@/widgets/workspace/DualTerminal'));
@@ -38,7 +39,10 @@ interface WorkspaceProps {
 
 export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, agent, conversationView, onConversationViewChange }: WorkspaceProps) {
   const { t } = useI18n();
-  const { runtime, webcontainer, isReady: isRuntimeReady, error: runtimeError, isRestarting, forceRestart, getContainerRoot } = useWorkspaceRuntime();
+  const { runtime, webcontainer, isReady: isRuntimeReady, error: runtimeError, isRestarting, forceRestart, getContainerRoot, effectiveContainerState, containerStarting } = useWorkspaceRuntime();
+  const containerAvailable = effectiveContainerState === 'enabled';
+  const { config: capabilityConfig } = useCapabilityContext();
+  const canAttach = capabilityConfig.modules['resources']?.enabled ?? true;
   const { events, runs, messages, messageKeys, activeRun, latestRun, viewedRun, streamingKey, streamingContent, streamingReasoning, streamingToolCalls, isCompacting, persistenceError: agentPersistenceError, hasOlderEvents, hasNewerEvents, loadOlderEvents, loadRunEvents, showNewerEvents, startTask, guideActiveTask, resumeTask, stopTask, stopSubagent } = agent;
   const sessions = useWorkspaceSelector((state) => state.sessions);
   const containers = useWorkspaceSelector((state) => state.containers);
@@ -121,7 +125,9 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
 
   const handleSubmit = (event?: SyntheticEvent) => {
     event?.preventDefault();
-    if (!isTerminalReady || !isRuntimeReady) return;
+    if (!isRuntimeReady) return;
+    const composerReady = containerAvailable ? isTerminalReady : true;
+    if (!composerReady) return;
     if (isRunning) {
       if (!input.trim()) return;
       const guidance = input.trim();
@@ -151,7 +157,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
     if (isNewSession) {
       void generateTitle(prompt, { apiKey, baseUrl, model: apiModel }).then((title) => { if (title) renameSession(sessionId!, title); }).catch((error) => setAttachmentError(toErrorMessage(error)));
     }
-    const containerId = activeContainerId ?? createContainer();
+    const containerId = activeContainerId ?? (containerAvailable ? createContainer() : undefined);
     setUserMessageEntrance({ id: ++userMessageEntranceIdRef.current, previousLastMessage: messages.at(-1) ?? null });
     followLatest();
     startTask(prompt, sessionId, containerId, attachments);
@@ -165,20 +171,40 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
     setMobileActive(tab);
   };
 
+  // Desktop right column follows the container lifecycle. Mobile: the first (refresh/initial)
+  // boot stays on the chat page; a user-initiated later boot (retry/re-enable) jumps to the
+  // Sunam computer tab so the booting state is perceivable. The bottom-nav indicator tracks
+  // `mobileActive`, so the two never misalign.
+  const bootStartedRef = useRef(false);
+  useEffect(() => {
+    if (containerStarting) {
+      setTerminalTab('ai');
+      if (bootStartedRef.current) setMobileActive('ai');
+      bootStartedRef.current = true;
+    } else if (!containerAvailable) {
+      setTerminalTab('capability');
+    }
+  }, [containerAvailable, containerStarting]);
+
+  // Without the attachments capability the composer cannot attach or analyze files.
+  useEffect(() => {
+    if (!canAttach) setAttachments([]);
+  }, [canAttach]);
+
   return (
     <div className="workspace-container" data-active-tab={mobileActive} data-layout={layoutState} data-layout-transition={layoutTransition ?? undefined} onAnimationEnd={finishLayoutTransition}>
       <div className="chat-section">
         <ModelSelector model={sunamModel} isOpen={isModelMenuOpen} onToggle={() => setIsModelMenuOpen((open) => !open)} onSelect={(model) => { setSunamModel(model); setIsModelMenuOpen(false); }} {...(onMobileSidebarToggle ? { onMobileSidebarToggle } : {})} />
         <ChatMessageList messages={messages} messageKeys={messageKeys} isRunning={isRunning} containerRef={containerRef} contentRef={contentRef} onScroll={handleChatScroll} bottomInset={(isSubagentView ? 68 : composerHeight) + 16} streamingContent={streamingContent} streamingReasoning={streamingReasoning} streamingToolCalls={streamingToolCalls} {...(streamingKey ? { streamingKey } : {})} isCompacting={isCompacting} {...(userMessageEntrance ? { userMessageEntrance, onUserMessageEntranceConsumed: (requestId: number) => setUserMessageEntrance((current) => current?.id === requestId ? null : current) } : {})} />
-        {isSubagentView ? <SubagentFooter isRunning={isRunning} isAtBottom={isAtBottom} taskList={viewedRun && viewedRun.task.plan.length > 0 ? <RunBoard run={viewedRun} events={events} liveOutput={streamingContent} /> : undefined} onStop={() => { void stopSubagent(conversationView.runId); }} onReturn={() => onConversationViewChange({ kind: 'root' })} onScrollToBottom={scrollToBottom} /> : <ChatComposer input={input} attachments={attachments} attachmentError={attachmentError} isRunning={Boolean(isRunning)} isTerminalReady={isTerminalReady} isAtBottom={isAtBottom} taskList={<RunBoard run={activeRun ?? latestRun} runs={runs} events={events} liveOutput={streamingContent} {...(isRuntimeReady ? { onResume: () => resumeTask(latestRun) } : {})} onLoadRunEvents={loadRunEvents} />} onFilesSelected={(files) => { void readChatAttachments([...attachments.flatMap((attachment) => attachment.file ?? []), ...files]).then((next) => { setAttachments(next); setAttachmentError(null); }).catch((error) => setAttachmentError(error instanceof Error ? error.message : String(error))); }} onRemoveAttachment={(index) => setAttachments((current) => current.filter((_attachment, candidateIndex) => candidateIndex !== index))} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} onHeightChange={setComposerHeight} />}
+        {isSubagentView ? <SubagentFooter isRunning={isRunning} isAtBottom={isAtBottom} taskList={viewedRun && viewedRun.task.plan.length > 0 ? <RunBoard run={viewedRun} events={events} liveOutput={streamingContent} /> : undefined} onStop={() => { void stopSubagent(conversationView.runId); }} onReturn={() => onConversationViewChange({ kind: 'root' })} onScrollToBottom={scrollToBottom} /> : <ChatComposer input={input} attachments={attachments} attachmentError={attachmentError} isRunning={Boolean(isRunning)} isTerminalReady={containerAvailable ? isTerminalReady : !containerStarting} isAtBottom={isAtBottom} canAttach={canAttach} taskList={<RunBoard run={activeRun ?? latestRun} runs={runs} events={events} liveOutput={streamingContent} {...(isRuntimeReady && containerAvailable ? { onResume: () => resumeTask(latestRun) } : {})} onLoadRunEvents={loadRunEvents} />} onFilesSelected={(files) => { void readChatAttachments([...attachments.flatMap((attachment) => attachment.file ?? []), ...files]).then((next) => { setAttachments(next); setAttachmentError(null); }).catch((error) => setAttachmentError(error instanceof Error ? error.message : String(error))); }} onRemoveAttachment={(index) => setAttachments((current) => current.filter((_attachment, candidateIndex) => candidateIndex !== index))} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} onHeightChange={setComposerHeight} />}
       </div>
       <div className="terminal-section">
         <Suspense fallback={<div className="motion-fade-in workspace-lazy-state" />}>
-          <DualTerminal runtime={runtime} webcontainer={webcontainer} onReady={() => setIsTerminalReady(true)} activeTab={terminalTab} onTabChange={selectTerminalTab} layoutState={layoutState} onLayoutChange={changeTerminalLayout} activeContainerId={activeContainerId} activeContainerName={activeContainer?.name ?? null} activeSessionId={activeSessionId} rootDir={activeContainerId ? getContainerRoot(activeContainerId) : '/'} isRestarting={isRestarting} onForceRestart={forceRestart} />
+          <DualTerminal runtime={runtime} webcontainer={webcontainer} onReady={() => setIsTerminalReady(true)} activeTab={terminalTab} onTabChange={selectTerminalTab} layoutState={layoutState} onLayoutChange={changeTerminalLayout} activeContainerId={activeContainerId} activeContainerName={activeContainer?.name ?? null} activeSessionId={activeSessionId} rootDir={activeContainerId ? getContainerRoot(activeContainerId) : '/'} isRestarting={isRestarting} onForceRestart={forceRestart} containerAvailable={containerAvailable} containerStarting={containerStarting} />
         </Suspense>
       </div>
       {(runtimeError || agentPersistenceError) && <div role="alert" className="workspace-runtime-error motion-notice-in">{runtimeError || agentPersistenceError}</div>}
-      <MobileNavigation active={mobileActive} onChange={(tab) => tab === 'chat' ? setMobileActive('chat') : selectTerminalTab(tab)} />
+      <MobileNavigation active={mobileActive} onChange={(tab) => tab === 'chat' ? setMobileActive('chat') : selectTerminalTab(tab)} showContainerTabs={containerAvailable || containerStarting} />
     </div>
   );
 }

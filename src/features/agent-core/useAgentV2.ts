@@ -3,6 +3,9 @@ import type { ChatAttachment, Message } from '@/entities/message/types';
 import type { SessionStatus } from '@/entities/workspace/types';
 import type { SunamModel } from '@/shared/config/models';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
+import { CHAT_ONLY_CONTAINER_ID, DEFAULT_CAPABILITY_CONFIG, type CapabilityConfig } from '@/shared/contracts/capability';
+import { capabilityRegistry } from './capability/registry';
+import { ensureCapabilityRegistry } from './capability/manifest';
 import { AgentEngine, type AgentResumeState } from './engine';
 import { AgentEventStore } from './eventStore';
 import { OpenAIChatModelClient } from './modelClient';
@@ -67,6 +70,7 @@ export function useAgentV2(
   activeContainerId: string | null,
   updateSessionStatus: UpdateSessionStatus,
   conversationView: AgentConversationView = { kind: 'root' },
+  capabilities: { config: CapabilityConfig; containerAvailable: boolean } = { config: DEFAULT_CAPABILITY_CONFIG, containerAvailable: true },
 ) {
   const storeRef = useRef(new AgentEventStore());
   const executionsRef = useRef(new Map<string, ActiveExecution>());
@@ -88,6 +92,11 @@ export function useAgentV2(
   runsRef.current = runs;
   const conversationViewRef = useRef(conversationView);
   conversationViewRef.current = conversationView;
+  ensureCapabilityRegistry();
+  const enabledTools = useMemo(
+    () => capabilityRegistry.resolveEnabledTools(capabilities.config, capabilities.containerAvailable ? undefined : 'restricted'),
+    [capabilities.config, capabilities.containerAvailable],
+  );
 
   useEffect(() => {
     const executions = executionsRef.current;
@@ -198,7 +207,8 @@ export function useAgentV2(
 
   const launchTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, inheritedMessages?: Message[], attachments?: ChatAttachment[], resume?: AgentResumeState) => {
     const sessionId = overrideSessionId ?? activeSessionId;
-    const containerId = overrideContainerId ?? activeContainerId;
+    const containerAvailable = capabilities.containerAvailable;
+    const containerId = overrideContainerId ?? activeContainerId ?? (containerAvailable ? undefined : CHAT_ONLY_CONTAINER_ID);
     if (!sessionId || !containerId || !runtime || !userPrompt.trim()) return;
     setPersistenceError(null);
     [...executionsRef.current.values()].filter((execution) => execution.sessionId === sessionId).forEach((execution) => execution.controller.abort(new DOMException('Superseded by a newer run.', 'AbortError')));
@@ -220,6 +230,8 @@ export function useAgentV2(
       signal: controller.signal,
       onEvent: appendEvent,
       onRunChange: updateRun,
+      enabledTools,
+      containerAvailable,
       ...(resume ? { resume } : {}),
     });
     const onChildrenPruned = (runIds: string[]) => {
@@ -232,6 +244,7 @@ export function useAgentV2(
     };
     const coordinator = new AgentFamilyCoordinator({
       root: engine, createClient, runtime, store: storeRef.current, signal: controller.signal, persona: sunamModel, model: apiModel, onEvent: appendEvent, onRunChange: updateRun, onChildrenPruned,
+      enabledTools, containerAvailable,
     });
     engine.setSubagentHost(coordinator);
     updateRun(engine.getRun());
@@ -248,7 +261,7 @@ export function useAgentV2(
         });
       });
     executionsRef.current.set(runId, { sessionId, containerId, controller, engine, coordinator, completion });
-  }, [activeContainerId, activeSessionId, apiKey, apiModel, appendEvent, baseUrl, events, runs, runtime, sunamModel, updateRun]);
+  }, [activeContainerId, activeSessionId, apiKey, apiModel, appendEvent, baseUrl, capabilities.containerAvailable, enabledTools, events, runs, runtime, sunamModel, updateRun]);
 
   const startTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, attachments?: ChatAttachment[]) => {
     launchTask(userPrompt, overrideSessionId, overrideContainerId, undefined, attachments);

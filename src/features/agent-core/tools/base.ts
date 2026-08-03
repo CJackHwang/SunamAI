@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
+import type { ToolCapabilityDeclaration } from '@/shared/contracts/capability';
 import type { AgentRole, AgentToolResult, SubagentNotification, SubagentRole, TaskContract } from '../types';
 import type { ContainerMutationLease } from '../agentFamily';
 
@@ -19,6 +20,10 @@ export interface ToolExecutionContext {
   runtime: AgentWorkspaceRuntime;
   signal: AbortSignal;
   agentRole: AgentRole;
+  /** Whether the container capability is usable (false = chat-only session). */
+  containerAvailable?: boolean;
+  /** Whether `shell_run` is exposed (false → no verification tool). */
+  shellAvailable?: boolean;
   writeScope?: string[];
   subagents?: SubagentHost;
   mutationLease: ContainerMutationLease;
@@ -35,6 +40,8 @@ export interface ToolDefinition<TSchema extends z.ZodType> {
   dataImpact: 'none' | 'workspace' | 'process' | 'task' | 'run';
   timeoutMs: number;
   resultType: 'text' | 'tree' | 'matches' | 'changes' | 'process' | 'plan' | 'control' | 'resources' | 'resource';
+  /** Required capability declaration. A tool without one cannot compile → cannot reach the Agent. */
+  capability: ToolCapabilityDeclaration;
   execute(input: z.infer<TSchema>, context: ToolExecutionContext): Promise<AgentToolResult>;
 }
 
@@ -47,6 +54,7 @@ export interface RegisteredTool {
   dataImpact: ToolDefinition<z.ZodType>['dataImpact'];
   timeoutMs: number;
   resultType: ToolDefinition<z.ZodType>['resultType'];
+  capability: ToolCapabilityDeclaration;
   execute(input: unknown, context: ToolExecutionContext): Promise<AgentToolResult>;
 }
 

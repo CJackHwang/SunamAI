@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { defineTool, type RegisteredTool } from './base';
 
+const VIRTUAL_CONTAINER = { module: 'virtual-container', defaultEnabled: true } as const;
+
 export const workspaceTools: RegisteredTool[] = [
   defineTool({
     name: 'workspace_tree',
@@ -11,6 +13,7 @@ export const workspaceTools: RegisteredTool[] = [
     dataImpact: 'none',
     timeoutMs: 10_000,
     resultType: 'tree',
+    capability: VIRTUAL_CONTAINER,
     async execute(input, context) {
       const entries = await context.runtime.listWorkspace(context.containerId, input.max_depth);
       return { ok: true, content: entries.map((entry) => `${entry.isDirectory ? 'dir ' : 'file'} ${entry.path}`).join('\n') || '(workspace is empty)', data: entries };
@@ -25,6 +28,7 @@ export const workspaceTools: RegisteredTool[] = [
     dataImpact: 'none',
     timeoutMs: 10_000,
     resultType: 'text',
+    capability: VIRTUAL_CONTAINER,
     async execute(input, context) {
       const content = await context.runtime.readWorkspaceFile(context.containerId, input.path, input.start_line, input.end_line);
       return { ok: true, content, data: { path: input.path } };
@@ -39,6 +43,7 @@ export const workspaceTools: RegisteredTool[] = [
     dataImpact: 'none',
     timeoutMs: 15_000,
     resultType: 'matches',
+    capability: VIRTUAL_CONTAINER,
     async execute(input, context) {
       const matches = await context.runtime.searchWorkspace(context.containerId, input.query, input.max_results);
       return { ok: true, content: matches.map((match) => `${match.path}:${match.line}: ${match.content}`).join('\n') || '(no matches)', data: matches };
@@ -53,6 +58,7 @@ export const workspaceTools: RegisteredTool[] = [
     dataImpact: 'workspace',
     timeoutMs: 30_000,
     resultType: 'changes',
+    capability: VIRTUAL_CONTAINER,
     async execute(input, context) {
       const changes = await context.runtime.applyWorkspaceChanges(context.containerId, input.changes.map((change) => ({ path: change.path, content: change.content, ...(change.expected_content !== undefined ? { expectedContent: change.expected_content } : {}) })));
       const workspaceRevision = await context.runtime.getWorkspaceRevision(context.containerId);

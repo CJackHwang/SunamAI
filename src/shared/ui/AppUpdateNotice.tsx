@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore } from 'react';
 import { useI18n } from '@/shared/i18n';
 import { getAppUpdateSnapshot, reloadToApplyUpdate, subscribeToAppUpdate } from '@/shared/lib/appUpdates';
-import './AppUpdateNotice.css';
+import './appNotice.css';
 
 export function AppUpdateNotice() {
   const { t } = useI18n();
@@ -13,12 +13,12 @@ export function AppUpdateNotice() {
   if (!updateAvailable) return null;
 
   return (
-    <div className="app-update-overlay motion-fade-in" role="dialog" aria-modal="true">
-      <div className="app-update-notice motion-rise-in">
-        <div className="app-update-content">
-          <span className="app-update-text">{t('update.available')}</span>
+    <div className="app-notice-overlay motion-fade-in" role="dialog" aria-modal="true">
+      <div className="app-notice-card motion-rise-in">
+        <div className="app-notice-content">
+          <span className="app-notice-text">{t('update.available')}</span>
         </div>
-        <div className="app-update-actions">
+        <div className="app-notice-actions">
           <button className="btn btn-primary" type="button" onClick={() => { void reloadToApplyUpdate(); }}>
             {t('update.reload')}
           </button>

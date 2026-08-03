@@ -11,6 +11,9 @@ import './shared/styles/effects.css'
 import { initializeAppUpdates } from './shared/lib/appUpdates.ts'
 
 initializeAppUpdates()
+// Load the capability registry off the initial bundle; consumers call
+// `ensureCapabilityRegistry()` idempotently, so late arrival is harmless.
+void import('./features/agent-core/capability/manifest.ts').then(({ bootstrapCapabilityRegistry }) => bootstrapCapabilityRegistry())
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

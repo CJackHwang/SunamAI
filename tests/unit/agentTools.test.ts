@@ -12,6 +12,7 @@ function createContext() {
     ensureContainer: vi.fn(async () => undefined),
     getWorkspaceRevision: vi.fn(async () => workspaceRevision),
     flushWorkspace: vi.fn(async () => undefined),
+    flushSnapshots: vi.fn(async () => undefined),
     listResources: vi.fn(async () => []),
     readResourceText: vi.fn(async () => 'resource content'),
     readResourceImage: vi.fn(async () => ({ id: 'res-1', name: 'image.png', kind: 'image' as const, mimeType: 'image/png', size: 4, sha256: 'hash', createdAt: 1 })),

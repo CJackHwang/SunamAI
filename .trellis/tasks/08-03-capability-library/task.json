@@ -1,0 +1,30 @@
+{
+  "id": "capability-library",
+  "name": "capability-library",
+  "title": "能力库：Agent 与容器解耦 + 能力模块化管理",
+  "description": "把 Agent 的工具层模块化：能力清单作为唯一真源，工具注入式注册（编译期约束），用户可配置开关；容器能力可关闭/降级，Agent 在无容器时退化为纯聊天客户端；右栏能力库 UI；为笔记等后续产品线预留热插拔模块。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "CJackHwang",
+  "assignee": "CJackHwang",
+  "createdAt": "2026-08-03",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-03-capability-engine",
+    "08-03-container-capability-flow",
+    "08-03-capability-library-ui"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

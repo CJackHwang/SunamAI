@@ -8,6 +8,7 @@ Use this router for Agent execution and every contract crossing Agent Core, mode
 
 | Change area | Read |
 | --- | --- |
+| Adding/gating an Agent tool, capability registry, container availability, or chat-only degradation | [Capability library](./capability-library.md) |
 | Owner selection or a new cross-layer Agent field/tool/event | [Architecture and data flow](./architecture-and-data-flow.md) |
 | Model profiles, messages, provider wire data, token budgets, compaction, or reasoning deltas | [Model context and messages](./model-context-and-messages.md) |
 | Resource limits, MIME validation, session isolation, model copies, or materialization | [Resources](./resources.md) |

@@ -9,6 +9,7 @@ import { WebContainerAgentRuntime } from '@/features/runtime/WebContainerAgentRu
 import { CollapsedTerminalNav, TerminalTabs } from '@/features/terminal-session/TerminalTabs';
 import { ServicesPanel } from '@/features/terminal-session/ServicesPanel';
 import { ServicePreviewOverlay } from '@/features/terminal-session/ServicePreviewOverlay';
+import { CapabilityPanel } from '@/widgets/capability/CapabilityPanel';
 import type { RuntimePortStatus, TerminalLayout, TerminalTab } from '@/shared/contracts/terminal';
 import './DualTerminal.css';
 import './DualTerminalLayout.css';
@@ -30,10 +31,15 @@ interface DualTerminalProps {
   activeSessionId?: string | null;
   isRestarting: boolean;
   onForceRestart: () => Promise<void>;
+  /** Whether container entries (terminal/files/services) are usable. */
+  containerAvailable?: boolean;
+  /** Whether a container boot is in flight — shows the container tabs with their booting state. */
+  containerStarting?: boolean;
 }
 
-const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTabChange, layoutState = 'half', onLayoutChange, activeContainerId, activeContainerName, activeSessionId, isRestarting, onForceRestart }: DualTerminalProps) => {
+const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTabChange, layoutState = 'half', onLayoutChange, activeContainerId, activeContainerName, activeSessionId, isRestarting, onForceRestart, containerAvailable = true, containerStarting = false }: DualTerminalProps) => {
   const { t } = useI18n();
+  const containerTabsVisible = containerAvailable || containerStarting;
   const aiTermRef = useRef<import('@xterm/xterm').Terminal | null>(null);
   const userTermRef = useRef<import('@xterm/xterm').Terminal | null>(null);
   const [isUserTermReady, setIsUserTermReady] = useState(false);
@@ -50,6 +56,12 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
   useEffect(() => {
     if (runtime) onReady?.();
   }, [onReady, runtime]);
+
+  // Reset the booted flag when there is no live container (dispose/chat-only) so a
+  // re-boot shows the "booting" loading state again instead of a stale live terminal.
+  useEffect(() => {
+    if (!runtime) setIsBooted(false);
+  }, [runtime]);
 
   useEffect(() => {
     const unsubscribe = subscribeAgentTerminalPersistence((sessionId, error) => {
@@ -128,14 +140,15 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
   const previewService = activePreview ? activePorts.find((entry) => entry.port === activePreview.port) : undefined;
 
   return <><div className="dual-terminal" data-layout={layoutState}>
-    {layoutState === 'collapsed' ? <CollapsedTerminalNav activeTab={activeTab} onTabChange={onTabChange} onExpand={() => onLayoutChange?.('half')} /> : <TerminalTabs activeTab={activeTab} onTabChange={onTabChange} layoutState={layoutState} {...(onLayoutChange ? { onLayoutChange } : {})} />}
-    {layoutState !== 'collapsed' && <div className="terminal-environment-bar" title={activeContainerId ?? undefined}>{containerIdentity}</div>}
+    {layoutState === 'collapsed' ? <CollapsedTerminalNav activeTab={activeTab} onTabChange={onTabChange} onExpand={() => onLayoutChange?.('half')} containerAvailable={containerTabsVisible} /> : <TerminalTabs activeTab={activeTab} onTabChange={onTabChange} layoutState={layoutState} containerAvailable={containerTabsVisible} {...(onLayoutChange ? { onLayoutChange } : {})} />}
+    {layoutState !== 'collapsed' && activeTab !== 'capability' && <div className="terminal-environment-bar" title={activeContainerId ?? undefined}>{containerIdentity}</div>}
     <div className="terminal-content" data-tab={activeTab}>
-      {!isBooted && activeTab !== 'services' && <div className="terminal-boot-state"><Loader2 className="lucide-spin" /><span>{t('terminal.booting')}</span></div>}
+      {!isBooted && activeTab !== 'services' && activeTab !== 'capability' && <div className="terminal-boot-state"><Loader2 className="lucide-spin" /><span>{t('terminal.booting')}</span></div>}
       <div className="terminal-panel" data-active={activeTab === 'ai'}><AgentTerminalPanel sessionId={activeSessionId ?? null} terminalRef={aiTermRef} /></div>
       <div className="terminal-panel" data-active={activeTab === 'user'}><TerminalView readOnly={false} onTerminalReady={(terminal) => { userTermRef.current = terminal; setIsUserTermReady(true); }} /></div>
       <div className="terminal-panel terminal-file-panel" data-active={activeTab === 'files'}>{isBooted && <Suspense fallback={null}><FileManager wc={webcontainer} rootDir={rootDir} /></Suspense>}</div>
       {activeTab === 'services' && <div className="terminal-panel terminal-services-panel" data-active="true"><ServicesPanel ports={activePorts} processes={processes} isRestarting={isRestarting} onPreview={(port, url) => setActivePreview({ port, lastUrl: url })} onStopPort={(port) => runtime?.stopPort(port) ?? Promise.resolve(false)} onForceRestart={onForceRestart} onKillProcess={(process) => { void runtime?.stopProcess(process.id, { sessionId: process.sessionId, runId: process.runId, containerId: process.containerId }); }} /></div>}
+      <div className="terminal-panel terminal-capability-panel" data-active={activeTab === 'capability'}><CapabilityPanel /></div>
     </div>
   </div>{activePreview && <ServicePreviewOverlay port={activePreview.port} url={previewService?.url ?? activePreview.lastUrl} isOnline={Boolean(previewService)} onDismiss={() => setActivePreview(null)} />}</>;
 };

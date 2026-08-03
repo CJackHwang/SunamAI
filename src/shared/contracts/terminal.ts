@@ -1,4 +1,4 @@
-export type TerminalTab = 'ai' | 'user' | 'files' | 'services';
+export type TerminalTab = 'ai' | 'user' | 'files' | 'services' | 'capability';
 export type TerminalLayout = 'half' | 'full' | 'collapsed';
 
 export type RuntimePortState = 'identifying' | 'managed' | 'orphaned' | 'stopping';

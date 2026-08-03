@@ -52,8 +52,18 @@
   display: flex;
   align-items: flex-end;
   width: calc(100% - 56px);
+  min-width: 0;
   align-self: flex-start;
   pointer-events: auto;
+  transition: width var(--motion-slow) var(--motion-sheet);
+}
+
+/* Dynamic-Island task list: it stretches to fill the right-side column ONLY when the
+   whole column is truly free — scrolled to the bottom (scroll button gone) AND the
+   attachments capability is off (attach button gone). If either button is present, the
+   task list reserves its 56px so content never runs under a floating button. */
+.chat-composer-shell[data-at-bottom='true'][data-can-attach='false'] .chat-composer-upper-row {
+  width: 100%;
 }
 
 .chat-task-list-slot {
@@ -88,6 +98,12 @@
   pointer-events: auto;
   border-radius: 50%;
   color: var(--color-text);
+}
+
+/* Without the attachments capability the attach button is hidden; the scroll-to-bottom
+   button slides down into its place (bottom 70px → 128px relationship). */
+.chat-composer-shell[data-can-attach='false'] .chat-scroll-bottom-btn {
+  bottom: 70px;
 }
 
 .chat-attach-btn:disabled {

@@ -87,6 +87,13 @@ describe('ChatComposer', () => {
     expect(within(container).getByRole('button', { name: '添加聊天附件' })).toBeInTheDocument();
   });
 
+  it('hides the attachment entry and tray when the attachments capability is off', () => {
+    const { container } = render(<I18nProvider><ChatComposer input="hi" attachments={[{ name: 'notes.txt', size: 5, resourceId: 'res-1' }]} canAttach={false} isRunning={false} isTerminalReady isAtBottom onInputChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()} onScrollToBottom={vi.fn()} /></I18nProvider>);
+    expect(within(container).queryByRole('button', { name: '添加聊天附件' })).not.toBeInTheDocument();
+    expect(container.querySelector('.chat-attachment-tray')).not.toBeInTheDocument();
+    expect(container.querySelector('input[type="file"]')).not.toBeInTheDocument();
+  });
+
   it('keeps the scroll control in the independent right-side action column', () => {
     const { container } = render(<I18nProvider><ChatComposer input="" isRunning={false} isTerminalReady isAtBottom={false} onInputChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()} onScrollToBottom={vi.fn()} /></I18nProvider>);
     expect(within(container).getByRole('button', { name: '回到底部' })).toHaveClass('chat-scroll-bottom-btn');

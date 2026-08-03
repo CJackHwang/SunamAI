@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/agent/process-lifecycle.md", "reason": "boot/force-restart/进程生命周期"}
+{"file": ".trellis/spec/frontend/agent/architecture-and-data-flow.md", "reason": "运行时边界与 provider 数据流"}
+{"file": ".trellis/spec/frontend/state/ownership-and-workspace-store.md", "reason": "可用性状态的 store 归属"}
+{"file": ".trellis/spec/frontend/foundation/architecture-and-boundaries.md", "reason": "运行时唯一边界"}
+{"file": ".trellis/spec/frontend/react/disclosures-and-action-menus.md", "reason": "弹窗/披露组件规范"}

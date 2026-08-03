@@ -11,6 +11,8 @@ interface ChatComposerProps {
   taskList?: ReactNode;
   attachments?: ChatAttachment[];
   attachmentError?: string | null;
+  /** Whether the attachments capability is enabled; hides the upload entry when false. */
+  canAttach?: boolean;
   onFilesSelected?: (files: File[]) => void;
   onRemoveAttachment?: (index: number) => void;
   onInputChange: (value: string, element: HTMLTextAreaElement) => void;
@@ -22,7 +24,7 @@ interface ChatComposerProps {
 
 const MOBILE_WORKSPACE_BREAKPOINT = 900;
 
-export function ChatComposer({ input, isRunning, isTerminalReady, isAtBottom, taskList, attachments = [], attachmentError, onFilesSelected, onRemoveAttachment, onInputChange, onSubmit, onStop, onScrollToBottom, onHeightChange }: ChatComposerProps) {
+export function ChatComposer({ input, isRunning, isTerminalReady, isAtBottom, taskList, attachments = [], attachmentError, canAttach = true, onFilesSelected, onRemoveAttachment, onInputChange, onSubmit, onStop, onScrollToBottom, onHeightChange }: ChatComposerProps) {
   const { t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -64,16 +66,16 @@ export function ChatComposer({ input, isRunning, isTerminalReady, isAtBottom, ta
       observer.disconnect();
       window.removeEventListener('resize', report);
     };
-  }, [hasAttachmentError, hasAttachments, hasTaskList, onHeightChange]);
+  }, [canAttach, hasAttachmentError, hasAttachments, hasTaskList, onHeightChange]);
   return (
-    <div ref={shellRef} className="chat-composer-shell">
+    <div ref={shellRef} className="chat-composer-shell" data-can-attach={canAttach ? 'true' : 'false'} data-at-bottom={isAtBottom ? 'true' : 'false'}>
       {!isAtBottom && <button onClick={onScrollToBottom} className="chat-scroll-bottom-btn glass-input motion-pop-in" title={t('chat.backToBottom')} aria-label={t('chat.backToBottom')}><ArrowDown size={16} /></button>}
-      <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => { if (event.target.files?.length) onFilesSelected?.(Array.from(event.target.files)); event.target.value = ''; }} />
-      {attachments.length > 0 && <div className="chat-attachment-tray">{attachments.map((attachment, index) => <div className="chat-attachment-chip motion-rise-in" key={`${attachment.name}-${index}`}><FileText size={14} /><span>{attachment.name}</span><small>{Math.max(1, Math.ceil(attachment.size / 1024))} KB</small><button type="button" onClick={() => onRemoveAttachment?.(index)} aria-label={`${t('chat.removeAttachment')} ${attachment.name}`}><X size={13} /></button></div>)}</div>}
+      {canAttach && <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => { if (event.target.files?.length) onFilesSelected?.(Array.from(event.target.files)); event.target.value = ''; }} />}
+      {canAttach && attachments.length > 0 && <div className="chat-attachment-tray">{attachments.map((attachment, index) => <div className="chat-attachment-chip motion-rise-in" key={`${attachment.name}-${index}`}><FileText size={14} /><span>{attachment.name}</span><small>{Math.max(1, Math.ceil(attachment.size / 1024))} KB</small><button type="button" onClick={() => onRemoveAttachment?.(index)} aria-label={`${t('chat.removeAttachment')} ${attachment.name}`}><X size={13} /></button></div>)}</div>}
       {attachmentError && <div className="chat-attachment-error motion-rise-in" role="alert">{attachmentError}</div>}
       <div className="chat-composer-upper-row">
         <div className="chat-task-list-slot">{taskList}</div>
-        <button type="button" className="chat-attach-btn glass-input" onClick={() => fileInputRef.current?.click()} disabled={isRunning || !isTerminalReady} title={t('chat.attachFiles')} aria-label={t('chat.attachFiles')}><Plus size={20} /></button>
+        {canAttach && <button type="button" className="chat-attach-btn glass-input" onClick={() => fileInputRef.current?.click()} disabled={isRunning || !isTerminalReady} title={t('chat.attachFiles')} aria-label={t('chat.attachFiles')}><Plus size={20} /></button>}
       </div>
       <div className="chat-input-row">
         <textarea className="input-field glass-input chat-input" rows={1} value={input} onChange={(event) => onInputChange(event.target.value, event.target)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !isMobileViewport) { event.preventDefault(); onSubmit(event); resetHeight(event.currentTarget); } }} disabled={!isTerminalReady} placeholder={isTerminalReady ? t('chat.askAnything') : t('chat.booting')} />

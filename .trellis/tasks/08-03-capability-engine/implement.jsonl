@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/agent/architecture-and-data-flow.md", "reason": "Agent 跨层改动边界与数据流"}
+{"file": ".trellis/spec/frontend/agent/revision-verification-and-completion.md", "reason": "completion 门与无容器验证语义"}
+{"file": ".trellis/spec/frontend/agent/subagents-and-cancellation.md", "reason": "子角色 toolPolicy 与能力交集"}
+{"file": ".trellis/spec/frontend/agent/persistence-and-snapshots.md", "reason": "containerId/schema 约束与哨兵可行性"}
+{"file": ".trellis/spec/frontend/state/ownership-and-workspace-store.md", "reason": "配置持久化与 store 边界"}
+{"file": ".trellis/spec/frontend/foundation/architecture-and-boundaries.md", "reason": "运行时唯一边界与层依赖"}
+{"file": ".trellis/spec/frontend/foundation/type-safety.md", "reason": "类型守卫与规范化"}

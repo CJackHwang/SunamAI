@@ -1,4 +1,4 @@
-.app-update-overlay {
+.app-notice-overlay {
   position: fixed;
   inset: 0;
   z-index: 1400;
@@ -9,7 +9,7 @@
   backdrop-filter: blur(4px);
 }
 
-.app-update-notice {
+.app-notice-card {
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -23,26 +23,33 @@
   color: var(--color-text);
 }
 
-.app-update-content {
+.app-notice-content {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
+  gap: 8px;
 }
 
-.app-update-text {
+.app-notice-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.app-notice-text {
   font-size: 15px;
   line-height: 1.5;
 }
 
-.app-update-actions {
+.app-notice-actions {
   display: flex;
   flex-direction: column;
   gap: 12px;
   width: 100%;
 }
 
-.app-update-notice .btn {
+.app-notice-card .btn {
   width: 100%;
   justify-content: center;
   padding: 10px;

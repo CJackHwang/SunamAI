@@ -90,6 +90,7 @@ class FakeRuntime implements AgentWorkspaceRuntime {
   async ensureContainer(): Promise<void> {}
   async getWorkspaceRevision(): Promise<number> { return 0; }
   async flushWorkspace(): Promise<void> {}
+  async flushSnapshots(): Promise<void> {}
   async listResources(): Promise<[]> { return []; }
   async readResourceText(): Promise<string> { return ''; }
   async readResourceImage() { return { id: 'res', name: 'image.png', kind: 'image' as const, mimeType: 'image/png', size: 1, sha256: 'x', createdAt: 1 }; }

@@ -51,3 +51,19 @@ export const resetWebContainer = async (): Promise<void> => {
   bootPromise = null;
   await instance.teardown();
 };
+
+/** Tear down a specific WebContainer instance without touching a newer one that a
+ *  concurrent re-boot may have installed — race-safe for close-then-reopen. */
+export const resetWebContainerIfCurrent = async (instance: WebContainer): Promise<void> => {
+  detachWebContainer(instance);
+  await instance.teardown();
+};
+
+/** Synchronously clear the singleton only when it still points at `instance`; a newer
+ *  instance installed by a concurrent re-boot is left untouched. */
+export function detachWebContainer(instance: WebContainer): void {
+  if (webcontainerInstance === instance) {
+    webcontainerInstance = null;
+    bootPromise = null;
+  }
+}

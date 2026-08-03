@@ -4,6 +4,7 @@ import type { SessionStatus } from '@/entities/workspace/types';
 import { WorkspaceRuntimeProvider } from '@/features/runtime/WorkspaceRuntimeProvider';
 import { useWorkspaceRuntime } from '@/features/runtime/WorkspaceRuntimeContext';
 import { useAgentV2, type AgentController, type AgentConversationView } from '@/features/agent-core/useAgentV2';
+import { CapabilityProvider, useAgentCapabilities } from '@/widgets/capability/CapabilityContext';
 import { useI18n } from '@/shared/i18n';
 import Workspace from '@/widgets/workspace/Workspace';
 
@@ -13,6 +14,7 @@ interface ConfiguredAgentState {
   onConversationViewChange: (view: AgentConversationView) => void;
   isMobileOpen: boolean;
   onCloseMobile: () => void;
+  containerAvailable: boolean;
 }
 
 export interface ConfiguredPageProps {
@@ -30,18 +32,27 @@ export interface ConfiguredPageProps {
 }
 
 function ConfiguredPageContent({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, activeSessionId, activeContainerId, updateSessionStatus, persistenceError, onReloadWorkspace, children }: ConfiguredPageProps) {
-  const { runtime } = useWorkspaceRuntime();
+  const { agentRuntime, effectiveContainerState, setContainerSwitchLocked } = useWorkspaceRuntime();
+  const capabilities = useAgentCapabilities();
   const { t } = useI18n();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [conversationView, setConversationView] = useState<AgentConversationView>({ kind: 'root' });
-  const agent = useAgentV2(apiKey, baseUrl, apiModel, sunamModel, runtime, activeSessionId, activeContainerId, updateSessionStatus, conversationView);
+  const agent = useAgentV2(apiKey, baseUrl, apiModel, sunamModel, agentRuntime, activeSessionId, activeContainerId, updateSessionStatus, conversationView, capabilities);
 
   useEffect(() => {
     if (conversationView.kind === 'subagent' && conversationView.sessionId !== activeSessionId) setConversationView({ kind: 'root' });
   }, [activeSessionId, conversationView]);
 
+  // Lock the container switch while an Agent run is active (root or subagent via the
+  // root's observing phase) so a close cannot tear down a running task. `awaiting_user`
+  // and finished runs are not locked.
+  const activeRun = agent.activeRun;
+  useEffect(() => {
+    setContainerSwitchLocked(Boolean(activeRun));
+  }, [activeRun, setContainerSwitchLocked]);
+
   return <div className="app-container">
-    {children({ agent, conversationView, onConversationViewChange: setConversationView, isMobileOpen, onCloseMobile: () => setIsMobileOpen(false) })}
+    {children({ agent, conversationView, onConversationViewChange: setConversationView, isMobileOpen, onCloseMobile: () => setIsMobileOpen(false), containerAvailable: effectiveContainerState === 'enabled' })}
     <main className="app-main">
       {persistenceError && <div className="persistence-error motion-notice-in" role="alert"><span>{t('persistence.unavailable')}: {persistenceError}</span><button className="btn btn-secondary" onClick={onReloadWorkspace}>{t('common.retry')}</button></div>}
       <div className="app-workspace"><Workspace apiKey={apiKey} baseUrl={baseUrl} apiModel={apiModel} sunamModel={sunamModel} setSunamModel={setSunamModel} onMobileSidebarToggle={() => setIsMobileOpen(true)} activeSessionId={activeSessionId} activeContainerId={activeContainerId} agent={agent} conversationView={conversationView} onConversationViewChange={setConversationView} /></div>
@@ -50,5 +61,5 @@ function ConfiguredPageContent({ apiKey, baseUrl, apiModel, sunamModel, setSunam
 }
 
 export default function ConfiguredPage(props: ConfiguredPageProps) {
-  return <WorkspaceRuntimeProvider><ConfiguredPageContent {...props} /></WorkspaceRuntimeProvider>;
+  return <WorkspaceRuntimeProvider><CapabilityProvider><ConfiguredPageContent {...props} /></CapabilityProvider></WorkspaceRuntimeProvider>;
 }

@@ -249,7 +249,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileNavigation = page.getByRole('navigation', { name: '对话' });
   await expect(mobileNavigation).toBeVisible();
-  await expect(mobileNavigation.getByRole('button')).toHaveCount(5);
+  await expect(mobileNavigation.getByRole('button')).toHaveCount(6);
   await mobileNavigation.getByRole('button', { name: '对话' }).click();
   await expect(page.locator('.workspace-container')).toHaveAttribute('data-active-tab', 'chat');
   await expect(composer).toHaveCSS('backdrop-filter', 'blur(14px) saturate(1.6)');

@@ -3,6 +3,8 @@ import { defineTool, type RegisteredTool } from './base';
 import type { AgentPlanItem } from '../types';
 import { evaluateCompletionGate } from '../completion';
 
+const AGENT_RUNTIME = { module: 'agent-runtime', defaultEnabled: true, warnOnDisable: true } as const;
+
 export const controlTools: RegisteredTool[] = [
   defineTool({
     name: 'update_plan',
@@ -13,6 +15,7 @@ export const controlTools: RegisteredTool[] = [
     dataImpact: 'task',
     timeoutMs: 5_000,
     resultType: 'plan',
+    capability: AGENT_RUNTIME,
     async execute(input, context) {
       const plan: AgentPlanItem[] = input.items;
       context.updateTask((task) => ({ ...task, plan }));
@@ -28,6 +31,7 @@ export const controlTools: RegisteredTool[] = [
     dataImpact: 'task',
     timeoutMs: 5_000,
     resultType: 'control',
+    capability: AGENT_RUNTIME,
     async execute(input) { return { ok: true, content: input.message, data: { progress: input.message } }; },
   }),
   defineTool({
@@ -39,6 +43,7 @@ export const controlTools: RegisteredTool[] = [
     dataImpact: 'run',
     timeoutMs: 5_000,
     resultType: 'control',
+    capability: AGENT_RUNTIME,
     async execute(input) { return { ok: true, content: input.question, stopRun: 'awaiting_user' }; },
   }),
   defineTool({
@@ -50,6 +55,7 @@ export const controlTools: RegisteredTool[] = [
     dataImpact: 'run',
     timeoutMs: 5_000,
     resultType: 'control',
+    capability: AGENT_RUNTIME,
     async execute(input, context) {
       if (context.agentRole === 'root') return { ok: false, content: 'ask_parent is available only to delegated child agents.' };
       return { ok: true, content: input.question, stopRun: 'awaiting_parent' };
@@ -64,9 +70,10 @@ export const controlTools: RegisteredTool[] = [
     dataImpact: 'run',
     timeoutMs: 5_000,
     resultType: 'control',
+    capability: AGENT_RUNTIME,
     async execute(input, context) {
       const task = context.getTask();
-      const gate = await evaluateCompletionGate({ task, agentRole: context.agentRole, runtime: context.runtime, containerId: context.containerId });
+      const gate = await evaluateCompletionGate({ task, agentRole: context.agentRole, runtime: context.runtime, containerId: context.containerId, containerAvailable: context.containerAvailable ?? true, shellAvailable: context.shellAvailable ?? true });
       context.updateTask(() => gate.task);
       if (!gate.ok) return { ok: false, content: gate.message };
       if (!input.evidence.length) return { ok: false, content: 'Completion blocked: provide structured evidence for the acceptance criteria.' };

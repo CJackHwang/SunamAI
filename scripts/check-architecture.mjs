@@ -64,3 +64,26 @@ if (issues.length) {
 } else {
   console.log('Architecture boundaries passed.');
 }
+
+// Capability registration audit: every tool defined via defineTool must carry a capability
+// declaration (the injection invariant). This is a coarse tripwire; the precise per-tool
+// checks (module id legality, duplicate names, `other` threshold) run in
+// tests/unit/capabilityRegistry.test.ts.
+const toolFiles = (await sourceFiles(sourceRoot))
+  .filter((file) => /[\\/]agent-core[\\/]tools[\\/][A-Za-z]+Tools\.ts$/.test(file));
+const capabilityAuditIssues = [];
+for (const file of toolFiles) {
+  const content = await readFile(file, 'utf8');
+  const defineCount = (content.match(/defineTool\(/g) ?? []).length;
+  const capabilityCount = (content.match(/capability:\s+/g) ?? []).length;
+  if (defineCount > capabilityCount) {
+    capabilityAuditIssues.push(`${path.relative(process.cwd(), file)}: ${defineCount} defineTool call(s) but only ${capabilityCount} capability declaration(s).`);
+  }
+}
+
+if (capabilityAuditIssues.length) {
+  console.error(`Capability registration check failed:\n${capabilityAuditIssues.join('\n')}`);
+  process.exitCode = 1;
+} else {
+  console.log('Capability registration passed.');
+}

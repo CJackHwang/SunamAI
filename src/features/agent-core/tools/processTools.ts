@@ -2,6 +2,9 @@ import { z } from 'zod';
 import type { ProcessOwnership, ProcessStatus } from '@/shared/contracts/agentRuntime';
 import { defineTool, type RegisteredTool, type ToolExecutionContext } from './base';
 
+const VIRTUAL_CONTAINER = { module: 'virtual-container', defaultEnabled: true } as const;
+const VIRTUAL_CONTAINER_WITH_SHELL = { module: 'virtual-container', defaultEnabled: true, dependencies: ['shell_run'] } as const;
+
 function processScope(context: ToolExecutionContext): Partial<ProcessOwnership> {
   const scope = { sessionId: context.sessionId, containerId: context.containerId };
   return context.agentRole === 'root' ? scope : { ...scope, runId: context.runId };
@@ -29,6 +32,7 @@ export const processTools: RegisteredTool[] = [
     dataImpact: 'process',
     timeoutMs: 300_000,
     resultType: 'process',
+    capability: VIRTUAL_CONTAINER,
     async execute(input, context) {
       const result = await context.runtime.runShell({ command: input.command, mode: input.mode, ...(input.timeout_ms ? { timeoutMs: input.timeout_ms } : {}), containerId: context.containerId, sessionId: context.sessionId, runId: context.runId, signal: context.signal });
       const process = result.process;
@@ -57,6 +61,7 @@ export const processTools: RegisteredTool[] = [
     dataImpact: 'none',
     timeoutMs: 5_000,
     resultType: 'process',
+    capability: VIRTUAL_CONTAINER_WITH_SHELL,
     async execute(_input, context) {
       const processes = accessibleProcesses(context);
       if (!processes.length) return { ok: true, content: '(no running Agent processes in this session and container)', data: [] };
@@ -80,6 +85,7 @@ export const processTools: RegisteredTool[] = [
     dataImpact: 'none',
     timeoutMs: 5_000,
     resultType: 'process',
+    capability: VIRTUAL_CONTAINER_WITH_SHELL,
     async execute(input, context) {
       const accessible = accessibleProcess(context, input.process_id);
       if (!accessible) return { ok: false, content: 'Process not found in the current session and container. Call process_list to refresh the running-process list.' };
@@ -97,6 +103,7 @@ export const processTools: RegisteredTool[] = [
     dataImpact: 'process',
     timeoutMs: 5_000,
     resultType: 'control',
+    capability: VIRTUAL_CONTAINER_WITH_SHELL,
     async execute(input, context) {
       const process = accessibleProcess(context, input.process_id);
       if (!process) return { ok: false, content: 'Process not found in the current session and container. Call process_list to refresh the running-process list.' };
@@ -113,6 +120,7 @@ export const processTools: RegisteredTool[] = [
     dataImpact: 'process',
     timeoutMs: 5_000,
     resultType: 'control',
+    capability: VIRTUAL_CONTAINER_WITH_SHELL,
     async execute(input, context) {
       const process = accessibleProcess(context, input.process_id);
       if (!process) return { ok: false, content: 'Process not found in the current session and container. Call process_list to refresh the running-process list.' };
@@ -143,6 +151,7 @@ export const processTools: RegisteredTool[] = [
     dataImpact: 'none',
     timeoutMs: 5_000,
     resultType: 'text',
+    capability: VIRTUAL_CONTAINER_WITH_SHELL,
     async execute(_input, context) {
       const buffer = context.runtime.getUserTerminalBuffer();
       if (!buffer) return { ok: true, content: '(User terminal is currently empty or has not received any output yet)' };

@@ -19,9 +19,11 @@ interface SidebarProps {
   agent?: AgentController;
   conversationView?: AgentConversationView;
   onConversationViewChange?: (view: AgentConversationView) => void;
+  /** Whether the container capability is usable (false hides the containers section). */
+  containerAvailable?: boolean;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, onCloseMobile, agent, conversationView = { kind: 'root' }, onConversationViewChange }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, onCloseMobile, agent, conversationView = { kind: 'root' }, onConversationViewChange, containerAvailable = true }) => {
   const { t } = useI18n();
   const [_isCollapsed, setIsCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 900);
@@ -106,7 +108,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
           <div className="sidebar-section">
             <button className="sidebar-action-btn" onClick={() => {
               createSession();
-              if (!activeContainerId) createContainer();
+              if (containerAvailable && !activeContainerId) createContainer();
             }}>
               <SquarePen size={18} />
               {!isCollapsed && <span>{t('sidebar.newTask')}</span>}
@@ -120,7 +122,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenSettings, isMobileOpen, 
           </div>
 
           {/* Containers Section */}
-          {!isCollapsed && (
+          {!isCollapsed && containerAvailable && (
             <div className="sidebar-section">
               <div className="sidebar-section-title">
                 {t('sidebar.containers')}

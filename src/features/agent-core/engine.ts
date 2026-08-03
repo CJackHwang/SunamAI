@@ -67,6 +67,10 @@ export interface AgentEngineOptions {
   mutationLease?: ContainerMutationLease;
   checkpointTimeoutMs?: number;
   onAwaitingParent?: (question: string) => Promise<void>;
+  /** Effective tool allow-set from the capability config + availability. Omitted = all tools. */
+  enabledTools?: ReadonlySet<string>;
+  /** Whether the container capability is usable (false = chat-only session). Defaults to true. */
+  containerAvailable?: boolean;
 }
 
 const CHILD_COMMON_TOOLS = ['workspace_tree', 'read_file', 'search_workspace', 'list_resources', 'read_resource_text', 'read_resource_image', 'update_plan', 'report_progress', 'ask_parent', 'complete_task'];
@@ -119,7 +123,13 @@ export class AgentEngine {
     this.checkpointTimeoutMs = Math.max(10, options.checkpointTimeoutMs ?? DEFAULT_CHECKPOINT_TIMEOUT_MS);
     const role: AgentRole = options.lineage?.role ?? 'root';
     const toolNames = toolsForRole(role);
-    this.registry = new AgentToolRegistry(toolNames ? new Set(toolNames) : undefined, role === 'root' ? new Set(['ask_parent']) : undefined);
+    const enabledTools = options.enabledTools;
+    const allowSet = toolNames
+      ? new Set(toolNames.filter((tool) => !enabledTools || enabledTools.has(tool)))
+      : enabledTools
+        ? new Set(enabledTools)
+        : undefined;
+    this.registry = new AgentToolRegistry(allowSet, role === 'root' ? new Set(['ask_parent']) : undefined);
     this.run = {
       id,
       sessionId: options.sessionId,
@@ -453,6 +463,8 @@ export class AgentEngine {
       runtime: this.options.runtime,
       signal: this.executionController.signal,
       agentRole: this.run.agentRole ?? 'root',
+      ...(this.options.containerAvailable !== undefined ? { containerAvailable: this.options.containerAvailable } : {}),
+      ...(this.options.enabledTools ? { shellAvailable: this.options.enabledTools.has('shell_run') } : {}),
       ...(this.run.toolPolicy?.writeScope ? { writeScope: this.run.toolPolicy.writeScope } : {}),
       ...(this.subagentHost ? { subagents: this.subagentHost } : {}),
       mutationLease: this.mutationLease,
@@ -550,7 +562,7 @@ export class AgentEngine {
         this.assertBudget();
         await this.flushUserGuidance();
         const workspaceRevision = await this.options.runtime.getWorkspaceRevision(this.options.containerId);
-        const system = buildAgentSystemPrompt({ containerId: this.options.containerId, task: this.task, chaos: this.run.chaos, summary: this.context.getSummary(), agentRole: this.run.agentRole ?? 'root' });
+        const system = buildAgentSystemPrompt({ containerId: this.options.containerId, task: this.task, chaos: this.run.chaos, summary: this.context.getSummary(), agentRole: this.run.agentRole ?? 'root', containerAvailable: this.options.containerAvailable ?? true });
         const estimate = this.options.client.estimateTokens?.bind(this.options.client) ?? ((value: string) => Math.ceil(value.length / 4));
         const toolSchemaTokens = estimate(JSON.stringify(this.registry.getApiDefinitions()));
         const mediaTokens = this.transcript.reduce((total, message) => total + (message.contentParts?.filter((part) => part.type === 'image_resource').length ?? 0) * 1_024, 0);
@@ -583,7 +595,7 @@ export class AgentEngine {
           await this.reflectTask();
         }
         const requestSystem = compacted.compacted
-          ? buildAgentSystemPrompt({ containerId: this.options.containerId, task: this.task, chaos: this.run.chaos, summary: this.context.getSummary(), agentRole: this.run.agentRole ?? 'root' })
+          ? buildAgentSystemPrompt({ containerId: this.options.containerId, task: this.task, chaos: this.run.chaos, summary: this.context.getSummary(), agentRole: this.run.agentRole ?? 'root', containerAvailable: this.options.containerAvailable ?? true })
           : system;
         let response: Awaited<ReturnType<typeof this.completeModelRequest>> | undefined;
         for (let promptAttempt = 1; promptAttempt <= 3; promptAttempt += 1) {
@@ -680,7 +692,7 @@ export class AgentEngine {
             await this.phase('observing', 'Processing queued user guidance before completion.');
             continue;
           }
-          const gate = await evaluateCompletionGate({ task: this.task, agentRole: this.run.agentRole ?? 'root', runtime: this.options.runtime, containerId: this.options.containerId });
+          const gate = await evaluateCompletionGate({ task: this.task, agentRole: this.run.agentRole ?? 'root', runtime: this.options.runtime, containerId: this.options.containerId, containerAvailable: this.options.containerAvailable ?? true, shellAvailable: this.options.enabledTools?.has('shell_run') ?? true });
           this.updateTask(() => gate.task);
           if (!gate.ok) {
             await this.emitter.emit('assistant_delta', { streamId: response.streamId, content: '', reasoningContent: '', transient: true });

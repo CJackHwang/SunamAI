@@ -63,11 +63,15 @@ export function buildAgentSystemPrompt(input: {
   chaos: ChaosContract;
   summary: string;
   agentRole: AgentRole;
+  containerAvailable?: boolean;
 }): string {
-  const workspacePath = getContainerPublicPath(input.containerId);
   const taskPlan = input.task.plan.length
     ? input.task.plan.map((item) => `- [${item.status}] ${item.title}`).join('\n')
     : '- No plan has been committed yet.';
+  if (input.containerAvailable === false) {
+    return buildChatOnlySystemPrompt({ ...input, taskPlan });
+  }
+  const workspacePath = getContainerPublicPath(input.containerId);
   const verificationDirective = input.agentRole === 'root'
     ? '3. **Mandatory Verification**: After making changes, you MUST use `shell_run` in \'foreground\' mode to run a truthful check that is relevant to the task and exits non-zero on failure. Command names, scripts, arguments, ports, and shell composition are not restricted, so never use forced success or unrelated commands as fake evidence. Any later workspace mutation requires another foreground check.'
     : '3. **Optional Child Verification**: Verification does not gate child completion. Run relevant checks when they add value, and report every attempted check truthfully; never fabricate or mask results.';
@@ -96,6 +100,48 @@ Constraints:
 ${input.task.constraints.map((constraint) => `- ${constraint}`).join('\n')}
 Plan:
 ${taskPlan}
+Recorded evidence:
+${input.task.evidence.map((evidence) => `- ${evidence}`).join('\n') || '- None yet.'}
+Working summary:
+${input.summary || '- No prior summary.'}
+
+ROLEPLAY DIRECTIVE (MANDATORY TONE):
+Persona: ${input.chaos.persona}
+Style Guidelines: ${input.chaos.styleDirective}
+Important: Maintain this persona strictly in your conversational text and explanations, but ensure your tool calls, JSON payloads, and actual source code edits remain perfectly well-formed, professional, and free of syntax errors.`;
+}
+
+/**
+ * Chat-only system prompt: rendered when the container capability is unavailable or disabled.
+ * No file system, no terminal, no processes — the agent answers from conversation + resources.
+ */
+function buildChatOnlySystemPrompt(input: {
+  containerId: string;
+  task: TaskContract;
+  chaos: ChaosContract;
+  summary: string;
+  agentRole: AgentRole;
+  taskPlan: string;
+}): string {
+  const delegationDirective = input.agentRole === 'root'
+    ? '4. **Subagent Selection**: Use `explore` for independent read-only investigation and `task` for delegated work. For independent subtasks, issue every `spawn_subagent` call before `wait_subagents` so up to three children can run concurrently.'
+    : '4. **Child Boundary**: Complete only the delegated goal. You cannot create more subagents or communicate with the end user. When blocked, call `ask_parent` with a concise question and wait for the root Agent to coordinate. A plain response never completes a child: only `complete_task` may finish it.';
+  return `You are ${input.chaos.persona}, an elite, highly rigorous autonomous AI assistant running in a browser chat-only session. You have no file system, no terminal, and no processes — you answer from the conversation and any attached resources.
+
+OPERATING CHARTER (CHAT-ONLY DIRECTIVES):
+1. **Conversation Grounding**: Answer strictly from the conversation context and attached resources. Never claim to have read files, run commands, or verified code that you did not — you cannot access any workspace.
+2. **Attached Resources**: Use the resource tools (\`list_resources\` / \`read_resource_text\` / \`read_resource_image\`) to inspect attachments on demand. Resource bodies are not embedded in chat history.
+3. **Absolute Truth**: Treat tool outputs as ground truth. Never invent completion, tests, files, commands, or evidence.
+${delegationDirective}
+
+CURRENT TASK
+Objective: ${input.task.objective}
+Acceptance criteria:
+${input.task.acceptanceCriteria.map((criterion) => `- ${criterion}`).join('\n')}
+Constraints:
+${input.task.constraints.map((constraint) => `- ${constraint}`).join('\n')}
+Plan:
+${input.taskPlan}
 Recorded evidence:
 ${input.task.evidence.map((evidence) => `- ${evidence}`).join('\n') || '- None yet.'}
 Working summary:

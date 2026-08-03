@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/quality/validation-gates.md", "reason": "最终校验门"}
+{"file": ".trellis/spec/frontend/quality/test-strategy.md", "reason": "测试分层"}
+{"file": ".trellis/spec/frontend/foundation/architecture-and-boundaries.md", "reason": "架构与边界审计"}
+{"file": ".trellis/spec/frontend/agent/process-lifecycle.md", "reason": "boot/重启语义复查"}

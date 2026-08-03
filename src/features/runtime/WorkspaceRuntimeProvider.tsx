@@ -1,44 +1,117 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PropsWithChildren } from 'react';
 import type { WebContainer } from '@webcontainer/api';
-import { WebContainerAgentRuntime } from '@/features/runtime/WebContainerAgentRuntime';
+import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
+import type { CapabilityAvailability } from '@/shared/contracts/capability';
+import { readCapabilityConfig, saveCapabilityConfig, setCapabilityModule } from '@/shared/lib/capabilityConfig';
 import { getContainerRoot } from '@/shared/lib/containerPaths';
-import { WorkspaceRuntimeContext, type WorkspaceRuntimeContextValue } from './WorkspaceRuntimeContext';
-import { forceRestartWorkspaceRuntime, getWorkspaceRuntime, type WorkspaceRuntimeInstance } from './runtimeSingleton';
+import { WebContainerAgentRuntime } from '@/features/runtime/WebContainerAgentRuntime';
+import { ContainerBootNotice } from '@/shared/ui/ContainerBootNotice';
 import { toErrorMessage } from '@/shared/lib/errors';
+import { WorkspaceRuntimeContext, type EffectiveContainerState, type WorkspaceRuntimeContextValue } from './WorkspaceRuntimeContext';
+import { createChatOnlyAgentRuntime, disposeWorkspaceRuntime, forceRestartWorkspaceRuntime, getWorkspaceRuntime, type WorkspaceRuntimeInstance } from './runtimeSingleton';
+import { ContainerAvailabilityController } from './containerAvailability';
 
 export function WorkspaceRuntimeProvider({ children }: PropsWithChildren) {
+  const controllerRef = useRef<ContainerAvailabilityController | null>(null);
+  if (!controllerRef.current) controllerRef.current = new ContainerAvailabilityController();
+  const controller = controllerRef.current;
+
   const [webcontainer, setWebcontainer] = useState<WebContainer | null>(null);
   const [runtime, setRuntime] = useState<WebContainerAgentRuntime | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
+  const [bootFailure, setBootFailure] = useState<string | null>(null);
+  const [availability, setAvailability] = useState<CapabilityAvailability>(() => controller.get());
+  const [containerStarting, setContainerStarting] = useState(() => controller.isStarting());
+  const [containerEnabled, setContainerEnabledState] = useState(() => readCapabilityConfig().modules['virtual-container']?.enabled ?? true);
+  const [containerSwitchLocked, setContainerSwitchLocked] = useState(false);
   const errorSubscriptionRef = useRef<(() => void) | null>(null);
 
-  const attachRuntime = useCallback((instance: WorkspaceRuntimeInstance) => {
+  const attachFullRuntime = useCallback((instance: WorkspaceRuntimeInstance) => {
     errorSubscriptionRef.current?.();
     errorSubscriptionRef.current = instance.runtime.subscribeErrors(setError);
     setWebcontainer(instance.webcontainer);
     setRuntime(instance.runtime);
   }, []);
 
+  const attachChatOnly = useCallback(() => {
+    errorSubscriptionRef.current?.();
+    errorSubscriptionRef.current = null;
+    setWebcontainer(null);
+    setRuntime(null);
+  }, []);
+
   useEffect(() => {
     let active = true;
-    void getWorkspaceRuntime().then((instance) => {
-      if (active) attachRuntime(instance);
-    }).catch((caught) => {
-      if (active) setError(toErrorMessage(caught));
+    controller.setOnFailure((message) => { if (active) setBootFailure(message); });
+    const unsubscribe = controller.subscribe(() => {
+      if (!active) return;
+      setAvailability(controller.get());
+      setContainerStarting(controller.isStarting());
+    });
+    const forceFail = import.meta.env.DEV && new URLSearchParams(window.location.search).has('test-container-fail');
+    if (forceFail) {
+      // Test injection (mirrors ?test-update): simulate a container boot failure.
+      setAvailability('restricted');
+      setBootFailure('Simulated container boot failure');
+      attachChatOnly();
+      return () => { active = false; unsubscribe(); controller.setOnFailure(null); };
+    }
+    if (!containerEnabled) {
+      // User preference is off — do not boot the container at all (F3).
+      attachChatOnly();
+      return () => { active = false; unsubscribe(); controller.setOnFailure(null); };
+    }
+    void controller.initialize().then((outcome) => {
+      if (!active) return;
+      if (outcome === 'enabled') {
+        void getWorkspaceRuntime().then((instance) => { if (active) attachFullRuntime(instance); })
+          .catch((caught) => { if (!active) return; setAvailability('restricted'); setBootFailure(toErrorMessage(caught)); attachChatOnly(); });
+      } else {
+        attachChatOnly();
+      }
     });
     return () => {
       active = false;
+      unsubscribe();
+      controller.setOnFailure(null);
+    };
+  }, [attachChatOnly, attachFullRuntime, containerEnabled, controller]);
+
+  const retryContainer = useCallback(async (): Promise<boolean> => {
+    setBootFailure(null);
+    setError(null);
+    const outcome = await controller.retry();
+    if (outcome === 'enabled') {
+      const instance = await getWorkspaceRuntime();
+      attachFullRuntime(instance);
+    } else {
+      attachChatOnly();
+    }
+    return outcome === 'enabled';
+  }, [attachChatOnly, attachFullRuntime, controller]);
+
+  const setContainerEnabled = useCallback(async (enabled: boolean) => {
+    // Flip the preference immediately so the switch reacts without waiting for teardown;
+    // a slow flush no longer blocks the UI.
+    setContainerEnabledState(enabled);
+    saveCapabilityConfig(setCapabilityModule(readCapabilityConfig(), 'virtual-container', enabled));
+    if (!enabled) {
+      // 关闭即释放（F3.3/F4.4）：flush 快照落盘 → teardown → 清空单例。错误冒泡到 error，
+      // 不留下"界面已关但运行时未释放"的半开状态。run 活跃时开关已被锁定，不会打断任务。
+      try {
+        await disposeWorkspaceRuntime();
+        controller.resetForReboot();
+      } catch (caught) {
+        setError(toErrorMessage(caught));
+      }
       errorSubscriptionRef.current?.();
       errorSubscriptionRef.current = null;
-    };
-  }, [attachRuntime]);
-
-  useEffect(() => {
-    const flush = () => { void runtime?.flushSnapshots().catch((caught) => setError(toErrorMessage(caught))); };
-    window.addEventListener('pagehide', flush);
-    return () => window.removeEventListener('pagehide', flush);
-  }, [runtime]);
+    }
+    // The mount effect re-runs on `containerEnabled` and boots/attaches accordingly:
+    // a later enable boots lazily (fresh, thanks to the reset above); a disable has
+    // already released the singleton.
+  }, [controller]);
 
   const forceRestart = useCallback(async () => {
     if (isRestarting) return;
@@ -51,16 +124,55 @@ export function WorkspaceRuntimeProvider({ children }: PropsWithChildren) {
         setRuntime(null);
         setWebcontainer(null);
       });
-      attachRuntime(instance);
+      attachFullRuntime(instance);
     } catch (caught) {
-      const message = toErrorMessage(caught);
-      setError(message);
+      setError(toErrorMessage(caught));
       throw caught;
     } finally {
       setIsRestarting(false);
     }
-  }, [attachRuntime, isRestarting]);
+  }, [attachFullRuntime, isRestarting]);
 
-  const value = useMemo<WorkspaceRuntimeContextValue>(() => ({ webcontainer, runtime, error, isReady: Boolean(webcontainer && runtime) && !isRestarting, isRestarting, forceRestart, getContainerRoot }), [error, forceRestart, isRestarting, runtime, webcontainer]);
-  return <WorkspaceRuntimeContext.Provider value={value}>{children}</WorkspaceRuntimeContext.Provider>;
+  const effectiveContainerState: EffectiveContainerState = containerEnabled
+    ? (availability === 'restricted' ? 'restricted' : 'enabled')
+    : 'disabled';
+
+  // Chat-only runtime is always available; it backs the agent whenever the container is
+  // disabled/restricted so the sentinel container id never touches a real snapshot.
+  const chatOnlyRuntime = useMemo(() => createChatOnlyAgentRuntime(), []);
+  const agentRuntime: AgentWorkspaceRuntime | null = useMemo(
+    () => (effectiveContainerState === 'enabled' && runtime ? runtime : chatOnlyRuntime),
+    [chatOnlyRuntime, effectiveContainerState, runtime],
+  );
+
+  useEffect(() => {
+    const flush = () => { void agentRuntime?.flushSnapshots().catch((caught) => setError(toErrorMessage(caught))); };
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+  }, [agentRuntime]);
+
+  const value = useMemo<WorkspaceRuntimeContextValue>(() => ({
+    webcontainer,
+    runtime,
+    agentRuntime,
+    error,
+    isReady: Boolean(agentRuntime) && !isRestarting,
+    isRestarting,
+    containerAvailability: availability,
+    containerStarting,
+    effectiveContainerState,
+    retryContainer,
+    setContainerEnabled,
+    containerSwitchLocked,
+    setContainerSwitchLocked,
+    forceRestart,
+    getContainerRoot,
+  }), [agentRuntime, availability, containerStarting, containerSwitchLocked, effectiveContainerState, error, forceRestart, isRestarting, retryContainer, runtime, setContainerEnabled, webcontainer]);
+
+  return (
+    <WorkspaceRuntimeContext.Provider value={value}>
+      {children}
+      {bootFailure && <ContainerBootNotice message={bootFailure} onDismiss={() => setBootFailure(null)} onRetry={() => { void retryContainer(); }} />}
+    </WorkspaceRuntimeContext.Provider>
+  );
 }

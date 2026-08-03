@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/react/component-composition.md", "reason": "组件组合与 memo"}
+{"file": ".trellis/spec/frontend/react/hooks.md", "reason": "hooks 与外部 store"}
+{"file": ".trellis/spec/frontend/react/styling-and-motion.md", "reason": "CSS token 与动效"}
+{"file": ".trellis/spec/frontend/react/interaction-and-accessibility.md", "reason": "键盘与无障碍（switch）"}
+{"file": ".trellis/spec/frontend/react/disclosures-and-action-menus.md", "reason": "展开/折叠与披露"}
+{"file": ".trellis/spec/frontend/state/ownership-and-workspace-store.md", "reason": "开关配置持久化归属"}
+{"file": ".trellis/spec/frontend/foundation/architecture-and-boundaries.md", "reason": "widgets 层依赖规则"}

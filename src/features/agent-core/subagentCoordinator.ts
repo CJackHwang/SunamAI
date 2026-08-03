@@ -24,6 +24,10 @@ export interface CoordinatorOptions {
   onEvent: (event: AgentEvent) => void;
   onRunChange: (run: AgentRun) => void;
   onChildrenPruned?: (runIds: string[]) => void;
+  /** Effective tool allow-set inherited from the root run (capability config + availability). */
+  enabledTools?: ReadonlySet<string>;
+  /** Whether the container capability is usable (false = chat-only session). */
+  containerAvailable?: boolean;
 }
 
 interface QueuedChild {
@@ -188,6 +192,8 @@ export class AgentFamilyCoordinator implements SubagentHost {
       budget: childBudget,
       familyBudget: new AgentFamilyBudget(childBudget.maxModelTurns, childBudget.maxToolCalls, childBudget.maxDurationMs),
       mutationLease: this.options.root.getMutationLease(),
+      ...(this.options.enabledTools ? { enabledTools: this.options.enabledTools } : {}),
+      ...(this.options.containerAvailable !== undefined ? { containerAvailable: this.options.containerAvailable } : {}),
       lineage: { rootRunId: root.rootRunId ?? root.id, parentRunId: root.id, role: child.task.role, delegatedTaskId: child.task.id, depth: 1, ...(child.writeScope ? { writeScope: child.writeScope } : {}) },
       onAwaitingParent: async (question) => {
         child.task = { ...child.task, status: 'blocked', updatedAt: Date.now(), summary: question, blockedReason: question };
