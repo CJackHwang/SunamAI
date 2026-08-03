@@ -121,6 +121,12 @@ test('automatic compaction handles an oversized prompt without user controls', a
   const resultViewport = expandedTool.locator('.chat-tool-result-content');
   await expect(argumentsViewport).toHaveCSS('max-height', '96px');
   await expect(resultViewport).toHaveCSS('max-height', '96px');
+  // The disclosure animates the tool's width/height via WAAPI; `max-height` is a static
+  // value, so the assertions above resolve while the width is still moving. Measure only
+  // after the animation settles (`data-animating` is removed on finish) — otherwise the two
+  // boundingBox() calls can straddle fast early animation frames and report unequal widths
+  // on a slow CI runner (the arguments and result boxes share one flex width by design).
+  await expect(expandedTool).not.toHaveAttribute('data-animating', 'true', { timeout: 10_000 });
   const [argumentsBox, resultBox] = await Promise.all([argumentsViewport.boundingBox(), resultViewport.boundingBox()]);
   expect(argumentsBox).not.toBeNull();
   expect(resultBox).not.toBeNull();
