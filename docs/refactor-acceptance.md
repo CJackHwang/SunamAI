@@ -168,3 +168,15 @@ Runtime：真实 WebContainer launch/PID/端口登记、服务面板手动停止
 - 字体已转换并只保留 WOFF2：normal 400/500/600/700 与 italic 400；README 头图已移出 `public`，无效生产图标和 PWA asset 声明已删除。
 
 因此本轮父子 Agent 会话隔离功能达到发布门禁。后续变更仍需满足本清单，且不得把 development-only advisory 例外扩展到生产依赖；需要重新声明优化冻结时，仍必须连续两次执行完整门禁。
+
+## 12. 当前工作区验证记录（2026-08-03 · 能力库）
+
+- 功能门禁状态：**通过**。最终代码状态下 `npm run check` 完整通过一次（typecheck、lint、架构边界 + 能力注册审计、覆盖率、build、包体）；E2E 15/15、runtime 3/3；本轮不声明需要连续两次的优化冻结复验。
+- 核心自动化：59 个测试文件、370 个测试全绿；新增能力专项测试（注入式注册、注册表模块宿主与依赖闭合、CapabilityAwareRuntime 方法矩阵、completion 门 shell 关闭语义、容器可用性协调器、disposeWorkspaceRuntime 释放流程、面板开关/run 锁/受限态、Workspace 纯聊天）。
+- 覆盖率：statements 91.04%、branches 83.28%、functions 90.73%、lines 94.94%。
+- 包体：初始 88.03 KiB gzip、总 JS 335.95 KiB gzip、dist 1.44 MiB；能力库引导经动态 import 移出初始脚本。
+- Playwright：E2E 15/15（含能力库开关容器 → 纯聊天 → 重开恢复全流程）；runtime 3/3。视觉 3/4——移动端底部导航新增「能力库」入口，基线待人工重生成。
+- 能力库核心行为验证：容器三态（已开启/已关闭/启动受限，boot 失败弹窗复用更新弹窗样式、放弃后纯聊天可用、手动重试恢复）；关闭即释放（flush 快照 → teardown → 单例清空 → 重开从快照恢复，Agent run 活跃锁禁止关闭）；纯聊天降级（无容器工具注入、附件分析仍可用、completion 门不引用 `shell_run`、哨兵 `__chat__` 承接 run）；composer 在受限态可用、容器启动中显示 booting 态；资源附件模块关闭时隐藏附件上传入口并联动任务列表宽度。
+- `npm run check:audit` 返回 `found 0 vulnerabilities`；完整 development audit 的 PWA/Workbox advisory 仍按 [依赖策略](dependency-advisories.md) 跟踪。
+
+因此本轮能力库（Agent 与容器解耦 + 能力模块化）功能达到发布门禁。视觉基线待重生成后需人工复核。

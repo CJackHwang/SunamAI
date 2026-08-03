@@ -17,6 +17,8 @@ Sunam 是运行在浏览器中的开源 AI 编程助手。它通过 OpenAI-compa
 - 资源附件：文本、代码、PNG/JPEG/WebP/GIF 和通用二进制作为本地资源保存；文本按范围读取，图片按需送入视觉模型，其他文件可 materialize 到工作区。
 - 多模态降级：模型明确拒绝视觉输入时自动改用文本与持久资源引用；与视觉无关的 400/422 错误原样上抛，不进行无效二次调用。
 - 子 Agent：根 Agent 在 `explore`（只读探索）与 `task`（完整任务权限、不可递归委派）之间选型，最多三路混合并发；模型执行可并行，实际写入与命令通过容器 lease 串行，父 Agent 负责综合当前工作区版本的证据。
+- 能力库（Capability Library）：右侧栏集中管理 AI 可感知的能力。每个工具通过 `defineTool` 注入式声明归属（编译期强制，缺声明无法编译），按模块（Agent运行时 / 虚拟容器 / 资源附件 / 笔记预留 / 其他）提供双层开关——模块总开关控制用户侧功能块，工具子开关控制 AI 侧可感知工具，实现个性化与权限管理；为未来 MCP / 第三方插件 / 笔记扩展预留热插拔模块宿主。
+- 容器三态与纯聊天降级：容器状态为 已开启 / 已关闭 / 启动受限；boot 失败不阻断应用，弹窗告知后可继续纯聊天。关闭容器即真正释放（flush 快照落盘 → teardown 释放内存/进程），重开从 IndexedDB 快照恢复；Agent run 活跃时容器开关锁定，避免打断任务。
 - 子任务记录按需加载：展开 RunBoard 中的子任务时，才读取该子 Run 最近 250 条事件并显示最近 transcript，不占用主聊天首屏。
 - 可恢复执行：Run、事件、单一 checkpoint、子任务、终端记录和快照保存在浏览器；刷新后活动父子 Run 标记为 `interrupted`，继续时创建新 Run，不复活旧请求、控制器或 PID。
 - 可恢复写入：workspace 保存、session/container 删除和 reset 使用同一串行队列；Run、checkpoint、terminal 和 snapshot 分别串行保存。显式 snapshot flush 会取消尚未触发的 debounce，避免重复快照；失败保留上一份完整版本，已排队的后续快照仍会继续。
@@ -60,7 +62,7 @@ Sunam 是纯前端应用，浏览器直接向你指定的模型服务发起请�
 
 | 数据 | 保存位置 | 注意事项 |
 | --- | --- | --- |
-| API 地址、API Key、模型与界面语言 | Local Storage（`sunam_v2_*`） | 不要在公共设备或共享浏览器保存个人密钥。设置键保留 v2 名称以维持配置兼容。 |
+| API 地址、API Key、模型、界面语言与能力开关配置 | Local Storage（`sunam_v2_*`） | 不要在公共设备或共享浏览器保存个人密钥。设置键保留 v2 名称以维持配置兼容；能力配置只存与默认不同的 override。 |
 | 会话、容器、Run、事件、资源、子任务、终端记录、快照 | IndexedDB（`sunam-v3`） | 旧 v2 repository/schema 等生产实现已删除；生产代码不打开、读取、迁移或删除旧 `sunam-v2` 工作数据库。清理站点数据会删除本地数据。 |
 | 当前提示、选定图片、模型主动读取的文件/资源片段和工具结果 | 你配置的模型服务 | Sunam 不会默认上传整个工作区；实际发送内容仍适用提供商的隐私、保留、配额与计费规则。 |
 
@@ -115,7 +117,7 @@ python3 ./.trellis/scripts/task.py validate <task-id>
 
 ### 当前验证状态
 
-2026-07-31 的当前工作区已在最新依赖图上通过一次完整 `npm run check:all`：49 个测试文件、292 个核心测试，E2E 13/13、视觉 4/4、真实 WebContainer 3/3，生产依赖审计返回 `found 0 vulnerabilities`。覆盖率为 statements 90.61%、branches 83.16%、functions 90.18%、lines 94.71%；初始 JS 87.93 KiB gzip、总 JS 327.48 KiB gzip、生产 `dist` 1.41 MiB。本次验证包含聊天流式尺寸变化、思考过程折叠、工具详情布局和依赖刷新后的构建/浏览器回归；尚未满足连续两次完整门禁才可声明的优化冻结复验。
+2026-08-03 的当前工作区已通过一次完整 `npm run check`（typecheck、lint、架构边界、覆盖率、build、包体）：59 个测试文件、370 个核心测试，E2E 15/15、真实 WebContainer 3/3、生产依赖审计返回 `found 0 vulnerabilities`。覆盖率为 statements 91.04%、branches 83.28%、functions 90.73%、lines 94.94%；初始 JS 88.03 KiB gzip、总 JS 335.95 KiB gzip、生产 `dist` 1.44 MiB。视觉回归 3/4——移动端底部导航因新增「能力库」入口，基线待重生成（由人工视觉验收）。本次验证包含能力库（注入式注册、模块宿主、双层开关、容器三态与关闭即释放、run 锁、纯聊天降级、受限态 composer 可用、附件/任务列表联动）；尚未满足连续两次完整门禁才可声明的优化冻结复验。
 
 完整开发依赖审计仍有 8 个 high，全部位于 `vite-plugin-pwa@1.3.0` / `workbox-build@7.4.1` 构建链；npm 提议的 `vite-plugin-pwa@1.2.0` 不支持 Vite 8，因此按 [依赖 advisory 策略](docs/dependency-advisories.md) 作为上游兼容性例外跟踪，不影响生产依赖零漏洞门禁。
 

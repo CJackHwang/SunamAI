@@ -128,7 +128,7 @@ RunBoard 仍以树形摘要展示子任务，但断点和子任务详情默认�
 
 ## 7. 工具和权限
 
-每个工具必须声明 Zod schema、只读/并发属性、数据影响、超时和结果类型。角色白名单在构造子 Run 时冻结。
+每个工具必须声明 Zod schema、只读/并发属性、数据影响、超时和结果类型，并**必填 `capability` 声明**（归属模块、默认开关、`warnOnDisable`、依赖工具）——缺声明编译失败。`CapabilityRegistry` 模块宿主是工具 allow-set 的唯一真源：面板开关、引擎注入与系统提示词都从注册表派生。能力关闭只影响注入，agent 不感知、自然终止，不做运行时强制失败。角色白名单在构造子 Run 时冻结。
 
 - WebContainer 真实 workdir 为 `/home/workspace`，项目根是 `/home/workspace/<containerId>`。Agent、子 Agent、用户终端、FileManager、资源物化和快照只使用这一命名空间；容器名不参与路径。
 - Agent 和用户 shell 使用同一项目 `cwd` 与 `SUNAM_WORKSPACE`，但 `HOME=/home/workspace` 保持在项目根之外，避免 `.jshrc` 等启动文件进入用户目录和快照。
@@ -174,8 +174,8 @@ v3 stores：workspace、runs、events、checkpoints、terminalHistory、snapshot
 
 ## 10. 当前实现基线
 
-2026-07-31 的当前工作区已通过一次完整 `npm run check:all`。核心自动化为 49 个测试文件、292 个测试；E2E 13/13、视觉 4/4、真实 WebContainer 3/3。真实 Runtime 已覆盖移动端切换后后台进程和端口保持、资源 materialize 后快照排除生成目录、父 Run 取消级联停止 task 子进程，以及用户终端、Agent 文件工具、Agent shell 与 FileManager 的规范工作区双向可见性。
+2026-08-03 的当前工作区已通过一次完整 `npm run check`。核心自动化为 59 个测试文件、370 个测试；E2E 15/15、真实 WebContainer 3/3，视觉 3/4（移动端「能力库」入口基线待重生成）。真实 Runtime 已覆盖移动端切换后后台进程和端口保持、资源 materialize 后快照排除生成目录、父 Run 取消级联停止 task 子进程，以及用户终端、Agent 文件工具、Agent shell 与 FileManager 的规范工作区双向可见性。
 
-当前覆盖率为 statements 90.61%、branches 83.16%、functions 90.18%、lines 94.71%；初始/总 JS 为 87.93/327.48 KiB gzip，生产 `dist` 1.41 MiB，生产依赖审计返回 `found 0 vulnerabilities`。本轮功能门禁通过，但不声明需要连续两次完整通过的优化冻结复验；后续功能仍需遵守本设计中的预算、revision、持久化、取消与聊天动效所有权边界。
+当前覆盖率为 statements 91.04%、branches 83.28%、functions 90.73%、lines 94.94%；初始/总 JS 为 88.03/335.95 KiB gzip，生产 `dist` 1.44 MiB，生产依赖审计返回 `found 0 vulnerabilities`。本轮新增能力库验证：注入式注册（全工具 capability 声明）、注册表模块宿主与依赖闭合、容器三态与关闭即释放（dispose 单测）、run 活跃锁、受限态纯聊天 composer 可用、completion 门在 shell 关闭时不引用 `shell_run`。本轮功能门禁通过，但不声明需要连续两次完整通过的优化冻结复验；后续功能仍需遵守本设计中的预算、revision、持久化、取消与聊天动效所有权边界，以及能力库的注入式声明约束。
 
 自动化门槛和真实浏览器场景见 [发布与优化冻结验收](refactor-acceptance.md)，模块依赖见 [架构说明](architecture.md)。

@@ -12,10 +12,11 @@ shared → entities → features → widgets → pages → app
 | --- | --- | --- |
 | `src/shared` | LLM/SSE、跨功能 contracts、i18n、通用浏览器能力、UI | 不依赖业务领域、feature、widget 或页面。 |
 | `src/entities` | message、agent、resource、workspace 领域类型与 v3 persistence | 可依赖 shared；不依赖 UI 和 feature 实现。 |
-| `src/features/agent-core` | AgentEngine、context、工具、资源处理、子 Agent coordinator | 通过 contracts 使用 runtime/persistence；不穿透其他 feature 内部模块。 |
-| `src/features/runtime` | WebContainer 文件、进程、资源 materialize、快照和 revision | 是运行时实现唯一归属；终端组件不拥有 Agent runtime。 |
+| `src/features/agent-core` | AgentEngine、context、工具、资源处理、子 Agent coordinator、能力注册表（`capability/`） | 通过 contracts 使用 runtime/persistence；不穿透其他 feature 内部模块。 |
+| `src/features/runtime` | WebContainer 文件、进程、资源 materialize、快照和 revision；`CapabilityAwareRuntime` 纯聊天降级 | 是运行时实现唯一归属；终端组件不拥有 Agent runtime。 |
 | `src/features/terminal-session` | 终端标签、服务预览和终端用例 | 只使用公开 runtime/contracts。 |
 | `src/features/chat`、`file-manager`、`settings` | 独立交互用例 | 不能直接导入其他 feature 的内部类型。 |
+| `src/widgets/capability` | 能力库面板与上下文（`CapabilityProvider`/`CapabilityPanel`/`CapabilitySwitch`） | 组合 registry 清单、持久化配置与运行时可用性；不写第二份清单。 |
 | `src/widgets/workspace` | Workspace 与 DualTerminal 等跨功能组合 | 组合 features/entities/shared；不被低层反向依赖。 |
 | `src/widgets/sidebar` | 会话、容器和导航组合 | 只调用 workspace store 公共操作。 |
 | `src/pages` | 页面入口与状态编排 | 依赖 widgets 和 feature 公共入口。 |
@@ -73,6 +74,24 @@ Root synthesis → current container revision gate
 ```
 
 父子 Run 共享 root-family 预算和 container mutation lease，但事件、上下文、取消域和 checkpoint 独立。最多三个 `explore | task` 子 Run 可同时推理和读取；apply/materialize/shell 等实际 mutation 通过进程内全局 container lease 逐次执行，因此不同 root family 操作同一容器也会串行。root Chat 与状态只投影 depth-zero Run；Sidebar 预读可见 session 的轻量 child Run 摘要，只有实际存在 child 的历史行才提供折叠入口，选中后 Workspace 才按需读取并投影该 `runId` 的只读 transcript。停止一个 child 只作用于它自己的取消域。旧持久化 `implement | verify` 记录继续读取，但统一显示为 `task`。
+
+### 能力库（Capability Library）
+
+Agent 可感知的每个工具都必须通过 `defineTool` 携带 `capability` 声明（**编译期强制**，缺声明无法编译），并登记进 `CapabilityRegistry` 模块宿主。能力库面板、引擎工具 allow-set 与系统提示词一律读注册表当前状态，不存在第二份手写清单。
+
+```text
+defineTool → capability 声明（module / defaultEnabled / warnOnDisable / dependencies）
+  → CapabilityRegistry（core 启动注册、不可卸载；extension 运行时热插拔，id `ext:<pluginId>`）
+  → resolveEnabledTools(config, availability) 派生 allow-set
+  → AgentEngine.enabledTools ∩ 子角色工具集
+  → 系统提示词按可用能力动态生成
+```
+
+- 双层开关：模块总开关控制用户侧功能块（容器关 → 隐藏终端/文件/服务），工具子开关控制 AI 侧可感知工具；总开关关 → 该模块工具强制关。Agent运行时工具标「不建议关闭」。
+- 可用性：容器为 `enabled | restricted`（受限 = boot 失败，开关即重试入口，不强制禁用）；`resolveEnabledTools` 在 restricted 时整体排除虚拟容器模块。
+- 纯聊天降级：容器关/受限时 `CapabilityAwareRuntime` 提供聊天运行时——容器操作 no-op/空值，资源读取（`list_resources`/`read_resource_text`/`read_resource_image`）始终走 IndexedDB（与容器无关，附件仍可分析）；run 绑定哨兵 `__chat__` containerId，持久化 schema 不变；completion 门在 `containerAvailable=false` 或 `shellAvailable=false` 时跳过 workspace 验证。
+- 关闭即释放：`disposeWorkspaceRuntime()` flush 快照落盘 → `runtime.dispose()` → `resetWebContainer()` → 清空单例；重开走全新 boot，工作区从 IndexedDB 快照恢复（revision 一并恢复）。Agent run（含子 agent）活跃时容器开关锁定，禁止关闭/重试。
+- 容器启动中（重开/受限重试）：composer 显示「容器启动中」并禁用输入，Sunam 电脑/终端显示加载态；移动视图默认停在聊天页，用户主动启动时才跳到容器页面。
 
 ### 启动与恢复
 
@@ -168,7 +187,8 @@ Agent 工具批次后的 snapshot/Run/event/checkpoint 同步有独立 watchdog�
 
 - 新模型协议实现新的 `AgentModelClient` adapter，不在 Engine 中加入供应商判断。
 - 新资源类型实现 `ResourceProcessor`，不修改 AgentEngine。
-- 新工具先定义 schema、权限、并发、超时、结果和持久化边界；默认串行和最小权限。
+- 新工具先定义 schema、权限、并发、超时、结果和持久化边界，并**必填 `capability` 声明**（module 归属、默认开关、依赖）；默认串行和最小权限。缺声明即编译失败。
+- 能力开关只影响 AI 侧工具注入；关闭后 agent 不感知、自然终止，不做运行时强制失败。
 - feature 间只通过公共入口或 `shared/contracts` 交互；禁止引用其他 feature 内部类型。
 - 任何 persistence schema 变更必须同步版本、validator、quarantine、删除语义、恢复测试和文档。
 - 写入工作区的能力必须参与真实 container revision 与 mutation lease；验证必须绑定同一 revision。
@@ -178,4 +198,4 @@ Agent 工具批次后的 snapshot/Run/event/checkpoint 同步有独立 watchdog�
 
 ## 当前架构基线
 
-2026-07-31，架构边界检查已随一次完整门禁通过。当前生产构建初始 JS 为 87.93 KiB gzip、总 JS 为 327.48 KiB gzip、`dist` 为 1.41 MiB；核心自动化 49 文件/292 测试，E2E 13/13、视觉 4/4、真实 WebContainer 3/3。生产依赖审计返回 `found 0 vulnerabilities`；开发期 PWA/Workbox advisory 仍按 [依赖策略](dependency-advisories.md) 跟踪。本轮不声明连续两次完整门禁要求的优化冻结复验。
+2026-08-03，架构边界检查已随一次完整门禁通过（`npm run check`，含能力注册审计 tripwire）。当前生产构建初始 JS 为 88.03 KiB gzip、总 JS 为 335.95 KiB gzip、`dist` 为 1.44 MiB；核心自动化 59 文件/370 测试，E2E 15/15、真实 WebContainer 3/3，视觉 3/4（移动端「能力库」入口基线待重生成）。覆盖率为 statements 91.04%、branches 83.28%、functions 90.73%、lines 94.94%。生产依赖审计返回 `found 0 vulnerabilities`；开发期 PWA/Workbox advisory 仍按 [依赖策略](dependency-advisories.md) 跟踪。本轮不声明连续两次完整门禁要求的优化冻结复验。
