@@ -83,6 +83,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
   font-optical-sizing: auto;
   text-rendering: optimizeLegibility;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 #root {
@@ -123,6 +129,31 @@ select {
 
 ::selection {
   background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+/* UI text is non-selectable by default (see body above) so long-press gestures on
+   touch devices don't accidentally start a text selection. Re-enable selection on
+   the real content regions: chat messages, markdown/code, tool I/O, thinking, and
+   the task list. Form controls and the terminal handle selection on their own. */
+.chat-answer,
+.chat-user-content,
+.chat-ask-user,
+.thinking-content,
+.chat-tool-arguments,
+.chat-tool-result-content,
+.task-list-scroll,
+.markdown-pre,
+.markdown-code-block,
+.markdown-code-fallback,
+.markdown-inline-code,
+.markdown-table,
+.markdown-paragraph,
+.markdown-list,
+.markdown-quote,
+.markdown-link {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .persistence-error {

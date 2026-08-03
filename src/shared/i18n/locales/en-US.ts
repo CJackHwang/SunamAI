@@ -10,6 +10,8 @@ export const enUS = {
   'common.save': 'Save and continue',
   'common.loading': 'Loading...',
   'common.retry': 'Retry',
+  'common.copy': 'Copy code',
+  'common.copied': 'Copied',
   'update.available': 'A new version is ready. Click restart to experience it.',
   'update.later': 'Later',
   'update.reload': 'Update now',

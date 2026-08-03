@@ -1,3 +1,36 @@
+.markdown-pre-wrap { position: relative; width: 100%; max-width: 100%; min-width: 0; }
+
+/* Floating one-click copy button for code blocks: transparent, icon-only, so it never
+   obscures the code underneath. Sizing/transition come from the shared `.icon-button`;
+   this only positions it above the scrollable pre (as a sibling, so horizontal scroll
+   never carries it away) and tunes its resting opacity. */
+.code-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  background: transparent;
+  opacity: 0.72;
+  transition: color var(--motion-fast) ease, opacity var(--motion-fast) ease, scale var(--motion-fast) var(--motion-snappy);
+}
+
+/* Kill the shared `.icon-button` gray hover background — a transparent icon must not
+   flash a filled square over the code. */
+.markdown-pre-wrap .code-copy-btn:hover {
+  background: transparent;
+  opacity: 1;
+}
+
+/* Fenced blocks use the dark vscDarkPlus highlighter; keep the icon light there. */
+.markdown-pre-wrap[data-dark='true'] .code-copy-btn { color: rgb(255 255 255 / 72%); }
+.markdown-pre-wrap[data-dark='true'] .code-copy-btn:hover { color: #fff; }
+
+/* Copied state last so the green wins over both the light and dark base/hover colors. */
+.markdown-pre-wrap .code-copy-btn.is-copied {
+  color: var(--color-success);
+  opacity: 1;
+}
+
 .markdown-code-block { width: 100%; max-width: 100%; min-width: 0; margin: 8px 0; overflow: hidden; border-radius: var(--radius-small); box-shadow: var(--elevation-2); }
 .markdown-code-fallback { width: 100%; max-width: 100%; margin: 0; overflow-x: auto; padding: 16px; background: var(--color-gray-100); font: 13px/1.5 var(--font-mono); white-space: pre; overscroll-behavior-x: contain; }
 .markdown-code-fallback code { display: block; width: max-content; min-width: 100%; background: transparent; color: inherit; }

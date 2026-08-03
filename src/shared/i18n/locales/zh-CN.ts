@@ -8,6 +8,8 @@ export const zhCN = {
   'common.save': '保存并继续',
   'common.loading': '加载中...',
   'common.retry': '重试',
+  'common.copy': '复制代码',
+  'common.copied': '已复制',
   'update.available': '新版本已准备就绪，点击重启即可体验。',
   'update.later': '稍后处理',
   'update.reload': '立即更新',

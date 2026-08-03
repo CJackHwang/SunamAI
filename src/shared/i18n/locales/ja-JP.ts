@@ -10,6 +10,8 @@ export const jaJP = {
   'common.save': '保存して続行',
   'common.loading': '読み込み中...',
   'common.retry': '再試行',
+  'common.copy': 'コードをコピー',
+  'common.copied': 'コピーしました',
   'update.available': '新しいバージョンの準備ができました。再起動をクリックして体験してください。',
   'update.later': '後で',
   'update.reload': '今すぐ更新',
