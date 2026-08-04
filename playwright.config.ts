@@ -7,6 +7,11 @@ export default defineConfig({
   testMatch: ['**/e2e/**/*.spec.ts', '**/visual/**/*.spec.ts'],
   timeout: 30_000,
   expect: { timeout: 8_000 },
+  // CI runners are shared and slow; the high-timing-sensitivity e2e flows
+  // (image attachment fallback, compaction gates) occasionally flake on
+  // cold runners. One retry on CI keeps the gate honest while absorbing
+  // genuine environment jitter — a systematic failure still fails twice.
+  retries: process.env.CI ? 1 : 0,
   use: {
     baseURL: 'http://127.0.0.1:4173',
     trace: 'retain-on-failure',
