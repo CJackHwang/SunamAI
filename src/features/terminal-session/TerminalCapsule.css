@@ -1,0 +1,78 @@
+/* Dynamic-island segment switcher for the merged "Sunam的电脑" view. A compact track
+   in the same light gray as the chat background with a white rounded thumb that follows
+   the active segment. Its height matches the chat input box and its bottom edge lines
+   up with the input box's bottom edge (spacing tokens come from the terminal-content
+   reservation so both sides stay in sync). Thumb left/width are measured from the active
+   button in JS because segment labels vary in width across locales; when there is no
+   room the labels collapse to icons. The island stretches/shrinks on that collapse with
+   the same spatial size animation the task list uses. */
+.terminal-capsule {
+  position: absolute;
+  bottom: var(--capsule-bottom, 12px);
+  left: 50%;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100% - 24px);
+  padding: 3px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg);
+  box-shadow: var(--elevation-1);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.terminal-capsule-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  z-index: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%), 0 2px 6px rgb(0 0 0 / 6%);
+  /* Spatial motion, matching the island's stretch and the sheet-based layout shifts. */
+  transition: left var(--motion-slow) var(--motion-sheet), width var(--motion-slow) var(--motion-sheet);
+}
+
+.terminal-capsule-btn {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  min-width: 0;
+  min-height: 40px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color var(--motion-fast) ease;
+}
+
+.terminal-capsule-btn:hover { color: var(--color-black); }
+.terminal-capsule-btn.active { color: var(--color-black); }
+
+/* Labels are never ellipsized: without room the whole island becomes a pure icon row.
+   `--measuring` briefly re-reveals labels so the fit test can read their width. */
+.terminal-capsule--icons .terminal-capsule-btn span { display: none; }
+.terminal-capsule--icons.terminal-capsule--measuring .terminal-capsule-btn span { display: inline; }
+
+@media (max-width: 520px) {
+  .terminal-capsule-btn { padding: 0 10px; font-size: 12px; }
+}
+
+@media (forced-colors: active) {
+  .terminal-capsule {
+    border: 1px solid var(--color-text);
+    background: var(--color-surface);
+  }
+  .terminal-capsule-thumb { background: Highlight; }
+}

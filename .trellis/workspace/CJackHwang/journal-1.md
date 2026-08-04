@@ -319,3 +319,31 @@ Refreshed direct and compatible transitive JavaScript dependencies, made Testing
 ### Status
 
 [OK] **Completed**
+
+## Session 15: 终端合并灵动岛（含文件）+ 触摸滚动 + 表格横向滚动
+
+**Date**: 2026-08-05
+**Task**: 移动终端滚动修复 + 表格横向滚动 + 电脑/终端/服务/文件合并灵动岛
+**Branch**: `main`
+
+### Summary
+
+完成 terminal-merge-dynamic-island 任务并归档：
+1. **移动端终端触摸滚动**：xterm 竖滑手势转译为 `.xterm-scrollable-element` 的 WheelEvent，滚动条 `touch-action: none`，手机端可滚动。
+2. **聊天表格内部横向滚动**：`.markdown-table` 自然宽度 + `.markdown-table-wrap` 内滚，不再挤压列宽。
+3. **四视图合并灵动岛**：Sunam的电脑/终端/服务/文件合并为单一 ai 页，胶囊型分段滑块（灰底 `--color-bg` + 白色滑块、点击/滑动/方向键切换）。后续细化：文件入岛、首项改标「电脑」、高/间距对齐聊天输入框（桌面 12px / 移动 10px、间距 10px）、空间不足纯 icon 伸缩动画（复用 `useLayoutSizeAnimation`，spatial `--motion-slow --motion-sheet`）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| (未提交，随工作区一起人工审查) | 见 `git status` |
+
+### Status
+
+[OK] **Completed**
+
+### 关键调试
+
+- 滑块初始测量为 0：灵动岛在移动端挂载于 `display:none` 的右栏内，`offsetWidth` 为 0 且无后续重测 → 统一 `measure` 挂到 ResizeObserver + resize + 激活段变化。
+- 桌面展开回环：展开期间可用宽度小触发 icon 塌缩，`useLayoutSizeAnimation` 显式宽度又让 fit 判定误判「仍溢出」→ 改对可用宽度（parent clientWidth - 24）判定、动画期间跳过 fit，并在阈值加 16px 迟滞。

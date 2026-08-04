@@ -1,11 +1,44 @@
 .dual-terminal { display: flex; width: 100%; height: 100%; min-height: 0; flex-direction: column; overflow: hidden; }
 .dual-terminal[data-layout="collapsed"] { flex-direction: row; }
 .terminal-content { position: relative; min-height: 0; flex: 1; overflow: hidden; padding: 16px; }
-.terminal-content[data-tab="files"], .terminal-content[data-tab="services"], .terminal-content[data-tab="capability"] { padding: 0; }
+.terminal-content[data-tab="capability"] { padding: 0; }
 .dual-terminal[data-layout="collapsed"] .terminal-content { display: none; }
 .terminal-panel { position: absolute; inset: 16px; z-index: 1; opacity: 0; transform: translateY(5px); pointer-events: none; transition: opacity var(--motion-base) ease, transform var(--motion-base) var(--motion-ease); }
-.terminal-content[data-tab="files"] .terminal-panel, .terminal-content[data-tab="services"] .terminal-panel, .terminal-content[data-tab="capability"] .terminal-panel { inset: 0; }
+/* Services and files are full-bleed inside the merged ai tab; capability is full-bleed too. */
+.terminal-content[data-tab="capability"] .terminal-panel, .terminal-content[data-tab="ai"] .terminal-services-panel, .terminal-content[data-tab="ai"] .terminal-file-panel { inset: 0; }
 .terminal-panel[data-active="true"] { z-index: 2; opacity: 1; transform: translateY(0); pointer-events: auto; }
 .terminal-boot-state { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--color-surface); color: var(--color-text-secondary); font-size: 14px; }
 .terminal-boot-state svg { width: 32px; height: 32px; animation: spin 2s linear infinite; }
 .terminal-boot-state span { margin-top: 16px; }
+
+/* The capsule island reserves a bottom strip so it sits below the terminal content
+   instead of covering the last line. Its height matches the chat input box (46px), its
+   bottom edge lines up with the input box's bottom edge (--capsule-bottom), and the gap
+   above it matches the input-box→task-list gap (--capsule-gap). On mobile the capsule
+   sits above the bottom nav, so --capsule-bottom tightens to match the mobile composer
+   padding. */
+.terminal-content[data-capsule='true'] {
+  --capsule-h: 46px;
+  --capsule-bottom: 12px;
+  --capsule-gap: 10px;
+}
+@media (max-width: 900px) {
+  .terminal-content[data-capsule='true'] {
+    --capsule-bottom: 10px;
+  }
+}
+.terminal-content[data-capsule='true'] .terminal-panel {
+  bottom: calc(var(--capsule-bottom) + var(--capsule-h) + var(--capsule-gap));
+}
+/* The two black terminal views (ai/user shells) hug the sides/top at the same distance
+   as the gap to the capsule below, so the terminal reads as one aligned block with the
+   island. */
+.terminal-content[data-capsule='true'] .terminal-shell-panel {
+  top: var(--capsule-gap);
+  right: var(--capsule-gap);
+  left: var(--capsule-gap);
+}
+.terminal-content[data-capsule='true'] .terminal-services-panel,
+.terminal-content[data-capsule='true'] .terminal-file-panel {
+  bottom: calc(var(--capsule-bottom) + var(--capsule-h) + var(--capsule-gap));
+}

@@ -117,7 +117,7 @@ python3 ./.trellis/scripts/task.py validate <task-id>
 
 ### 当前验证状态
 
-2026-08-03 的当前工作区已通过一次完整 `npm run check`（typecheck、lint、架构边界、覆盖率、build、包体）：59 个测试文件、370 个核心测试，E2E 15/15、真实 WebContainer 3/3、生产依赖审计返回 `found 0 vulnerabilities`。覆盖率为 statements 91.04%、branches 83.28%、functions 90.73%、lines 94.94%；初始 JS 88.03 KiB gzip、总 JS 335.95 KiB gzip、生产 `dist` 1.44 MiB。视觉回归 3/4——移动端底部导航因新增「能力库」入口，基线待重生成（由人工视觉验收）。本次验证包含能力库（注入式注册、模块宿主、双层开关、容器三态与关闭即释放、run 锁、纯聊天降级、受限态 composer 可用、附件/任务列表联动）；尚未满足连续两次完整门禁才可声明的优化冻结复验。
+2026-08-05 的当前工作区已通过一次完整 `npm run check`（typecheck、lint、架构边界、覆盖率、build、包体）：60 个测试文件、374 个核心测试，E2E 18/18、真实 WebContainer 3/3、视觉回归 6/6（基线已重生成并人工检查）、生产依赖审计返回 `found 0 vulnerabilities`。覆盖率为 statements 91.04%、branches 83.28%、functions 90.73%、lines 94.94%；初始 JS 88.09 KiB gzip、总 JS 337.59 KiB gzip、生产 `dist` 1.45 MiB。本次验证包含能力库（注入式注册、模块宿主、双层开关、容器三态与关闭即释放、run 锁、纯聊天降级、受限态 composer 可用、附件/任务列表联动），以及移动端终端触摸滚动、聊天表格内部横向滚动、电脑/终端/服务/文件合并胶囊灵动岛（灰底白滑块、点击/移动端滑动切换、空间不足纯 icon 伸缩动画）；尚未满足连续两次完整门禁才可声明的优化冻结复验。
 
 完整开发依赖审计仍有 8 个 high，全部位于 `vite-plugin-pwa@1.3.0` / `workbox-build@7.4.1` 构建链；npm 提议的 `vite-plugin-pwa@1.2.0` 不支持 Vite 8，因此按 [依赖 advisory 策略](docs/dependency-advisories.md) 作为上游兼容性例外跟踪，不影响生产依赖零漏洞门禁。
 

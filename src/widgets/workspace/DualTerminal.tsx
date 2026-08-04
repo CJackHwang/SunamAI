@@ -7,15 +7,20 @@ import { toErrorMessage } from '@/shared/lib/errors';
 import { appendAgentTerminalBuffer, flushAgentTerminalBuffers, subscribeAgentTerminalPersistence } from '@/features/terminal-session/agentTerminalBuffer';
 import { WebContainerAgentRuntime } from '@/features/runtime/WebContainerAgentRuntime';
 import { CollapsedTerminalNav, TerminalTabs } from '@/features/terminal-session/TerminalTabs';
+import { TerminalCapsule } from '@/features/terminal-session/TerminalCapsule';
 import { ServicesPanel } from '@/features/terminal-session/ServicesPanel';
 import { ServicePreviewOverlay } from '@/features/terminal-session/ServicePreviewOverlay';
 import { CapabilityPanel } from '@/widgets/capability/CapabilityPanel';
-import type { RuntimePortStatus, TerminalLayout, TerminalTab } from '@/shared/contracts/terminal';
+import type { ContainerSegment, RuntimePortStatus, TerminalLayout, TerminalTab } from '@/shared/contracts/terminal';
 import './DualTerminal.css';
 import './DualTerminalLayout.css';
 import { AgentTerminalPanel } from '@/features/terminal-session/AgentTerminalPanel';
 
 const FileManager = lazy(() => import('@/features/file-manager/FileManager'));
+
+// Sub-view order inside the merged "Sunam的电脑" tab; unchanged from the former tabs.
+const SEGMENT_ORDER: ContainerSegment[] = ['ai', 'user', 'services', 'files'];
+const SWIPE_THRESHOLD_PX = 48;
 
 interface DualTerminalProps {
   webcontainer: WebContainer | null;
@@ -47,6 +52,9 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
   const [, setProcessVersion] = useState(0);
   const [activePorts, setActivePorts] = useState<RuntimePortStatus[]>([]);
   const [activePreview, setActivePreview] = useState<{ port: number; lastUrl: string } | null>(null);
+  // Sub-view inside the merged "Sunam的电脑" tab: 电脑 / 终端 / 服务.
+  const [containerSegment, setContainerSegment] = useState<ContainerSegment>('ai');
+  const contentRef = useRef<HTMLDivElement>(null);
   const userShellWriterRef = useRef<WritableStreamDefaultWriter<string> | null>(null);
   const sessionIdRef = useRef(activeSessionId);
   sessionIdRef.current = activeSessionId;
@@ -132,9 +140,59 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
 
   useEffect(() => {
     if (window.innerWidth <= 900) return;
-    const timer = setTimeout(() => { (activeTab === 'user' ? userTermRef.current : aiTermRef.current)?.focus(); }, 50);
+    // Only autofocus a terminal view; services/files/capability keep focus where it is.
+    const visibleTerminal = activeTab === 'user' ? 'user' : activeTab === 'ai' ? containerSegment : null;
+    if (!visibleTerminal) return;
+    const timer = setTimeout(() => { (visibleTerminal === 'user' ? userTermRef.current : aiTermRef.current)?.focus(); }, 50);
     return () => clearTimeout(timer);
-  }, [activeTab]);
+  }, [activeTab, containerSegment]);
+
+  // Reset to the computer sub-view when a container boot begins so the booting state
+  // (which lives on the 电脑/终端 segments) is visible again.
+  useEffect(() => {
+    if (containerStarting) setContainerSegment('ai');
+  }, [containerStarting]);
+
+  // Horizontal-dominant touch drags switch the 电脑 / 终端 / 服务 sub-view inside the
+  // merged Sunam computer tab. Vertical drags are already claimed by the terminal's
+  // own touch-scroll handler, so only horizontal intent reaches here; mouse users click
+  // the capsule instead.
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content || activeTab !== 'ai') return;
+    let startX = 0;
+    let startY = 0;
+    let armed = false;
+    const onTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) { armed = false; return; }
+      armed = true;
+      startX = event.touches[0]!.clientX;
+      startY = event.touches[0]!.clientY;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      if (!armed || event.touches.length !== 1) return;
+      const currentX = event.touches[0]!.clientX;
+      const currentY = event.touches[0]!.clientY;
+      const deltaX = currentX - startX;
+      const deltaY = currentY - startY;
+      if (Math.abs(deltaX) < SWIPE_THRESHOLD_PX || Math.abs(deltaX) <= Math.abs(deltaY)) return;
+      armed = false;
+      const currentIndex = SEGMENT_ORDER.indexOf(containerSegment);
+      const segment = SEGMENT_ORDER[deltaX < 0 ? currentIndex + 1 : currentIndex - 1];
+      if (segment) setContainerSegment(segment);
+    };
+    const disarm = () => { armed = false; };
+    content.addEventListener('touchstart', onTouchStart, { passive: true });
+    content.addEventListener('touchmove', onTouchMove, { passive: false });
+    content.addEventListener('touchend', disarm, { passive: true });
+    content.addEventListener('touchcancel', disarm, { passive: true });
+    return () => {
+      content.removeEventListener('touchstart', onTouchStart);
+      content.removeEventListener('touchmove', onTouchMove);
+      content.removeEventListener('touchend', disarm);
+      content.removeEventListener('touchcancel', disarm);
+    };
+  }, [activeTab, containerSegment]);
 
   const processes = activeContainerId ? runtime?.getProcesses({ containerId: activeContainerId }) ?? [] : [];
   const previewService = activePreview ? activePorts.find((entry) => entry.port === activePreview.port) : undefined;
@@ -142,13 +200,14 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
   return <><div className="dual-terminal" data-layout={layoutState}>
     {layoutState === 'collapsed' ? <CollapsedTerminalNav activeTab={activeTab} onTabChange={onTabChange} onExpand={() => onLayoutChange?.('half')} containerAvailable={containerTabsVisible} /> : <TerminalTabs activeTab={activeTab} onTabChange={onTabChange} layoutState={layoutState} containerAvailable={containerTabsVisible} {...(onLayoutChange ? { onLayoutChange } : {})} />}
     {layoutState !== 'collapsed' && activeTab !== 'capability' && <div className="terminal-environment-bar" title={activeContainerId ?? undefined}>{containerIdentity}</div>}
-    <div className="terminal-content" data-tab={activeTab}>
-      {!isBooted && activeTab !== 'services' && activeTab !== 'capability' && <div className="terminal-boot-state"><Loader2 className="lucide-spin" /><span>{t('terminal.booting')}</span></div>}
-      <div className="terminal-panel" data-active={activeTab === 'ai'}><AgentTerminalPanel sessionId={activeSessionId ?? null} terminalRef={aiTermRef} /></div>
-      <div className="terminal-panel" data-active={activeTab === 'user'}><TerminalView readOnly={false} onTerminalReady={(terminal) => { userTermRef.current = terminal; setIsUserTermReady(true); }} /></div>
-      <div className="terminal-panel terminal-file-panel" data-active={activeTab === 'files'}>{isBooted && <Suspense fallback={null}><FileManager wc={webcontainer} rootDir={rootDir} /></Suspense>}</div>
-      {activeTab === 'services' && <div className="terminal-panel terminal-services-panel" data-active="true"><ServicesPanel ports={activePorts} processes={processes} isRestarting={isRestarting} onPreview={(port, url) => setActivePreview({ port, lastUrl: url })} onStopPort={(port) => runtime?.stopPort(port) ?? Promise.resolve(false)} onForceRestart={onForceRestart} onKillProcess={(process) => { void runtime?.stopProcess(process.id, { sessionId: process.sessionId, runId: process.runId, containerId: process.containerId }); }} /></div>}
+    <div ref={contentRef} className="terminal-content" data-tab={activeTab} data-capsule={activeTab === 'ai' ? 'true' : undefined}>
+      {!isBooted && activeTab !== 'capability' && !(activeTab === 'ai' && containerSegment === 'services') && <div className="terminal-boot-state"><Loader2 className="lucide-spin" /><span>{t('terminal.booting')}</span></div>}
+      <div className="terminal-panel terminal-shell-panel" id="terminal-segment-panel-ai" role="tabpanel" aria-labelledby="terminal-segment-ai" data-active={activeTab === 'ai' && containerSegment === 'ai'}><AgentTerminalPanel sessionId={activeSessionId ?? null} terminalRef={aiTermRef} /></div>
+      <div className="terminal-panel terminal-shell-panel" id="terminal-segment-panel-user" role="tabpanel" aria-labelledby="terminal-segment-user" data-active={activeTab === 'ai' && containerSegment === 'user'}><TerminalView readOnly={false} onTerminalReady={(terminal) => { userTermRef.current = terminal; setIsUserTermReady(true); }} /></div>
+      {activeTab === 'ai' && <div className="terminal-panel terminal-services-panel" id="terminal-segment-panel-services" role="tabpanel" aria-labelledby="terminal-segment-services" data-active={containerSegment === 'services'}><ServicesPanel ports={activePorts} processes={processes} isRestarting={isRestarting} onPreview={(port, url) => setActivePreview({ port, lastUrl: url })} onStopPort={(port) => runtime?.stopPort(port) ?? Promise.resolve(false)} onForceRestart={onForceRestart} onKillProcess={(process) => { void runtime?.stopProcess(process.id, { sessionId: process.sessionId, runId: process.runId, containerId: process.containerId }); }} /></div>}
+      <div className="terminal-panel terminal-file-panel" id="terminal-segment-panel-files" role="tabpanel" aria-labelledby="terminal-segment-files" data-active={activeTab === 'ai' && containerSegment === 'files'}>{isBooted && <Suspense fallback={null}><FileManager wc={webcontainer} rootDir={rootDir} /></Suspense>}</div>
       <div className="terminal-panel terminal-capability-panel" data-active={activeTab === 'capability'}><CapabilityPanel /></div>
+      {activeTab === 'ai' && <TerminalCapsule active={containerSegment} onChange={setContainerSegment} />}
     </div>
   </div>{activePreview && <ServicePreviewOverlay port={activePreview.port} url={previewService?.url ?? activePreview.lastUrl} isOnline={Boolean(previewService)} onDismiss={() => setActivePreview(null)} />}</>;
 };

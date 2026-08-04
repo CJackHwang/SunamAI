@@ -92,6 +92,7 @@ defineTool → capability 声明（module / defaultEnabled / warnOnDisable / dep
 - 纯聊天降级：容器关/受限时 `CapabilityAwareRuntime` 提供聊天运行时——容器操作 no-op/空值，资源读取（`list_resources`/`read_resource_text`/`read_resource_image`）始终走 IndexedDB（与容器无关，附件仍可分析）；run 绑定哨兵 `__chat__` containerId，持久化 schema 不变；completion 门在 `containerAvailable=false` 或 `shellAvailable=false` 时跳过 workspace 验证。
 - 关闭即释放：`disposeWorkspaceRuntime()` flush 快照落盘 → `runtime.dispose()` → `resetWebContainer()` → 清空单例；重开走全新 boot，工作区从 IndexedDB 快照恢复（revision 一并恢复）。Agent run（含子 agent）活跃时容器开关锁定，禁止关闭/重试。
 - 容器启动中（重开/受限重试）：composer 显示「容器启动中」并禁用输入，Sunam 电脑/终端显示加载态；移动视图默认停在聊天页，用户主动启动时才跳到容器页面。
+- 合并的「Sunam的电脑」视图：终端/用户 shell/服务/文件四个子视图合并到单一电脑页，由底部胶囊型灵动岛分段切换（点击、移动端横向滑动、方向键）；顶部模块选择器收敛为 电脑 + 能力库，移动端底部导航为 对话 / 电脑 / 能力库。胶囊轨道用聊天背景同款灰（`--color-bg`）配白色滑块，高度/底部间距/上间距对齐聊天输入框与任务列表，黑色终端面板左右上边距与胶囊间距一致（`--capsule-gap`，10px）；空间不足时各段收敛为纯 icon，并以 `useLayoutSizeAnimation`（spatial `--motion-slow --motion-sheet`）伸缩过渡。xterm 终端移动端通过触摸拖动手势（纵向主导 → 合成 WheelEvent）支持滚动。
 
 ### 启动与恢复
 

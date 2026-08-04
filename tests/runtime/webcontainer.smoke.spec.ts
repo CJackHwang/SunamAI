@@ -113,7 +113,8 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(disabledSend).toBeDisabled();
   await expect(composer).toHaveCSS('backdrop-filter', 'blur(22px) saturate(1.6)');
   await expect(disabledSend).toHaveCSS('backdrop-filter', 'blur(22px) saturate(1.6)');
-  await page.getByRole('button', { name: '终端' }).click();
+  await page.getByRole('button', { name: 'Sunam的电脑' }).click();
+  await page.locator('.terminal-capsule').getByRole('tab', { name: '终端' }).click();
   const workspace = page.locator('.workspace-container');
   const terminalSection = page.locator('.terminal-section');
   await expect(page.locator('.model-selector-header')).toHaveCSS('animation-name', 'none');
@@ -147,7 +148,8 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(rightNavigationControl).toHaveCSS('border-radius', leftControlStyles.borderRadius);
   await rightNavigationControl.hover();
   await expect(rightNavigationControl).toHaveCSS('background-color', leftControlHover);
-  await rightNavigation.getByTitle('终端').click();
+  await rightNavigation.getByTitle('Sunam的电脑').click();
+  await page.locator('.terminal-capsule').getByRole('tab', { name: '终端' }).click();
   await expect(page.locator('.terminal-environment-dot')).toHaveCount(0);
   const terminalRows = page.locator('.xterm-rows').nth(1);
   await expect(terminalRows).not.toContainText(/\.sunam\/workspaces\/c-/);
@@ -171,7 +173,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await terminalInput.press('Enter');
   await expect(terminalRows).toContainText('shared-agent-file');
 
-  await page.locator('.dual-terminal-tabs').getByRole('button', { name: '文件' }).click();
+  await page.locator('.terminal-capsule').getByRole('tab', { name: '文件' }).click();
   await expect(page.locator('.fm-breadcrumb')).toHaveText('/');
   await expect(page.locator('.fm-item-name').filter({ hasText: /^user-created$/ })).toBeVisible();
   await expect(page.locator('.fm-item-name').filter({ hasText: /^\.jshrc$/ })).toHaveCount(0);
@@ -215,7 +217,8 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(page.locator('.fm-breadcrumb')).toHaveText('/');
   await expect(page.locator('.fm-item-name').filter({ hasText: /^user-created$/ })).toBeVisible();
 
-  await page.locator('.dual-terminal-tabs').getByRole('button', { name: '服务' }).click();
+  await page.locator('.dual-terminal-tabs').getByRole('button', { name: 'Sunam的电脑' }).click();
+  await page.locator('.terminal-capsule').getByRole('tab', { name: '服务' }).click();
   const services = page.locator('.services-panel');
   const processList = page.locator('.services-process-list');
   await expect(services.getByText('端口 3457')).toBeVisible();
@@ -249,7 +252,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileNavigation = page.getByRole('navigation', { name: '对话' });
   await expect(mobileNavigation).toBeVisible();
-  await expect(mobileNavigation.getByRole('button')).toHaveCount(6);
+  await expect(mobileNavigation.getByRole('button')).toHaveCount(3);
   await mobileNavigation.getByRole('button', { name: '对话' }).click();
   await expect(page.locator('.workspace-container')).toHaveAttribute('data-active-tab', 'chat');
   await expect(composer).toHaveCSS('backdrop-filter', 'blur(14px) saturate(1.6)');
@@ -269,7 +272,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   expect(forcedMaterial.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
   await page.emulateMedia({ forcedColors: 'none' });
   await composer.focus();
-  await mobileNavigation.getByRole('button', { name: '终端' }).click();
+  await mobileNavigation.getByRole('button', { name: 'Sunam的电脑' }).click();
   await page.waitForTimeout(100);
   expect(await page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'))).toBe(false);
   await mobileNavigation.getByRole('button', { name: '对话' }).click();
@@ -281,8 +284,9 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await mobileSidebarClose.click();
   await expect(mobileSidebar).not.toHaveClass(/mobile-open/);
   await expect(page.locator('.mobile-overlay')).toHaveCount(0);
-  await mobileNavigation.getByRole('button', { name: '服务' }).click();
-  await expect(page.locator('.workspace-container')).toHaveAttribute('data-active-tab', 'services');
+  await mobileNavigation.getByRole('button', { name: 'Sunam的电脑' }).click();
+  await page.locator('.terminal-capsule').getByRole('tab', { name: '服务' }).click();
+  await expect(page.locator('.workspace-container')).toHaveAttribute('data-active-tab', 'ai');
   await services.getByRole('button', { name: '预览端口 3457' }).click();
   const mobilePreview = page.getByRole('dialog', { name: '端口 3457 实时预览' });
   await expect(mobilePreview).toBeVisible();
@@ -306,8 +310,9 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(serverProcess).toHaveCount(0);
   await expect(page.locator('.service-process-row')).toHaveCount(17);
 
-  await mobileNavigation.getByRole('button', { name: '文件' }).click();
-  await expect(page.locator('.workspace-container')).toHaveAttribute('data-active-tab', 'files');
+  // Files now lives inside the merged computer page and is reached through the capsule.
+  await page.locator('.terminal-capsule').getByRole('tab', { name: '文件' }).click();
+  await expect(page.locator('.workspace-container')).toHaveAttribute('data-active-tab', 'ai');
   await page.locator('.fm-item').filter({ has: page.locator('.fm-item-name', { hasText: /^user-created$/ }) }).dblclick();
   const mobileAgentFile = page.locator('.fm-item').filter({ has: page.locator('.fm-item-name', { hasText: /^from-agent\.txt$/ }) });
   const mobileSize = mobileAgentFile.locator('.fm-item-size');
@@ -447,7 +452,8 @@ test('real WebContainer cascades parent cancellation into a task child process',
   await page.locator('.chat-composer-shell input[type="file"]').setInputFiles({ name: 'package.json', mimeType: 'application/json', buffer: Buffer.from(packageJson) });
   await composer.fill('Start a task child using this project resource, then wait while its long verification command runs.');
   await composer.press('Enter');
-  await page.getByRole('button', { name: '服务' }).click();
+  await page.getByRole('button', { name: 'Sunam的电脑' }).click();
+  await page.locator('.terminal-capsule').getByRole('tab', { name: '服务' }).click();
   await expect(page.locator('.service-process-row')).toHaveCount(1, { timeout: 100_000 });
   await page.getByRole('button', { name: '停止主 Agent' }).click();
   await expect(page.locator('.service-process-row')).toHaveCount(0, { timeout: 30_000 });

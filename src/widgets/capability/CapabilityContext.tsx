@@ -38,8 +38,8 @@ function sanitizeConfig(config: CapabilityConfig): CapabilityConfig {
     for (const tool of module.tools()) tools.add(tool.name);
   }
   return {
-    modules: Object.fromEntries(Object.entries(config.modules).filter(([id]) => modules.has(id))),
-    tools: Object.fromEntries(Object.entries(config.tools).filter(([name]) => tools.has(name))),
+    modules: Object.fromEntries(Object.entries(config.modules ?? {}).filter(([id]) => modules.has(id))),
+    tools: Object.fromEntries(Object.entries(config.tools ?? {}).filter(([name]) => tools.has(name))),
   };
 }
 

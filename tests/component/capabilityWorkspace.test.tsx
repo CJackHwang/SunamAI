@@ -101,7 +101,7 @@ describe('Workspace in chat-only (restricted container)', () => {
   it('shows the container entry tabs when the container is enabled', async () => {
     renderWorkspace(runtimeValue({ containerAvailability: 'enabled', effectiveContainerState: 'enabled' }));
     // Collapsed rail renders container tabs as icon buttons carrying their label as a title.
-    expect(await screen.findByTitle('服务')).toBeInTheDocument();
-    expect(screen.getByTitle('终端')).toBeInTheDocument();
+    expect(await screen.findByTitle('Sunam的电脑')).toBeInTheDocument();
+    expect(screen.getByTitle('能力库')).toBeInTheDocument();
   });
 });

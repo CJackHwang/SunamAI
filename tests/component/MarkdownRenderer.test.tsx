@@ -30,4 +30,17 @@ describe('MarkdownRenderer', () => {
     fireEvent.click(button!);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('const answer = 42;'));
   });
+
+  it('wraps tables in a horizontally scrollable container so wide tables do not squeeze', () => {
+    const { container } = render(<I18nProvider><MarkdownRenderer content={'| a | b |\n| --- | --- |\n| 1 | 2 |'} /></I18nProvider>);
+    // The renderer emits `.markdown-table-wrap` (the horizontal scroll owner) around the
+    // table; the CSS (width:max-content / min-width:100% + overflow-x:auto) is proven in
+    // browser coverage since jsdom does not evaluate imported stylesheets.
+    const wrap = container.querySelector('.markdown-table-wrap');
+    const table = container.querySelector('.markdown-table');
+    expect(wrap).not.toBeNull();
+    expect(table).not.toBeNull();
+    expect(wrap!.contains(table)).toBe(true);
+    expect(table).toHaveTextContent('1');
+  });
 });

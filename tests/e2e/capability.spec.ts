@@ -36,12 +36,12 @@ test('the capability panel lives in the right column and toggles the container m
 
   await expect(page.locator('.dual-terminal')).toBeVisible();
   await openCapabilityTab(page); // expands the collapsed rail and lands on the capability tab
-  await expect(page.locator('.terminal-tab-btn').filter({ hasText: '终端' })).toBeVisible();
+  await expect(page.locator('.terminal-tab-btn').filter({ hasText: 'Sunam的电脑' })).toBeVisible();
 
   // Turn the container module off → container tabs leave, the right sidebar (capability) stays.
   await page.locator('.capability-rail').getByRole('switch', { name: '虚拟容器' }).click();
   await expect(page.locator('.capability-rail')).toBeVisible();
-  await expect(page.locator('.terminal-tab-btn').filter({ hasText: '终端' })).toHaveCount(0);
+  await expect(page.locator('.terminal-tab-btn').filter({ hasText: 'Sunam的电脑' })).toHaveCount(0);
   await expect(page.locator('.sidebar-section').filter({ hasText: '容器' })).toBeHidden();
 
   // Chat-only mode still completes a conversation (no container tools needed).
@@ -52,7 +52,7 @@ test('the capability panel lives in the right column and toggles the container m
 
   // Re-enable the container → the container tabs return alongside the capability tab.
   await page.locator('.capability-rail').getByRole('switch', { name: '虚拟容器' }).click();
-  await expect(page.locator('.terminal-tab-btn').filter({ hasText: '终端' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.terminal-tab-btn').filter({ hasText: 'Sunam的电脑' })).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.capability-rail')).toBeVisible();
 });
 

@@ -1,4 +1,4 @@
-import { Folder, Maximize2, Minimize2, Monitor, PanelRightClose, Server, SlidersHorizontal, Terminal as TerminalIcon } from 'lucide-react';
+import { Maximize2, Minimize2, Monitor, PanelRightClose, SlidersHorizontal } from 'lucide-react';
 import type { TerminalLayout, TerminalTab } from '@/shared/contracts/terminal';
 import { useI18n } from '@/shared/i18n';
 import './TerminalTabs.css';
@@ -12,8 +12,11 @@ interface TerminalTabsProps {
   containerAvailable?: boolean;
 }
 
+// The computer, user terminal, services, and files views all merged into the single
+// "Sunam的电脑" (ai) container tab; capability stays as its own top-level tab. The
+// sub-views are switched by the capsule island on that page.
 const containerTabDefinitions = [
-  ['ai', Monitor, 'terminal.aiComputer'], ['user', TerminalIcon, 'terminal.shell'], ['files', Folder, 'terminal.files'], ['services', Server, 'terminal.services'],
+  ['ai', Monitor, 'terminal.aiComputer'],
 ] as const;
 const capabilityTabDefinition = ['capability', SlidersHorizontal, 'capability.title'] as const;
 
@@ -26,7 +29,7 @@ export function TerminalTabs({ activeTab, onTabChange, layoutState, onLayoutChan
   const tabs = tabList(containerAvailable);
   return (
     <div className="dual-terminal-tabs motion-fade-in">
-      {tabs.map(([tab, Icon, label]) => <button key={tab} className={`terminal-tab-btn ${activeTab === tab ? 'active' : ''}`} onClick={() => onTabChange(tab)}><Icon size={tab === 'ai' || tab === 'user' ? 18 : 16} className="show-on-narrow" /><span className="hide-on-narrow">{t(label)}</span></button>)}
+      {tabs.map(([tab, Icon, label]) => <button key={tab} className={`terminal-tab-btn ${activeTab === tab ? 'active' : ''}`} onClick={() => onTabChange(tab)}><Icon size={18} className="show-on-narrow" /><span className="hide-on-narrow">{t(label)}</span></button>)}
       <div className="terminal-tabs-spacer" />
       {onLayoutChange && <div className="terminal-layout-actions"><div className="terminal-tabs-divider" />{layoutState === 'half' ? <button className="desktop-only-btn terminal-icon-btn" onClick={() => onLayoutChange('full')} title={t('terminal.fullscreen')}><Maximize2 size={18} /></button> : <button className="desktop-only-btn terminal-icon-btn" onClick={() => onLayoutChange('half')} title={t('terminal.halfScreen')}><Minimize2 size={18} /></button>}<button className="desktop-only-btn terminal-icon-btn" onClick={() => onLayoutChange('collapsed')} title={t('terminal.collapse')}><PanelRightClose size={18} /></button></div>}
     </div>

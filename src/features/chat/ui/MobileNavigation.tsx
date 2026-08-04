@@ -1,4 +1,4 @@
-import { Folder, MessageSquare, Monitor, Server, SlidersHorizontal, Terminal } from 'lucide-react';
+import { MessageSquare, Monitor, SlidersHorizontal } from 'lucide-react';
 import type { TerminalTab } from '@/shared/contracts/terminal';
 import { useI18n } from '@/shared/i18n';
 import './MobileNavigation.css';
@@ -7,11 +7,10 @@ interface MobileNavigationProps { active: 'chat' | TerminalTab; onChange: (tab: 
 
 export function MobileNavigation({ active, onChange, showContainerTabs = true }: MobileNavigationProps) {
   const { t } = useI18n();
+  // The user terminal, services, and files all live inside the "Sunam的电脑" (ai) page;
+  // segment switching happens through the capsule island on that page.
   const containerTabs = [
     ['ai', Monitor, 'terminal.aiComputer'],
-    ['user', Terminal, 'terminal.shell'],
-    ['files', Folder, 'terminal.files'],
-    ['services', Server, 'terminal.services'],
   ] as const;
   const items = [
     ['chat', MessageSquare, 'chat.navigation'],

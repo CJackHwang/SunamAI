@@ -207,3 +207,40 @@ test('workspace resource card and subtask tree keep the mobile visual baseline',
   await expect(page.locator('.chat-input')).toHaveCSS('scrollbar-width', 'none');
   await expect(page).toHaveScreenshot('workspace-resources-subagents-mobile.png', { maxDiffPixelRatio: 0.002 });
 });
+
+async function openTerminalCapsuleView(page: import('@playwright/test').Page, viewport: { width: number; height: number }) {
+  await page.setViewportSize(viewport);
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem('sunam_v2_api_key', 'visual-no-network');
+    localStorage.setItem('sunam_v2_base_url', 'https://visual.invalid/v1');
+    localStorage.setItem('sunam_v2_api_model', 'visual-model');
+  });
+  await page.route('https://visual.invalid/v1/chat/completions', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }) });
+  });
+  await page.goto('/');
+  const composer = page.locator('textarea[placeholder="问 Sunam 任何问题..."]');
+  await expect(composer).toBeEnabled({ timeout: 100_000 });
+  // Desktop loads the right column collapsed (rail); mobile loads the chat page. Either
+  // way the "Sunam的电脑" entry is the merged computer view with the capsule island.
+  await page.getByRole('button', { name: 'Sunam的电脑' }).click();
+  const capsule = page.locator('.terminal-capsule');
+  await expect(capsule).toBeVisible({ timeout: 60_000 });
+  // Settle past the boot spinner so the terminal rows are captured, not the overlay.
+  await expect(page.locator('.terminal-boot-state')).toHaveCount(0, { timeout: 60_000 });
+}
+
+test('merged terminal capsule island keeps the desktop visual baseline', async ({ page }) => {
+  test.setTimeout(120_000);
+  await openTerminalCapsuleView(page, { width: 1440, height: 900 });
+  await expect(page.locator('.terminal-section')).toHaveScreenshot('terminal-capsule-desktop.png', { maxDiffPixelRatio: 0.002 });
+});
+
+test('merged terminal capsule island sits above the mobile bottom bar', async ({ page }) => {
+  test.setTimeout(120_000);
+  await openTerminalCapsuleView(page, { width: 390, height: 844 });
+  // Full viewport on mobile shows the capsule above the bottom nav (which now holds
+  // 对话 / 电脑 / 能力库; files lives inside the computer page).
+  await expect(page).toHaveScreenshot('terminal-capsule-mobile.png', { maxDiffPixelRatio: 0.002 });
+});

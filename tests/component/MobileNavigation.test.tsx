@@ -12,10 +12,11 @@ describe('MobileNavigation', () => {
     render(<I18nProvider><MobileNavigation active="chat" onChange={onChange} /></I18nProvider>);
 
     expect(screen.getByRole('navigation', { name: '对话' })).toBeInTheDocument();
-    expect(screen.getAllByRole('button')).toHaveLength(6);
+    // 对话 / 电脑 / 能力库 — the user terminal, services, and files merged into 电脑.
+    expect(screen.getAllByRole('button')).toHaveLength(3);
     expect(screen.getByRole('button', { name: '对话' })).toHaveAttribute('aria-current', 'page');
-    await userEvent.click(screen.getByRole('button', { name: '服务' }));
-    expect(onChange).toHaveBeenCalledWith('services');
+    await userEvent.click(screen.getByRole('button', { name: 'Sunam的电脑' }));
+    expect(onChange).toHaveBeenCalledWith('ai');
     await userEvent.click(screen.getByRole('button', { name: '能力库' }));
     expect(onChange).toHaveBeenCalledWith('capability');
   });
@@ -25,6 +26,6 @@ describe('MobileNavigation', () => {
     expect(screen.getAllByRole('button')).toHaveLength(2);
     expect(screen.getByRole('button', { name: '对话' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '能力库' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '终端' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sunam的电脑' })).not.toBeInTheDocument();
   });
 });
