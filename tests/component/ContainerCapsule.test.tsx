@@ -1,15 +1,15 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TerminalCapsule } from '@/features/terminal-session/TerminalCapsule';
+import { ContainerCapsule } from '@/widgets/workspace/ContainerCapsule';
 import { I18nProvider } from '@/shared/i18n';
 
 afterEach(() => cleanup());
 
-describe('TerminalCapsule', () => {
+describe('ContainerCapsule', () => {
   it('renders the four computer sub-views and reports clicks', async () => {
     const onChange = vi.fn();
-    render(<I18nProvider><TerminalCapsule active="ai" onChange={onChange} /></I18nProvider>);
+    render(<I18nProvider><ContainerCapsule active="ai" onChange={onChange} /></I18nProvider>);
 
     expect(screen.getByRole('tablist', { name: 'Sunam的电脑视图切换' })).toBeInTheDocument();
     const tabs = screen.getAllByRole('tab');
@@ -27,7 +27,7 @@ describe('TerminalCapsule', () => {
 
   it('keeps only the active segment in the tab order and supports arrow-key switching', async () => {
     const onChange = vi.fn();
-    render(<I18nProvider><TerminalCapsule active="user" onChange={onChange} /></I18nProvider>);
+    render(<I18nProvider><ContainerCapsule active="user" onChange={onChange} /></I18nProvider>);
 
     const tabs = screen.getAllByRole('tab');
     expect(tabs[1]).toHaveAttribute('tabindex', '0');

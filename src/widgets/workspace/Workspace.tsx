@@ -9,7 +9,7 @@ import { ChatMessageList, type UserMessageEntranceRequest } from '@/features/cha
 import { MobileNavigation } from '@/features/chat/ui/MobileNavigation';
 import { ModelSelector } from '@/features/chat/ui/ModelSelector';
 import { SubagentFooter } from '@/features/chat/ui/SubagentFooter';
-import { generateTitle } from '@/features/session/titleService';
+import { generateTitle } from '@/entities/workspace/titleService';
 import type { SunamModel } from '@/shared/config/models';
 import type { ChatAttachment } from '@/entities/message/types';
 import { useWorkspaceActions, useWorkspaceSelector } from '@/entities/workspace/useWorkspaceStore';
@@ -21,7 +21,7 @@ import { isDefaultSessionTitle } from '@/entities/workspace/defaults';
 import { useCapabilityContext } from '@/widgets/capability/CapabilityContext';
 import './Workspace.css';
 
-const DualTerminal = lazy(() => import('@/widgets/workspace/DualTerminal'));
+const ComputerView = lazy(() => import('@/widgets/workspace/ComputerView'));
 
 interface WorkspaceProps {
   apiKey: string;
@@ -202,7 +202,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
       </div>
       <div className="terminal-section">
         <Suspense fallback={<div className="motion-fade-in workspace-lazy-state" />}>
-          <DualTerminal runtime={runtime} webcontainer={webcontainer} onReady={() => setIsTerminalReady(true)} activeTab={terminalTab} onTabChange={selectTerminalTab} layoutState={layoutState} onLayoutChange={changeTerminalLayout} activeContainerId={activeContainerId} activeContainerName={activeContainer?.name ?? null} activeSessionId={activeSessionId} rootDir={activeContainerId ? getContainerRoot(activeContainerId) : '/'} isRestarting={isRestarting} onForceRestart={forceRestart} containerAvailable={containerAvailable} containerStarting={containerStarting} />
+          <ComputerView runtime={runtime} webcontainer={webcontainer} onReady={() => setIsTerminalReady(true)} activeTab={terminalTab} onTabChange={selectTerminalTab} layoutState={layoutState} onLayoutChange={changeTerminalLayout} activeContainerId={activeContainerId} activeContainerName={activeContainer?.name ?? null} activeSessionId={activeSessionId} rootDir={activeContainerId ? getContainerRoot(activeContainerId) : '/'} isRestarting={isRestarting} onForceRestart={forceRestart} containerAvailable={containerAvailable} containerStarting={containerStarting} />
         </Suspense>
       </div>
       {(runtimeError || agentPersistenceError) && <div role="alert" className="workspace-runtime-error motion-notice-in">{runtimeError || agentPersistenceError}</div>}

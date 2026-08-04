@@ -15,10 +15,11 @@ shared → entities → features → widgets → pages → app
 | `src/features/agent-core` | AgentEngine、context、工具、资源处理、子 Agent coordinator、能力注册表（`capability/`） | 通过 contracts 使用 runtime/persistence；不穿透其他 feature 内部模块。 |
 | `src/features/runtime` | WebContainer 文件、进程、资源 materialize、快照和 revision；`CapabilityAwareRuntime` 纯聊天降级 | 是运行时实现唯一归属；终端组件不拥有 Agent runtime。 |
 | `src/features/terminal-session` | 终端标签、服务预览和终端用例 | 只使用公开 runtime/contracts。 |
-| `src/features/chat`、`file-manager`、`settings` | 独立交互用例 | 不能直接导入其他 feature 的内部类型。 |
+| `src/features/chat`、`file-manager` | 独立交互用例 | 不能直接导入其他 feature 的内部类型。 |
 | `src/widgets/capability` | 能力库面板与上下文（`CapabilityProvider`/`CapabilityPanel`/`CapabilitySwitch`） | 组合 registry 清单、持久化配置与运行时可用性；不写第二份清单。 |
-| `src/widgets/workspace` | Workspace 与 DualTerminal 等跨功能组合 | 组合 features/entities/shared；不被低层反向依赖。 |
+| `src/widgets/workspace` | Workspace 与 ComputerView 等跨功能组合 | 组合 features/entities/shared；不被低层反向依赖。 |
 | `src/widgets/sidebar` | 会话、容器和导航组合 | 只调用 workspace store 公共操作。 |
+| `src/widgets/settings` | 设置交互 | 组合 shared/entities；不被低层反向依赖。 |
 | `src/pages` | 页面入口与状态编排 | 依赖 widgets 和 feature 公共入口。 |
 | `src/app` | 根 Provider、全局样式、字体和应用启动 | 不承载业务运行时实现。 |
 
@@ -199,4 +200,4 @@ Agent 工具批次后的 snapshot/Run/event/checkpoint 同步有独立 watchdog�
 
 ## 当前架构基线
 
-2026-08-03，架构边界检查已随一次完整门禁通过（`npm run check`，含能力注册审计 tripwire）。当前生产构建初始 JS 为 88.03 KiB gzip、总 JS 为 335.95 KiB gzip、`dist` 为 1.44 MiB；核心自动化 59 文件/370 测试，E2E 15/15、真实 WebContainer 3/3，视觉 3/4（移动端「能力库」入口基线待重生成）。覆盖率为 statements 91.04%、branches 83.28%、functions 90.73%、lines 94.94%。生产依赖审计返回 `found 0 vulnerabilities`；开发期 PWA/Workbox advisory 仍按 [依赖策略](dependency-advisories.md) 跟踪。本轮不声明连续两次完整门禁要求的优化冻结复验。
+2026-08-05，本次为纯结构整理（`ComputerView` 与 `ContainerCapsule` 组件改名归位、伪 feature 拆分，零行为变更），架构边界检查已随一次完整门禁通过（`npm run check`，含能力注册审计 tripwire）。08-05 已落地的合并「Sunam的电脑」主视图由四段胶囊「电脑/终端/服务/文件」分段切换，文件管理随文件段入岛；顶部模块选择器收敛为 电脑 + 能力库（移动端底部导航为 对话 / 电脑 / 能力库）。当前生产构建初始 JS 为 88.09 KiB gzip、总 JS 为 337.59 KiB gzip、`dist` 为 1.45 MiB；核心自动化 60 文件/374 测试，E2E 15/15、真实 WebContainer 3/3，视觉 3/4（最近一次 `check:all` 结果，本任务未重跑、未重生成视觉基线）。覆盖率为 statements 91.04%、branches 83.28%、functions 90.73%、lines 94.94%。生产依赖审计返回 `found 0 vulnerabilities`；开发期 PWA/Workbox advisory 仍按 [依赖策略](dependency-advisories.md) 跟踪。本轮不声明连续两次完整门禁要求的优化冻结复验。

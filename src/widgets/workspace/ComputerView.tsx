@@ -7,13 +7,13 @@ import { toErrorMessage } from '@/shared/lib/errors';
 import { appendAgentTerminalBuffer, flushAgentTerminalBuffers, subscribeAgentTerminalPersistence } from '@/features/terminal-session/agentTerminalBuffer';
 import { WebContainerAgentRuntime } from '@/features/runtime/WebContainerAgentRuntime';
 import { CollapsedTerminalNav, TerminalTabs } from '@/features/terminal-session/TerminalTabs';
-import { TerminalCapsule } from '@/features/terminal-session/TerminalCapsule';
+import { ContainerCapsule } from '@/widgets/workspace/ContainerCapsule';
 import { ServicesPanel } from '@/features/terminal-session/ServicesPanel';
 import { ServicePreviewOverlay } from '@/features/terminal-session/ServicePreviewOverlay';
 import { CapabilityPanel } from '@/widgets/capability/CapabilityPanel';
 import type { ContainerSegment, RuntimePortStatus, TerminalLayout, TerminalTab } from '@/shared/contracts/terminal';
-import './DualTerminal.css';
-import './DualTerminalLayout.css';
+import './ComputerView.css';
+import './ComputerViewLayout.css';
 import { AgentTerminalPanel } from '@/features/terminal-session/AgentTerminalPanel';
 
 const FileManager = lazy(() => import('@/features/file-manager/FileManager'));
@@ -22,7 +22,7 @@ const FileManager = lazy(() => import('@/features/file-manager/FileManager'));
 const SEGMENT_ORDER: ContainerSegment[] = ['ai', 'user', 'services', 'files'];
 const SWIPE_THRESHOLD_PX = 48;
 
-interface DualTerminalProps {
+interface ComputerViewProps {
   webcontainer: WebContainer | null;
   runtime: WebContainerAgentRuntime | null;
   rootDir: string;
@@ -42,7 +42,7 @@ interface DualTerminalProps {
   containerStarting?: boolean;
 }
 
-const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTabChange, layoutState = 'half', onLayoutChange, activeContainerId, activeContainerName, activeSessionId, isRestarting, onForceRestart, containerAvailable = true, containerStarting = false }: DualTerminalProps) => {
+const ComputerView = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTabChange, layoutState = 'half', onLayoutChange, activeContainerId, activeContainerName, activeSessionId, isRestarting, onForceRestart, containerAvailable = true, containerStarting = false }: ComputerViewProps) => {
   const { t } = useI18n();
   const containerTabsVisible = containerAvailable || containerStarting;
   const aiTermRef = useRef<import('@xterm/xterm').Terminal | null>(null);
@@ -207,9 +207,9 @@ const DualTerminal = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
       {activeTab === 'ai' && <div className="terminal-panel terminal-services-panel" id="terminal-segment-panel-services" role="tabpanel" aria-labelledby="terminal-segment-services" data-active={containerSegment === 'services'}><ServicesPanel ports={activePorts} processes={processes} isRestarting={isRestarting} onPreview={(port, url) => setActivePreview({ port, lastUrl: url })} onStopPort={(port) => runtime?.stopPort(port) ?? Promise.resolve(false)} onForceRestart={onForceRestart} onKillProcess={(process) => { void runtime?.stopProcess(process.id, { sessionId: process.sessionId, runId: process.runId, containerId: process.containerId }); }} /></div>}
       <div className="terminal-panel terminal-file-panel" id="terminal-segment-panel-files" role="tabpanel" aria-labelledby="terminal-segment-files" data-active={activeTab === 'ai' && containerSegment === 'files'}>{isBooted && <Suspense fallback={null}><FileManager wc={webcontainer} rootDir={rootDir} /></Suspense>}</div>
       <div className="terminal-panel terminal-capability-panel" data-active={activeTab === 'capability'}><CapabilityPanel /></div>
-      {activeTab === 'ai' && <TerminalCapsule active={containerSegment} onChange={setContainerSegment} />}
+      {activeTab === 'ai' && <ContainerCapsule active={containerSegment} onChange={setContainerSegment} />}
     </div>
   </div>{activePreview && <ServicePreviewOverlay port={activePreview.port} url={previewService?.url ?? activePreview.lastUrl} isOnline={Boolean(previewService)} onDismiss={() => setActivePreview(null)} />}</>;
 };
 
-export default DualTerminal;
+export default ComputerView;

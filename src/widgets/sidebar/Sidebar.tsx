@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SquarePen, History, Box, Plus, Search } from 'lucide-react';
 import { useWorkspaceActions, useWorkspaceSelector } from '@/entities/workspace/useWorkspaceStore';
-import { WorkspaceResourceList } from '@/features/session/ui/WorkspaceResourceList';
+import { WorkspaceResourceList } from './WorkspaceResourceList';
 import { useI18n } from '@/shared/i18n';
 import { usePresence } from '@/shared/ui/usePresence';
 import { SidebarResourceContextMenu } from './SidebarResourceContextMenu';

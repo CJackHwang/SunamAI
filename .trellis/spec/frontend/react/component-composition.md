@@ -13,7 +13,7 @@ Read this leaf when creating or changing React component boundaries, props, repe
 - Use focused subcomponents or children for composition. Use stable record IDs for keys; an index is acceptable only for a transient list with no independent identity.
 - Derive with `useMemo` only when cost or identity stability matters. Use `memo` for repeated renderers such as `ChatMessage`, not by default.
 - Keep streaming projections bounded. Chat uses the current message window and indexed tool-result projection; historical Markdown keeps `content-visibility` and a fixed 250-message DOM window.
-- Lazy-load heavy boundaries with visible fallbacks, including `DualTerminal`, Workspace, and syntax highlighting.
+- Lazy-load heavy boundaries with visible fallbacks, including `ComputerView`, Workspace, and syntax highlighting.
 
 Local patterns: `src/features/chat/ui/ChatMessage.tsx` is a focused memoized renderer. `src/widgets/workspace/Workspace.tsx` is a widget because it composes multiple features and delegates runtime work.
 

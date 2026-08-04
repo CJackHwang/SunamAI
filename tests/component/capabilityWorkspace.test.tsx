@@ -70,7 +70,7 @@ describe('Workspace in chat-only (restricted container)', () => {
 
   it('keeps the capability rail present and hides container entry tabs', async () => {
     renderWorkspace(runtimeValue());
-    // DualTerminal is lazy — wait for it to resolve, then the capability panel appears.
+    // ComputerView is lazy — wait for it to resolve, then the capability panel appears.
     expect(await screen.findByText(/管理 AI 可调用的模型工具与功能模块/)).toBeInTheDocument();
     expect(screen.getByText(/开关改动在下一轮任务生效/)).toBeInTheDocument();
     expect(screen.queryByText('服务')).not.toBeInTheDocument();

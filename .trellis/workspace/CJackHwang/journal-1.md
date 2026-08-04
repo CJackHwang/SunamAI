@@ -347,3 +347,29 @@ Refreshed direct and compatible transitive JavaScript dependencies, made Testing
 
 - 滑块初始测量为 0：灵动岛在移动端挂载于 `display:none` 的右栏内，`offsetWidth` 为 0 且无后续重测 → 统一 `measure` 挂到 ResizeObserver + resize + 激活段变化。
 - 桌面展开回环：展开期间可用宽度小触发 icon 塌缩，`useLayoutSizeAnimation` 显式宽度又让 fit 判定误判「仍溢出」→ 改对可用宽度（parent clientWidth - 24）判定、动画期间跳过 fit，并在阈值加 16px 迟滞。
+
+## Session 16: 结构整理（灵动岛合并后的命名/归属归位）
+
+**Date**: 2026-08-05
+**Task**: 电脑视图组件改名归位 + 伪 feature 拆分（TASK-08-05-structure-tidy）
+**Branch**: `main`
+
+### Summary
+
+Hermes 架构审查发现 08-05 灵动岛合并后三处「名不副实/放错层」遗留，外包 Claude Code 完成纯结构整理（零行为变更）：
+
+1. `DualTerminal.tsx` → `ComputerView.tsx`（实际是四段电脑主视图，非双终端）+ CSS 同步改名 + Workspace lazy 引用 + spec/文档同步。
+2. `TerminalCapsule.tsx` → 移入 `widgets/workspace/` 改名 `ContainerCapsule.tsx`（四段容器视图胶囊，归属组合层）+ 测试改名同步。
+3. `features/session/` 伪 feature 拆分：`WorkspaceResourceList` → `widgets/sidebar/`、`titleService` → `entities/workspace/`，目录删除。
+4. 文档同步：architecture.md 目录职责表（settings 归 widgets、ComputerView 引用）、活动 spec、基线数字刷新（88.09 KiB 初始 / 337.59 KiB 总 / 1.45 MiB dist、60 文件/374 测试）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| (见 git log) | `refactor: rename DualTerminal→ComputerView, TerminalCapsule→ContainerCapsule, split session pseudo-feature` |
+| (见 git log) | `chore(task): archive structure-tidy task and record session journal` |
+
+### Status
+
+[OK] **Completed** — Hermes 验收：diff 全量审查（25+/24-，纯标识符改名）+ `npm run check` 全绿复验 + grep 静态自查零残留（`DualTerminal`/`features/session` 零结果，`TerminalCapsule` 仅视觉 helper）。

@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from 'react';
-import { generateAutoTitle } from '@/features/session/titleService';
+import { generateAutoTitle } from '@/entities/workspace/titleService';
 import type { TranslationKey } from '@/shared/i18n';
 import { readAppSettings } from '@/shared/lib/settings';
 import type { SidebarContextMenuState, SidebarEditingState, SidebarResourceKind } from './sidebarResources';

@@ -3,7 +3,7 @@ import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent } fr
 import type { ContainerSegment } from '@/shared/contracts/terminal';
 import { useI18n } from '@/shared/i18n';
 import { useLayoutSizeAnimation } from '@/shared/ui/useLayoutSizeAnimation';
-import './TerminalCapsule.css';
+import './ContainerCapsule.css';
 
 const SEGMENTS = [
   ['ai', Monitor, 'terminal.computer'],
@@ -16,7 +16,7 @@ const SEGMENTS = [
  *  when they fit with this much space to spare (avoids flip-flopping at the edge). */
 const ICON_REVEAL_MARGIN = 16;
 
-interface TerminalCapsuleProps {
+interface ContainerCapsuleProps {
   active: ContainerSegment;
   onChange: (segment: ContainerSegment) => void;
 }
@@ -31,7 +31,7 @@ interface TerminalCapsuleProps {
  * without room they collapse to a pure icon row, and the island stretches/shrinks to fit
  * with the same spatial size animation the task list uses.
  */
-export function TerminalCapsule({ active, onChange }: TerminalCapsuleProps) {
+export function ContainerCapsule({ active, onChange }: ContainerCapsuleProps) {
   const { t } = useI18n();
   const [iconsOnly, setIconsOnly] = useState(false);
   const capsuleRef = useLayoutSizeAnimation({ active: true, layoutSignature: iconsOnly ? 'icons' : 'labels' });
