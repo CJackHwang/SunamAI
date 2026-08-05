@@ -1,10 +1,21 @@
 import type { WebContainer } from '@webcontainer/api';
 import type { ProcessOwnership, ProcessStatus, RuntimeProcessEvent } from '@/shared/contracts/agentRuntime';
+import type { SuccinixProcessEntry } from './succinixClient';
 
 export type WebContainerProcess = Awaited<ReturnType<WebContainer['spawn']>>;
 
+/**
+ * Succinix 适配后的进程对象：结构与 WebContainerProcess 兼容（UI/契约不变），
+ * 额外暴露 host 侧 pid 供 ps() 数据源对账（run 语义前台完成进程为 null）。
+ */
+export interface SuccinixProcessShim extends WebContainerProcess {
+  succinixPid: number | null;
+  /** run 语义：host 是否因超时终止了命令（驱动 runShell 的 timedOut 语义）。 */
+  succinixTimedOut: boolean;
+}
+
 interface ManagedProcess extends ProcessStatus {
-  process: WebContainerProcess;
+  process: SuccinixProcessShim;
 }
 
 export class ProcessRegistry {
@@ -16,7 +27,7 @@ export class ProcessRegistry {
     return () => this.listeners.delete(listener);
   }
 
-  add(status: ProcessStatus, process: WebContainerProcess): void {
+  add(status: ProcessStatus, process: SuccinixProcessShim): void {
     const managed = { ...status, process };
     this.processes.set(status.id, managed);
     this.publish('started', managed);
@@ -55,16 +66,11 @@ export class ProcessRegistry {
     return snapshot;
   }
 
-  async sendInput(processId: string, ownership: ProcessOwnership, input: string): Promise<boolean> {
+  async sendInput(processId: string, ownership: ProcessOwnership, _input: string): Promise<boolean> {
     const process = this.processes.get(processId);
     if (!process || !this.hasOwnership(process, ownership) || !process.isRunning) return false;
-    const writer = process.process.input.getWriter();
-    try {
-      await writer.write(input);
-      return true;
-    } finally {
-      writer.releaseLock();
-    }
+    // Succinix 文件 RPC 不支持交互 stdin（物理边界）；进程工具层已有对应容错。
+    return false;
   }
 
   stop(processId: string, ownership: ProcessOwnership): boolean {
@@ -90,6 +96,27 @@ export class ProcessRegistry {
         && (ownership.runId === undefined || process.runId === ownership.runId)
         && (ownership.containerId === undefined || process.containerId === ownership.containerId)))
       .map((process) => this.snapshot(process));
+  }
+
+  /** 是否仍有需要 ps() 对账的后台进程（带 host pid 且运行中）。 */
+  hasTrackedPids(): boolean {
+    return [...this.processes.values()].some((process) => process.isRunning && process.process.succinixPid !== null);
+  }
+
+  /**
+   * ps() 数据源对账：把注册表中带 host pid 的进程与 Succinix 进程表对照，
+   * host 表里已消失的进程按退出处理（用表中记录的 exitCode，缺省 -1）。
+   * 输出尾部同步不在 M1 范围（进程 UI 对账是 M5）。
+   */
+  reconcile(entries: SuccinixProcessEntry[]): void {
+    const runningPids = new Set(entries.filter((entry) => entry.status === 'running').map((entry) => entry.pid));
+    for (const process of [...this.processes.values()]) {
+      if (!process.isRunning || process.process.succinixPid === null) continue;
+      const pid = process.process.succinixPid;
+      if (runningPids.has(pid)) continue;
+      const entry = entries.find((candidate) => candidate.pid === pid);
+      this.markExited(process.id, entry?.exitCode ?? -1);
+    }
   }
 
   dispose(): void {

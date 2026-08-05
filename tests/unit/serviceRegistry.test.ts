@@ -1,6 +1,37 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { WebContainer } from '@webcontainer/api';
 import { RuntimeServiceRegistry } from '@/features/runtime/serviceRegistry';
+
+const { mockRun, mockSpawn, mockPs, mockKill } = vi.hoisted(() => ({
+  mockRun: vi.fn(),
+  mockSpawn: vi.fn(),
+  mockPs: vi.fn(),
+  mockKill: vi.fn(),
+}));
+
+// Succinix 文件 RPC 客户端用 mock 替换：spawn 底层执行（run/spawn/ps/kill）全部走 mock 方法。
+vi.mock('@/features/runtime/succinixClient', () => {
+  class MockSuccinixClient {
+    run = mockRun;
+    spawn = mockSpawn;
+    ps = mockPs;
+    kill = mockKill;
+    cwd = vi.fn(async () => '');
+    setCwd = vi.fn(async () => ({ ok: true }));
+  }
+  return { SuccinixClient: MockSuccinixClient };
+});
+
+beforeEach(() => {
+  mockRun.mockReset();
+  mockSpawn.mockReset();
+  mockPs.mockReset();
+  mockKill.mockReset();
+  mockRun.mockResolvedValue({ ok: true, exitCode: 0, stdout: '', stderr: '', timedOut: false });
+  mockSpawn.mockResolvedValue({ ok: true, pid: 4321 });
+  mockPs.mockResolvedValue([]);
+  mockKill.mockResolvedValue({ ok: true, killed: true, message: 'killed' });
+});
 
 class FakeProcess {
   readonly input = new WritableStream<string>();
@@ -76,7 +107,8 @@ describe('RuntimeServiceRegistry', () => {
     const fixture = new FakeWebContainer();
     const registry = new RuntimeServiceRegistry(fixture as unknown as WebContainer, vi.fn());
     await registry.initialize();
-    const { launchId, process } = await registry.spawn({ source: 'agent', containerId: 'c-1', command: 'jsh', args: ['-c', 'npm run dev'], processId: 'proc-1', sessionId: 's-1', runId: 'r-1' });
+    // spawn 语义请求（后台 node 服务）保持 launch 存活，监听记录才能归属到 launch。
+    const { launchId } = await registry.spawn({ source: 'agent', containerId: 'c-1', command: 'node', args: ['-e', 'setInterval(()=>{},1e9)'], processId: 'proc-1', sessionId: 's-1', runId: 'r-1' });
     fixture.emit('port', 5173, 'open', 'https://5173.example.test');
     expect(registry.getPorts()).toEqual([{ port: 5173, url: 'https://5173.example.test', state: 'identifying' }]);
 
@@ -84,8 +116,10 @@ describe('RuntimeServiceRegistry', () => {
     await settleEvents();
     expect(registry.getPorts()).toEqual([expect.objectContaining({ port: 5173, state: 'managed', pid: 4321, launchId, processId: 'proc-1', source: 'agent' })]);
 
-    (process as unknown as FakeProcess).onKill = () => fixture.emit('port', 5173, 'close', '');
-    await expect(registry.stopPort(5173)).resolves.toBe(true);
+    const stopPromise = registry.stopPort(5173);
+    fixture.emit('port', 5173, 'close', '');
+    await expect(stopPromise).resolves.toBe(true);
+    expect(mockKill).toHaveBeenCalledWith(4321);
     expect(registry.getPorts()).toEqual([]);
     registry.dispose();
   });
@@ -110,7 +144,7 @@ describe('RuntimeServiceRegistry', () => {
     const fixture = new FakeWebContainer();
     const registry = new RuntimeServiceRegistry(fixture as unknown as WebContainer, vi.fn());
     await registry.initialize();
-    const { launchId, process: terminalShell } = await registry.spawn({ source: 'terminal', containerId: 'c-1', command: 'jsh' });
+    const { launchId } = await registry.spawn({ source: 'terminal', containerId: 'c-1', command: 'node', args: ['-e', 'setInterval(()=>{},1e9)'] });
 
     fixture.appendServiceEvent({ action: 'listening', launchId, containerId: 'c-1', pid: 9876, port: 8080, timestamp: Date.now() });
     await settleEvents();
@@ -125,7 +159,7 @@ describe('RuntimeServiceRegistry', () => {
     };
     await expect(registry.stopPort(8080)).resolves.toBe(true);
 
-    expect((terminalShell as FakeProcess).killed).toBe(false);
+    expect(mockKill).not.toHaveBeenCalled();
     expect(registry.getPorts()).toEqual([]);
     registry.dispose();
   });

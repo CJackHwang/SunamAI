@@ -15,12 +15,17 @@ import { toErrorMessage } from '@/shared/lib/errors';
 import { clipTextToTokenBudget } from '@/shared/lib/tokenEstimate';
 import { createId } from '@/shared/lib/ids';
 import { v3Persistence, type V3PersistenceRepository } from '@/entities/persistence/v3Repository';
-import { ProcessRegistry } from './processRegistry';
+import { ProcessRegistry, type SuccinixProcessShim } from './processRegistry';
 import { WorkspaceSnapshotCoordinator } from './snapshotCoordinator';
 import { WorkspaceFileSystem } from './workspaceFileSystem';
-import { RuntimeServiceRegistry } from './serviceRegistry';
+import { RuntimeServiceRegistry, type ManagedSpawnRequest } from './serviceRegistry';
+import { SuccinixClient } from './succinixClient';
 
 const MAX_PROCESS_OUTPUT = 20_000;
+// 后台进程表对账间隔：host ps() 数据源映射注册表，检测进程自然退出。
+const PS_MONITOR_MS = 1_000;
+// 用户终端无交互 stdin（文件 RPC 物理边界），spawn 一个常驻 node 进程作为"只读"终端底座。
+const USER_SHELL_COMMAND = `node -e "console.log('Succinix terminal ready');setInterval(()=>{},1e9)"`;
 
 function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -29,6 +34,9 @@ function sleep(milliseconds: number): Promise<void> {
 /**
  * Owns Agent-launched processes instead of leaking them through a terminal component.
  * A terminal may observe this class, but process ownership always remains with its Run.
+ *
+ * 执行底层已从 WebContainer jsh 切换到 Succinix TerminalExecutor 文件 RPC：
+ * 前台命令走 `run`（统一路由），后台服务走 `spawn`；进程注册表经 host `ps()` 对账。
  */
 export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
   private readonly files: WorkspaceFileSystem;
@@ -36,14 +44,18 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
   private readonly snapshots: WorkspaceSnapshotCoordinator;
   private readonly services: RuntimeServiceRegistry;
   private readonly repository: V3PersistenceRepository;
+  private readonly succinix: SuccinixClient;
   private readonly errorListeners = new Set<(error: string) => void>();
   private userTerminalBuffer = '';
+  private psTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(webcontainer: WebContainer, repository: V3PersistenceRepository = v3Persistence) {
     this.files = new WorkspaceFileSystem(webcontainer);
     this.repository = repository;
     this.snapshots = new WorkspaceSnapshotCoordinator(webcontainer, repository);
-    this.services = new RuntimeServiceRegistry(webcontainer, (error) => this.publishError(toErrorMessage(error)));
+    // 与 serviceRegistry 共享同一客户端：/cmd.json 是单槽信箱，并发链会覆盖在途请求。
+    this.succinix = new SuccinixClient(webcontainer.fs);
+    this.services = new RuntimeServiceRegistry(webcontainer, (error) => this.publishError(toErrorMessage(error)), this.succinix);
   }
 
   getUserTerminalBuffer(): string {
@@ -118,6 +130,7 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
   }
 
   dispose(): void {
+    if (this.psTimer) { clearTimeout(this.psTimer); this.psTimer = null; }
     this.services.dispose();
     this.snapshots.dispose();
     this.processes.dispose();
@@ -133,7 +146,8 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
     return this.services.spawn({
       source: 'terminal',
       containerId,
-      command: 'jsh',
+      command: USER_SHELL_COMMAND,
+      args: [],
       cwd: getContainerRoot(containerId),
       env: { HOME: WEB_CONTAINER_HOME, SUNAM_WORKSPACE: getContainerPublicPath(containerId) },
     });
@@ -164,17 +178,21 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
     if (request.signal?.aborted) throw request.signal.reason;
     await this.ensureContainer(request.containerId);
     const id = createId('proc');
-    const { process } = await this.services.spawn({
+    // 后台服务走 Succinix spawn（长驻进程，立即返回 pid）；前台命令走 run（-c 组合命令，统一路由）。
+    const spawnRequest: ManagedSpawnRequest = {
       source: 'agent',
       containerId: request.containerId,
-      command: 'jsh',
-      args: ['-c', request.command],
+      command: request.command,
+      args: request.mode === 'background' ? [] : ['-c', request.command],
       cwd: getContainerRoot(request.containerId),
       env: { HOME: WEB_CONTAINER_HOME, SUNAM_WORKSPACE: getContainerPublicPath(request.containerId) },
       processId: id,
       sessionId: request.sessionId,
       runId: request.runId,
-    });
+      ...(request.timeoutMs !== undefined ? { timeoutMs: request.timeoutMs } : {}),
+    };
+    const { process } = await this.services.spawn(spawnRequest);
+    const shim = process as SuccinixProcessShim;
     const status: ProcessStatus = {
       id,
       sessionId: request.sessionId,
@@ -185,7 +203,7 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
       output: '',
       cursor: 0,
     };
-    this.processes.add(status, process);
+    this.processes.add(status, shim);
     if (request.signal?.aborted) {
       this.processes.stop(id, request);
       throw request.signal.reason;
@@ -207,7 +225,10 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
       void this.snapshots.flush(request.containerId).catch(() => undefined);
     });
 
-    if (request.mode === 'background') return { process: this.processes.observe(id, request)!, timedOut: false };
+    if (request.mode === 'background') {
+      this.schedulePsMonitor();
+      return { process: this.processes.observe(id, request)!, timedOut: false };
+    }
 
     const timeoutMs = Math.min(Math.max(request.timeoutMs ?? 30_000, 1_000), 300_000);
     const deadline = Date.now() + timeoutMs;
@@ -220,8 +241,8 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
       }
       snapshot = this.processes.observe(id, request);
     }
-    if (!snapshot) return { process: finalStatus ?? { ...status, isRunning: false }, timedOut: false };
-    return { process: snapshot, timedOut: snapshot.isRunning };
+    if (!snapshot) return { process: finalStatus ?? { ...status, isRunning: false }, timedOut: shim.succinixTimedOut };
+    return { process: snapshot, timedOut: shim.succinixTimedOut || snapshot.isRunning };
   }
 
   observeProcess(processId: string, ownership: ProcessOwnership, cursor = 0): ProcessStatus | null {
@@ -250,5 +271,21 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
 
   getProcesses(ownership?: Partial<ProcessOwnership>): ProcessStatus[] {
     return this.processes.list(ownership);
+  }
+
+  /** 后台进程表对账：注册表与 Succinix ps() 同步，检测自然退出；无后台进程时自停。 */
+  private schedulePsMonitor(): void {
+    if (this.psTimer) return;
+    const tick = async (): Promise<void> => {
+      try {
+        const entries = await this.succinix.ps();
+        this.processes.reconcile(entries);
+      } catch {
+        // 单次查询失败：下一拍重试
+      }
+      if (this.processes.hasTrackedPids()) this.psTimer = setTimeout(() => { void tick(); }, PS_MONITOR_MS);
+      else this.psTimer = null;
+    };
+    this.psTimer = setTimeout(() => { void tick(); }, PS_MONITOR_MS);
   }
 }

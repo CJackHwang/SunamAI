@@ -1,6 +1,8 @@
 import type { WebContainer } from '@webcontainer/api';
 import type { RuntimePortStatus, RuntimeServiceSource } from '@/shared/contracts/terminal';
 import { createId } from '@/shared/lib/ids';
+import { SuccinixClient } from './succinixClient';
+import { type SuccinixProcessShim } from './processRegistry';
 
 type WebContainerProcess = Awaited<ReturnType<WebContainer['spawn']>>;
 
@@ -36,7 +38,7 @@ interface ManagedLaunch {
   source: RuntimeServiceSource;
   containerId: string;
   command: string;
-  process: WebContainerProcess;
+  process: SuccinixProcessShim;
   processId?: string;
   sessionId?: string;
   runId?: string;
@@ -54,6 +56,8 @@ export interface ManagedSpawnRequest {
   sessionId?: string;
   runId?: string;
   env?: Record<string, string>;
+  /** 透传给 Succinix host 的命令超时（run 语义下 host 侧超时杀进程）。 */
+  timeoutMs?: number;
 }
 
 export interface ManagedSpawnResult {
@@ -96,9 +100,82 @@ function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+/**
+ * run 语义进程适配：异步执行 Succinix `run`（统一路由），完成后一次性放出合并输出并结算 exit。
+ * Succinix run 无 host pid，无法中途终止（host 侧超时已兜底）；进程对象结构与 WebContainerProcess 兼容。
+ */
+function createRunShim(client: SuccinixClient, command: string, timeoutMs?: number): SuccinixProcessShim {
+  let resolveExit!: (code: number) => void;
+  let controller!: ReadableStreamDefaultController<string>;
+  const exit = new Promise<number>((resolve) => { resolveExit = resolve; });
+  const shim: SuccinixProcessShim = {
+    exit,
+    input: new WritableStream<string>({ write() { /* run 语义无交互 stdin，输入丢弃 */ } }),
+    output: new ReadableStream<string>({ start(next) { controller = next; } }),
+    kill() { /* run 语义无 host pid，无法中途终止；host 侧超时已兜底 */ },
+    resize() {},
+    succinixPid: null,
+    succinixTimedOut: false,
+  };
+  void client.run(command, { ...(timeoutMs !== undefined ? { timeoutMs } : {}) }).then((result) => {
+    const merged = `${result.stdout}${result.stderr}`;
+    try {
+      if (merged) controller.enqueue(merged);
+    } catch {
+      // 输出流已取消
+    }
+    try { controller.close(); } catch { /* 输出流已取消 */ }
+    shim.succinixTimedOut = result.timedOut;
+    resolveExit(result.exitCode);
+  }, (error) => {
+    // 传输层失败（RPC 超时/host 崩溃）以输出流错误暴露，runShell 的 pipeTo 会发布 error 事件。
+    try { controller.error(error instanceof Error ? error : new Error(String(error))); } catch { /* 输出流已取消 */ }
+    shim.succinixTimedOut = true;
+    resolveExit(-1);
+  });
+  return shim;
+}
+
+/**
+ * spawn 语义进程适配：后台 node 系长驻进程，立即返回 host pid。
+ * 交互 stdin 不受支持（文件 RPC 物理边界）；输出经 ps() 对账（M5），此处仅放出初始提示。
+ */
+function createSpawnShim(client: SuccinixClient, pid: number, initialOutput = ''): SuccinixProcessShim {
+  let killed = false;
+  let resolveExit!: (code: number) => void;
+  const exit = pid === -1
+    ? Promise.resolve(-1)
+    : new Promise<number>((resolve) => { resolveExit = resolve; });
+  const shim: SuccinixProcessShim = {
+    exit,
+    input: new WritableStream<string>({ write() { /* 无交互 stdin，输入丢弃 */ } }),
+    output: new ReadableStream<string>({
+      start(controller) {
+        if (initialOutput) controller.enqueue(initialOutput);
+        controller.close();
+      },
+    }),
+    kill() {
+      if (killed) return;
+      killed = true;
+      void client.kill(pid).then(() => resolveExit(-1), () => resolveExit(-1));
+    },
+    resize() {},
+    succinixPid: pid === -1 ? null : pid,
+    succinixTimedOut: false,
+  };
+  return shim;
+}
+
+function assembleCommand(command: string, args?: string[]): string {
+  if (!args?.length) return command;
+  return `${command} ${args.join(' ')}`;
+}
+
 export class RuntimeServiceRegistry {
   private readonly webcontainer: WebContainer;
   private readonly onError: (error: unknown) => void;
+  private readonly succinix: SuccinixClient;
   private readonly launches = new Map<string, ManagedLaunch>();
   private readonly ports = new Map<number, RuntimePortStatus>();
   private readonly listenersByPort = new Map<number, ListenerRecord>();
@@ -112,9 +189,11 @@ export class RuntimeServiceRegistry {
   private unsubscribeReady: (() => void) | null = null;
   private readQueued = false;
 
-  constructor(webcontainer: WebContainer, onError: (error: unknown) => void) {
+  constructor(webcontainer: WebContainer, onError: (error: unknown) => void, succinix?: SuccinixClient) {
     this.webcontainer = webcontainer;
     this.onError = onError;
+    // 单一共享客户端：/cmd.json 是单槽信箱，任何第二条链并发写都会覆盖在途请求。
+    this.succinix = succinix ?? new SuccinixClient(webcontainer.fs);
   }
 
   initialize(): Promise<void> {
@@ -146,19 +225,12 @@ export class RuntimeServiceRegistry {
   async spawn(request: ManagedSpawnRequest): Promise<ManagedSpawnResult> {
     await this.initialize();
     const launchId = createId('launch');
-    const hookPath = `${this.webcontainer.workdir}/${SERVICE_HOOK_PATH}`;
-    const eventPath = `${this.webcontainer.workdir}/${SERVICE_EVENT_PATH}`;
-    const env = {
-      ...request.env,
-      NODE_OPTIONS: `--require ${hookPath}`,
-      SUNAM_LAUNCH_ID: launchId,
-      SUNAM_CONTAINER_ID: request.containerId,
-      SUNAM_SERVICE_EVENT_FILE: eventPath,
-    };
-    const process = await this.webcontainer.spawn(request.command, request.args ?? [], {
-      env,
-      ...(request.cwd ? { cwd: request.cwd } : {}),
-    });
+    // run 语义：source=agent 且 args 为 jsh 式 `-c <cmd>` 组合命令 → Succinix run（统一路由，前台完成）。
+    // spawn 语义：其余（后台 node 服务 / 用户终端）→ Succinix spawn（后台长驻进程）。
+    const isRunSemantics = request.source === 'agent' && request.args?.length === 2 && request.args[0] === '-c';
+    const process = isRunSemantics
+      ? createRunShim(this.succinix, request.args![1]!, request.timeoutMs)
+      : createSpawnShim(this.succinix, await this.spawnBackground(request), request.source === 'terminal' ? 'Succinix terminal ready.\r\n' : '');
     const launch: ManagedLaunch = {
       id: launchId,
       source: request.source,
@@ -230,6 +302,12 @@ export class RuntimeServiceRegistry {
     this.listenersByPort.clear();
     this.listeners.clear();
     this.processedRecords.clear();
+  }
+
+  private async spawnBackground(request: ManagedSpawnRequest): Promise<number> {
+    const command = assembleCommand(request.command, request.args);
+    const result = await this.succinix.spawn(command, { ...(request.timeoutMs !== undefined ? { timeoutMs: request.timeoutMs } : {}) });
+    return result.ok ? result.pid : -1;
   }
 
   private async killPid(pid: number): Promise<void> {

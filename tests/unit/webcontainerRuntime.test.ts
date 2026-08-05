@@ -1,17 +1,57 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { WebContainerAgentRuntime } from '@/features/runtime/WebContainerAgentRuntime';
 import type { WebContainer } from '@webcontainer/api';
 import { Blob as NodeBlob } from 'node:buffer';
 import { estimateTextTokens } from '@/shared/lib/tokenEstimate';
 
-function createRuntime(snapshot: Record<string, unknown> | null = null) {
-  const kill = vi.fn();
-  const process = {
-    input: new WritableStream<string>(),
-    output: new ReadableStream<string>({ start(controller) { controller.close(); } }),
-    exit: new Promise<number>(() => undefined),
-    kill,
+const { mockRun, mockSpawn, mockPs, mockKill, spawnedPids, nextPid, resetSpawns } = vi.hoisted(() => {
+  let pidCounter = 0;
+  const spawnedPids: number[] = [];
+  return {
+    mockRun: vi.fn(),
+    mockSpawn: vi.fn(),
+    mockPs: vi.fn(),
+    mockKill: vi.fn(),
+    spawnedPids,
+    nextPid: () => ++pidCounter,
+    resetSpawns: () => { pidCounter = 0; spawnedPids.length = 0; },
   };
+});
+
+// Succinix 文件 RPC 客户端用 mock 替换：runtime/serviceRegistry 共享同一实例，命令走 mock 方法。
+vi.mock('@/features/runtime/succinixClient', () => {
+  class MockSuccinixClient {
+    run = mockRun;
+    spawn = mockSpawn;
+    ps = mockPs;
+    kill = mockKill;
+    cwd = vi.fn(async () => '');
+    setCwd = vi.fn(async () => ({ ok: true }));
+  }
+  return { SuccinixClient: MockSuccinixClient };
+});
+
+beforeEach(() => {
+  resetSpawns();
+  mockRun.mockReset();
+  mockSpawn.mockReset();
+  mockPs.mockReset();
+  mockKill.mockReset();
+  mockRun.mockResolvedValue({ ok: true, exitCode: 0, stdout: '', stderr: '', timedOut: false });
+  mockSpawn.mockImplementation(async () => {
+    const pid = nextPid();
+    spawnedPids.push(pid);
+    return { ok: true, pid };
+  });
+  mockPs.mockImplementation(async () => spawnedPids.map((pid) => ({ pid, cmd: 'node -e ...', status: 'running', startTime: 0 })));
+  mockKill.mockImplementation(async (pid: number) => {
+    const index = spawnedPids.indexOf(pid);
+    if (index >= 0) spawnedPids.splice(index, 1);
+    return { ok: true, killed: true, message: 'killed' };
+  });
+});
+
+function createRuntime(snapshot: Record<string, unknown> | null = null) {
   const webcontainer = {
     workdir: '/home/workspace',
     fs: {
@@ -23,7 +63,7 @@ function createRuntime(snapshot: Record<string, unknown> | null = null) {
     },
     mount: vi.fn(async () => undefined),
     export: vi.fn(async () => ({})),
-    spawn: vi.fn(async () => process),
+    spawn: vi.fn(),
     on: vi.fn(() => () => undefined),
   };
   const repository = {
@@ -33,7 +73,7 @@ function createRuntime(snapshot: Record<string, unknown> | null = null) {
     })),
     saveSnapshot: vi.fn(async () => undefined),
   };
-  return { runtime: new WebContainerAgentRuntime(webcontainer as unknown as WebContainer, repository as never), kill, webcontainer };
+  return { runtime: new WebContainerAgentRuntime(webcontainer as unknown as WebContainer, repository as never), webcontainer };
 }
 
 function createFilesystemRuntime() {
@@ -47,12 +87,6 @@ function createFilesystemRuntime() {
   const watchers: Array<{ close: ReturnType<typeof vi.fn> }> = [];
   const inputs: string[] = [];
   const events: string[] = [];
-  const process = {
-    input: new WritableStream<string>({ write(chunk) { inputs.push(chunk); } }),
-    output: new ReadableStream<string>({ start(controller) { controller.enqueue('hello output'); controller.close(); } }),
-    exit: Promise.resolve(0),
-    kill: vi.fn(),
-  };
   const readFile = vi.fn(async (path: string, encoding?: string) => {
     const bytes = files.get(path);
     if (!bytes) throw new Error('ENOENT');
@@ -83,7 +117,7 @@ function createFilesystemRuntime() {
     },
     mount: vi.fn(async () => undefined),
     export: vi.fn(async () => ({ 'snapshot.txt': { file: { contents: 'saved' } } })),
-    spawn: vi.fn(async () => process),
+    spawn: vi.fn(),
     on: vi.fn(() => () => undefined),
   };
   const resources = new Map([
@@ -103,13 +137,14 @@ function createFilesystemRuntime() {
 }
 
 describe('WebContainerAgentRuntime process ownership', () => {
-  it('launches the user shell inside the same real root and environment as Agent shells', async () => {
-    const { runtime, webcontainer } = createRuntime();
-    await runtime.spawnUserShell('c-1');
-    expect(webcontainer.spawn).toHaveBeenCalledWith('jsh', [], expect.objectContaining({
-      cwd: 'c-1',
-      env: expect.objectContaining({ HOME: '/home/workspace', SUNAM_WORKSPACE: '/home/workspace/c-1', SUNAM_CONTAINER_ID: 'c-1' }),
-    }));
+  it('launches the user shell through the shared Succinix spawn path', async () => {
+    const { runtime } = createRuntime();
+    const spawned = await runtime.spawnUserShell('c-1');
+    expect(spawned.launchId).toBeTruthy();
+    expect(spawned.process.output).toBeInstanceOf(ReadableStream);
+    expect(spawned.process.input).toBeInstanceOf(WritableStream);
+    expect(typeof spawned.process.kill).toBe('function');
+    expect(mockSpawn).toHaveBeenCalledWith(expect.stringContaining('node -e'), expect.anything());
     runtime.dispose();
   });
 
@@ -121,25 +156,21 @@ describe('WebContainerAgentRuntime process ownership', () => {
     expect(runtime.getProcesses()).toHaveLength(2);
     await expect(runtime.stopProcess(first.process.id, { sessionId: 's-1', runId: 'r-1', containerId: 'c-1' })).resolves.toBe(true);
     expect(runtime.getProcesses({ containerId: 'c-1' })).toEqual([]);
+    runtime.dispose();
   });
 
-  it('publishes output-stream failures and still removes the exited process', async () => {
-    const { runtime, webcontainer } = createRuntime();
+  it('publishes transport failures as output errors and still removes the exited process', async () => {
+    const { runtime } = createRuntime();
     const events: string[] = [];
     runtime.subscribe((event) => events.push(event.type));
-    vi.mocked(webcontainer.spawn).mockResolvedValueOnce({
-      input: new WritableStream<string>(),
-      output: new ReadableStream<string>({ start(controller) { controller.error(new Error('stream broke')); } }),
-      exit: Promise.resolve(1),
-      kill: vi.fn(),
-    } as never);
+    mockRun.mockRejectedValueOnce(new Error('stream broke'));
     await runtime.runShell({ command: 'broken', mode: 'foreground', sessionId: 's-1', runId: 'r-1', containerId: 'c-1' });
     expect(events).toEqual(expect.arrayContaining(['started', 'error', 'exited']));
     expect(runtime.getProcesses({ containerId: 'c-1' })).toEqual([]);
   });
 
   it('rejects cross-session, cross-run, and cross-container process operations', async () => {
-    const { runtime, kill } = createRuntime();
+    const { runtime } = createRuntime();
     const result = await runtime.runShell({ command: 'npm run dev', mode: 'background', sessionId: 's-1', runId: 'r-1', containerId: 'c-1' });
     const owner = { sessionId: 's-1', runId: 'r-1', containerId: 'c-1' };
     const intruder = { sessionId: 's-2', runId: 'r-1', containerId: 'c-1' };
@@ -148,22 +179,15 @@ describe('WebContainerAgentRuntime process ownership', () => {
     expect(runtime.observeProcess(result.process.id, intruder)).toBeNull();
     await expect(runtime.sendProcessInput(result.process.id, intruder, 'nope')).resolves.toBe(false);
     await expect(runtime.stopProcess(result.process.id, intruder)).resolves.toBe(false);
-    expect(kill).not.toHaveBeenCalled();
+    expect(mockKill).not.toHaveBeenCalled();
 
     runtime.stopRun(owner);
-    expect(kill).toHaveBeenCalledOnce();
+    expect(mockKill).toHaveBeenCalledOnce();
+    runtime.dispose();
   });
 
   it('advances the runtime revision exactly once when a registered process is explicitly stopped', async () => {
-    const { runtime, webcontainer } = createRuntime();
-    let resolveExit!: (exitCode: number) => void;
-    const kill = vi.fn();
-    vi.mocked(webcontainer.spawn).mockResolvedValueOnce({
-      input: new WritableStream<string>(),
-      output: new ReadableStream<string>({ start(controller) { controller.close(); } }),
-      exit: new Promise<number>((resolve) => { resolveExit = resolve; }),
-      kill,
-    } as never);
+    const { runtime } = createRuntime();
     const owner = { sessionId: 's-1', runId: 'r-old', containerId: 'c-1' };
     const result = await runtime.runShell({ command: 'npm run dev -- --port 1919', mode: 'background', ...owner });
     const beforeStop = await runtime.getWorkspaceRevision('c-1');
@@ -171,20 +195,19 @@ describe('WebContainerAgentRuntime process ownership', () => {
     await expect(runtime.stopProcess(result.process.id, owner)).resolves.toBe(true);
     const afterStop = await runtime.getWorkspaceRevision('c-1');
     expect(afterStop).toBe(beforeStop + 1);
-    expect(kill).toHaveBeenCalledOnce();
+    expect(mockKill).toHaveBeenCalledOnce();
     expect(runtime.getProcesses(owner)).toEqual([]);
-
-    resolveExit(0);
-    await vi.waitFor(async () => expect(await runtime.getWorkspaceRevision('c-1')).toBe(afterStop));
+    runtime.dispose();
   });
 
   it('stops an owned foreground process when its run signal is aborted', async () => {
-    const { runtime, kill } = createRuntime();
+    const { runtime } = createRuntime();
     const controller = new AbortController();
     const running = runtime.runShell({ command: 'hang', mode: 'foreground', sessionId: 's-1', runId: 'r-1', containerId: 'c-1', signal: controller.signal });
     controller.abort(new DOMException('stopped', 'AbortError'));
     await expect(running).rejects.toMatchObject({ name: 'AbortError' });
-    expect(kill).toHaveBeenCalledOnce();
+    expect(runtime.getProcesses({ containerId: 'c-1' })).toEqual([]);
+    runtime.dispose();
   });
 
   it('restores the v3 snapshot into the shared container root before work starts', async () => {
@@ -214,6 +237,7 @@ describe('WebContainerAgentRuntime process ownership', () => {
     expect(files.has('c-1/home/user/parallel.txt')).toBe(false);
     await expect(runtime.applyWorkspaceChanges('c-1', [{ path: 'src/main.txt', content: 'nope', expectedContent: 'stale' }])).rejects.toThrow('Refusing to overwrite');
 
+    mockRun.mockResolvedValueOnce({ ok: true, exitCode: 0, stdout: 'hello output', stderr: '', timedOut: false });
     const result = await runtime.runShell({ command: 'echo hi', mode: 'foreground', timeoutMs: 1_000, sessionId: 's-1', runId: 'r-1', containerId: 'c-1' });
     await Promise.resolve();
     const ownership = { sessionId: 's-1', runId: 'r-1', containerId: 'c-1' };
@@ -224,10 +248,7 @@ describe('WebContainerAgentRuntime process ownership', () => {
     expect(events).toEqual(expect.arrayContaining(['started', 'output', 'exited']));
     await runtime.flushSnapshots();
     expect(webcontainer.export).toHaveBeenCalledWith('c-1', expect.objectContaining({ format: 'json', excludes: expect.arrayContaining(['node_modules/**', 'dist/**']) }));
-    expect(webcontainer.spawn).toHaveBeenCalledWith('jsh', ['-c', 'echo hi'], expect.objectContaining({
-      cwd: 'c-1',
-      env: expect.objectContaining({ HOME: '/home/workspace', SUNAM_WORKSPACE: '/home/workspace/c-1', SUNAM_CONTAINER_ID: 'c-1' }),
-    }));
+    expect(mockRun).toHaveBeenCalledWith('echo hi', { timeoutMs: 1_000 });
     expect(repository.saveSnapshot).toHaveBeenCalledWith('c-1', expect.any(Object), expect.any(Number));
     runtime.dispose();
     expect(watchers[0]?.close).toHaveBeenCalledOnce();
