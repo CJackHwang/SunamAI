@@ -9,7 +9,10 @@ type WebContainerProcess = Awaited<ReturnType<WebContainer['spawn']>>;
 
 const RUNTIME_DIRECTORY = '.sunam/runtime';
 const SERVICE_EVENT_PATH = `${RUNTIME_DIRECTORY}/service-events.jsonl`;
-const ORPHAN_RECONCILIATION_MS = 1_500;
+// 孤儿分类等待窗：Succinix host 对 spawn 有 2s 启动确认窗口（PROTOCOL §5）——服务进程先绑定端口
+// （server-ready 即到），浏览器侧要到确认结果（~2s）才注册 launch。窗口必须覆盖该延迟，否则
+// launch 注册前端口已被误判 orphaned（R1 进程→端口推断的注册竞态）。
+const ORPHAN_RECONCILIATION_MS = 3_000;
 const STOP_WAIT_MS = 3_000;
 const MAX_EVENT_FILE_BYTES = 256 * 1024;
 // 后台/终端 spawn 进程输出尾部同步轮询间隔（host ps() 的 outputTail 字段，M2/M3）。
@@ -40,6 +43,8 @@ interface ManagedLaunch {
   source: RuntimeServiceSource;
   containerId: string;
   command: string;
+  /** R1：从命令串解析出的声明端口（--port N / .listen(N) / PORT=N），进程→端口推断的关联依据。 */
+  expectedPorts: number[];
   process: SuccinixProcessShim;
   processId?: string;
   sessionId?: string;
@@ -206,6 +211,27 @@ function assembleCommand(command: string, args?: string[]): string {
   return `${command} ${args.join(' ')}`;
 }
 
+/** 从命令串解析显式声明的端口号（R1 进程→端口推断的声明侧）。覆盖：
+ *  `--port N` / `--port=N`、`--server.port=N`（CLI 服务）、`.listen(N)`（node http/express）、
+ *  `PORT=N`（env 前置声明）。单横线 `-p` 因与 node `-p`(print) 歧义不纳入，避免误配；
+ *  端口必须落在 1–65535（`.listen(0)` 为随机端口，无法作为关联依据）。导出供单测覆盖。 */
+export function extractDeclaredPorts(command: string): number[] {
+  const ports = new Set<number>();
+  const patterns = [
+    /(?:^|\s)--port[\s=:]+(\d{1,5})/g,
+    /(?:^|\s)--server\.port[\s=:]+(\d{1,5})/g,
+    /\.listen\(\s*(\d{1,5})/g,
+    /(?:^|\s)PORT=(\d{1,5})/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of command.matchAll(pattern)) {
+      const port = Number(match[1]);
+      if (port > 0 && port <= 65_535) ports.add(port);
+    }
+  }
+  return [...ports].sort((left, right) => left - right);
+}
+
 export class RuntimeServiceRegistry {
   private readonly webcontainer: WebContainer;
   private readonly onError: (error: unknown) => void;
@@ -236,8 +262,10 @@ export class RuntimeServiceRegistry {
   }
 
   private async initializeInternal(): Promise<void> {
-    // 端口对齐（M2）：service-events 通道保留给 host 端口监听记录。NODE_OPTIONS hook 注入已随
-    // jsh 迁移移除，生产环境无进程写该文件，处于休眠；不删以免提前动 M2 的端口归属逻辑。
+    // R2（M2）：service-events.jsonl 监听通道已休眠——NODE_OPTIONS service-hook 随 jsh 迁移移除，
+    // 生产环境无进程写该文件；端口归属改由 R1 进程→端口推断（inferManagedPort）承担。保留通道
+    //（readEvents / consumeListenerRecord / managedPort）作休眠回退：若历史记录仍出现仍按记录归属，
+    // 不删以免动到保留项（webcontainer server-ready/port 监听）。killPid 保留（stopPort pid 分支兜底）。
     await this.webcontainer.fs.mkdir(RUNTIME_DIRECTORY, { recursive: true });
     await this.webcontainer.fs.writeFile(SERVICE_EVENT_PATH, '');
     this.eventWatcher = this.webcontainer.fs.watch(RUNTIME_DIRECTORY, () => this.queueReadEvents());
@@ -285,6 +313,8 @@ export class RuntimeServiceRegistry {
       source: request.source,
       containerId: request.containerId,
       command: request.command,
+      // run 语义（前台命令）无 host pid，不参与 R1 端口推断，声明端口置空。
+      expectedPorts: isRunSemantics ? [] : extractDeclaredPorts(assembleCommand(request.command, request.args)),
       process,
       startedAt: Date.now(),
       status: 'running',
@@ -303,7 +333,9 @@ export class RuntimeServiceRegistry {
     if (!launch || launch.status !== 'running') return false;
     launch.status = 'stopping';
     this.markPortsStopping(launchId);
-    launch.process.kill();
+    // R3：Succinix spawn 语义的 launch 持有 host pid，直接经 succinixClient.kill(pid) 终止；
+    // run 语义（无 host pid）由 killLaunchProcess 退化为 shim no-op（host 侧超时已兜底）。
+    void this.killLaunchProcess(launch).catch((error) => this.onError(error));
     this.scheduleLaunchStopFallback(launchId);
     return true;
   }
@@ -318,13 +350,18 @@ export class RuntimeServiceRegistry {
     }
     this.updatePort(portNumber, { ...port, state: 'stopping' });
     try {
-      if (launch.status === 'running' && launch.source === 'agent') {
+      if (launch.status === 'running') {
         launch.status = 'stopping';
         this.markPortsStopping(launch.id);
-        launch.process.kill();
+        // R3：managed 端口 stop 时 kill 关联进程的 host pid（succinixClient.kill），
+        // 不再走 webcontainer spawn node helper；port.pid 仅作 launch 无 host pid 时的兜底。
+        await this.killLaunchProcess(launch, port.pid);
         this.scheduleLaunchStopFallback(launch.id);
-      } else if (port.pid) await this.killPid(port.pid);
-      else launch.process.kill();
+      } else {
+        // launch 已退出（进程已死）：端口由 WC close 事件移除，无需再 kill。
+        this.updatePort(portNumber, { ...port, state: 'orphaned' });
+        return false;
+      }
     } catch (error) {
       this.onError(error);
       this.updatePort(portNumber, { ...port, state: 'orphaned' });
@@ -375,6 +412,24 @@ export class RuntimeServiceRegistry {
     if (exitCode !== 0) throw new Error(`Unable to stop registered service process ${pid}.`);
   }
 
+  /**
+   * R3：终止 launch 关联的真实进程。Succinix spawn 语义的 launch 持有 host pid
+   *（launch.process.succinixPid），直接经 succinixClient.kill(pid) 发 SIGTERM；kill 返回失败
+   *（进程已自然退出等）时回退 shim.kill()，让 launch 生命周期照常结算。无 host pid（run 语义
+   * shim，kill 为 no-op）且端口仍带 pid 时走保留的 killPid 兜底。
+   */
+  private async killLaunchProcess(launch: ManagedLaunch, portPid?: number): Promise<void> {
+    const hostPid = launch.process.succinixPid;
+    if (hostPid !== null && hostPid > 0) {
+      const result = await this.succinix.kill(hostPid);
+      if (!result.ok) launch.process.kill();
+    } else if (portPid) {
+      await this.killPid(portPid);
+    } else {
+      launch.process.kill();
+    }
+  }
+
   private markLaunchExited(launchId: string): void {
     const launch = this.launches.get(launchId);
     if (!launch) return;
@@ -406,7 +461,8 @@ export class RuntimeServiceRegistry {
   private openPort(portNumber: number, url: string): void {
     const existing = this.ports.get(portNumber);
     const listener = this.listenersByPort.get(portNumber);
-    const managed = listener ? this.managedPort(portNumber, url, listener) : null;
+    // 休眠的 listener 记录通道优先（历史记录仍有权威 pid）；无记录时走 R1 进程→端口推断。
+    const managed = listener ? this.managedPort(portNumber, url, listener) : this.inferManagedPort(portNumber, url);
     this.updatePort(portNumber, managed ?? { port: portNumber, url: url || existing?.url || '', state: existing?.state === 'stopping' ? 'stopping' : 'identifying', ...(existing?.source ? { source: existing.source } : {}), ...(existing?.containerId ? { containerId: existing.containerId } : {}), ...(existing?.launchId ? { launchId: existing.launchId } : {}), ...(existing?.processId ? { processId: existing.processId } : {}), ...(existing?.pid ? { pid: existing.pid } : {}) });
     if (!managed && existing?.state !== 'stopping') this.scheduleOrphanClassification(portNumber);
   }
@@ -441,6 +497,41 @@ export class RuntimeServiceRegistry {
     };
   }
 
+  /**
+   * R1：进程→端口推断。NODE_OPTIONS service-hook 随 jsh 迁移移除后 listener 记录通道无生产者，
+   * 端口归属改由这里推断：server-ready(port) 到来时，把端口关联到声明了该端口的常驻服务进程
+   *（`.listen(N)` / `--port N` / `PORT=N`）；命令未声明端口时，仅当容器内只有一个 Agent 服务进程
+   *（如 `node server.js`，端口不在命令里）才兜底关联。多服务且端口无声明归属 → 返回 null，落
+   * identifying → orphaned（无法可靠关联时如实呈现，不硬造 managed）。终端底座进程（source=terminal）
+   * 非服务，不参与兜底，避免把端口误配给只读终端。
+   */
+  private inferManagedPort(portNumber: number, url = this.ports.get(portNumber)?.url ?? ''): RuntimePortStatus | null {
+    const candidates = [...this.launches.values()].filter((launch) =>
+      launch.status === 'running'
+      && launch.process.succinixPid !== null
+      && launch.process.succinixPid > 0);
+    if (candidates.length === 0) return null;
+    const declared = candidates.filter((launch) => launch.expectedPorts.includes(portNumber));
+    const services = candidates.filter((launch) => launch.source !== 'terminal');
+    const matched = declared.length === 1
+      ? declared[0]
+      : declared.length === 0 && services.length === 1
+        ? services[0]
+        : null;
+    if (!matched) return null;
+    return {
+      port: portNumber,
+      url,
+      state: 'managed',
+      source: matched.source,
+      containerId: matched.containerId,
+      launchId: matched.id,
+      // candidates 已过滤 succinixPid 非空，此处恒为 number（条件展开兼容 exactOptionalPropertyTypes）。
+      ...(matched.process.succinixPid !== null ? { pid: matched.process.succinixPid } : {}),
+      ...(matched.processId ? { processId: matched.processId } : {}),
+    };
+  }
+
   private scheduleOrphanClassification(portNumber: number): void {
     const existing = this.orphanTimers.get(portNumber);
     if (existing) clearTimeout(existing);
@@ -451,13 +542,33 @@ export class RuntimeServiceRegistry {
     }, ORPHAN_RECONCILIATION_MS));
   }
 
+  /** 取消端口的孤儿分类计时器（端口已被归类 managed 时调用）。 */
+  private cancelOrphanTimer(portNumber: number): void {
+    const timer = this.orphanTimers.get(portNumber);
+    if (timer) clearTimeout(timer);
+    this.orphanTimers.delete(portNumber);
+  }
+
   private reconcileLaunch(launchId: string): void {
+    const launch = this.launches.get(launchId);
+    if (!launch) return;
+    // 休眠的 listener 记录通道：launch 注册前已到的记录按记录归属。
     for (const record of this.listenersByPort.values()) {
       if (record.launchId !== launchId) continue;
       const port = this.ports.get(record.port);
       if (!port) continue;
       const managed = this.managedPort(record.port, port.url, record);
       if (managed) this.updatePort(record.port, managed);
+    }
+    // R1 进程→端口推断：spawn RPC 返回前端口可能已 server-ready（identifying），launch 注册后
+    // 重跑推断，命中声明端口即归属 managed（并取消孤儿计时器）。
+    for (const [portNumber, port] of this.ports) {
+      if (port.state !== 'identifying') continue;
+      const managed = this.inferManagedPort(portNumber);
+      if (managed?.launchId === launchId) {
+        this.cancelOrphanTimer(portNumber);
+        this.updatePort(portNumber, managed);
+      }
     }
   }
 
@@ -497,9 +608,7 @@ export class RuntimeServiceRegistry {
     if (!port) return;
     const managed = this.managedPort(record.port, port.url, record);
     if (managed) {
-      const timer = this.orphanTimers.get(record.port);
-      if (timer) clearTimeout(timer);
-      this.orphanTimers.delete(record.port);
+      this.cancelOrphanTimer(record.port);
       this.updatePort(record.port, managed);
     }
   }

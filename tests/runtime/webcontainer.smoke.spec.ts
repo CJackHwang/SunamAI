@@ -231,9 +231,10 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   const services = page.locator('.services-panel');
   const processList = page.locator('.services-process-list');
   await expect(services.getByText('端口 3457')).toBeVisible();
-  // M1 后 NODE_OPTIONS hook 已移除（M2 端口对齐未做）：端口经 server-ready 检出但无 listener 记录，
-  // 以 identifying → orphaned 呈现而非 managed——只有预览可用，"停止端口"按钮属 M2 语义。
+  // M2 端口对齐（R1 进程→端口推断）：listen(3457) 声明端口 → managed 可 stop（非 orphaned），
+  // 端口行同时有"预览"与"停止端口"按钮。
   await expect(services.getByRole('button', { name: '预览端口 3457' })).toBeVisible();
+  await expect(services.getByRole('button', { name: '停止端口 3457 的服务' })).toBeVisible();
   await expect(page.locator('.service-process-row')).toHaveCount(18);
   await expect(services).toHaveCSS('overflow', 'hidden');
   await expect(processList).toHaveCSS('overflow-y', 'auto');
@@ -315,10 +316,10 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   });
   expect(mobileLayout).toEqual({ pageFits: true, contained: true });
 
-  // 端口未 managed 时无"停止端口"按钮；经进程行终止服务器进程，验证端口随之关闭
-  //（stopProcess → host kill 子进程 → WebContainer port close → closePort）。
+  // M2 端口对齐后端口归属 managed：端口行"停止端口"按钮 → stopPort（succinixClient.kill host pid）
+  // 终止服务器进程，验证端口随之关闭、进程行消失（host 进程表消失 → shim exit → 注册表移除）。
   const serverProcess = page.locator('.service-process-row').filter({ hasText: '3457' });
-  await serverProcess.locator('.icon-button-danger').click();
+  await services.getByRole('button', { name: '停止端口 3457 的服务' }).click();
   await expect(services.getByText('端口 3457')).toBeHidden();
   await expect(serverProcess).toHaveCount(0);
   await expect(page.locator('.service-process-row')).toHaveCount(17);
