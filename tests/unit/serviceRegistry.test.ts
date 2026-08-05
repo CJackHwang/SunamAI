@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { WebContainer } from '@webcontainer/api';
-import { RuntimeServiceRegistry } from '@/features/runtime/serviceRegistry';
+import { RuntimeServiceRegistry, tailDelta } from '@/features/runtime/serviceRegistry';
 
 const { mockRun, mockSpawn, mockPs, mockKill } = vi.hoisted(() => ({
   mockRun: vi.fn(),
@@ -172,5 +172,31 @@ describe('RuntimeServiceRegistry', () => {
     expect(fixture.files.has('.sunam/runtime/service-hook.cjs')).toBe(false);
     expect([...fixture.files.keys()].every((path) => !path.includes('.sunam/workspaces/'))).toBe(true);
     registry.dispose();
+  });
+});
+
+describe('tailDelta', () => {
+  it('emits the full candidate when nothing was emitted yet', () => {
+    expect(tailDelta('', 'hello')).toBe('hello');
+  });
+
+  it('returns nothing when the candidate is already fully emitted', () => {
+    expect(tailDelta('abc', 'abc')).toBe('');
+    expect(tailDelta('abc', 'bc')).toBe('');
+  });
+
+  it('emits only the suffix past the longest tail overlap', () => {
+    expect(tailDelta('hello world', 'world!!!')).toBe('!!!');
+    expect(tailDelta('abc', 'abcd')).toBe('d');
+    expect(tailDelta('ab', 'abcde')).toBe('cde');
+    expect(tailDelta('abc', 'bcX')).toBe('X');
+  });
+
+  it('emits the full candidate when there is no tail overlap', () => {
+    expect(tailDelta('abc', 'xyz')).toBe('xyz');
+  });
+
+  it('returns nothing for an empty candidate', () => {
+    expect(tailDelta('abc', '')).toBe('');
   });
 });

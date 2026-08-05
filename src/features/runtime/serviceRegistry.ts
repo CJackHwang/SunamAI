@@ -108,8 +108,9 @@ function createRunShim(client: SuccinixClient, command: string, timeoutMs?: numb
   return shim;
 }
 
-/** outputTail（host 保留最近 ~500 字符）相对已放流内容的增量：最长后缀-前缀去重，滚动尾部不丢新内容。 */
-function tailDelta(emitted: string, candidate: string): string {
+/** outputTail（host 保留最近 ~500 字符）相对已放流内容的增量：最长后缀-前缀去重，滚动尾部不丢新内容。
+ *  导出供单测覆盖（N6）。 */
+export function tailDelta(emitted: string, candidate: string): string {
   if (emitted.endsWith(candidate)) return '';
   let overlap = Math.min(emitted.length, candidate.length);
   while (overlap > 0 && !candidate.startsWith(emitted.slice(-overlap))) overlap -= 1;
@@ -271,6 +272,9 @@ export class RuntimeServiceRegistry {
       }
       // M-1：run 前按容器根 cd 前缀（/workspace/<containerId>）。Lifo 侧 cd 会把会话 cwd 同步到
       // 容器根，node 段经 Lifo 转发时用会话 cwd（真实路径 /home/workspace/<id>）——多容器隔离恢复。
+      // N5：cd 前缀引入了 shell 融合（&&），命令因此统一走 Lifo 混合链（Succinix host 上报 runtime
+      // 'lifo'），即使命令本身是 node 系；node 子进程由此落在 Lifo 默认超时（~25s）而非 host 的
+      // node 专用超时。后续如需 node 直路由，可在 M2/M3 用 setCwd（host 侧会话 cwd）替代 cd 前缀。
       const cwdPrefixed = request.cwd ? `cd ${request.cwd} && ${command}` : command;
       process = createRunShim(this.succinix, cwdPrefixed, request.timeoutMs, request.env);
     } else {

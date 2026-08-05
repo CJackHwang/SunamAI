@@ -201,3 +201,33 @@ export class SuccinixClient {
 **修复**：TASK 记录注明"请求 id 必须数字且严格递增（host 忽略非数字 id，权威协议 docs/PROTOCOL.md:38）"；SuccinixClient 加单实例共享注释（多 client 同容器会丢请求）。
 
 修复后重跑全部质量门禁（`npm run check` + 真实浏览器实测：node --version / npm install / python / 管道 / 超时判定 / 多容器目录隔离），再提交。提交信息：`fix: TASK-M1 复审修复（host boot + timedOut 判定 + cwd/env 透传 + 终端观察）`
+
+## 复审二轮修复项（2026-08 复审 agent 再发现，N1/N2 必修）
+
+初版修复（5a8629b）已通过复审确认 5 项全落实 + 端到端 boot 实证，但复审又发现以下问题。**全部修复后再提交**：
+
+### N1. 运行时冒烟测试为红（门禁不绿，必修）
+
+**问题**：用户终端交互 stdin 是 no-op（物理边界），`test:runtime` 的 `webcontainer.smoke.spec.ts:160-162` 向终端输入 `pwd` 期望输出路径——实测 100s 超时，`check:all` 门禁红。
+
+**修复**：更新冒烟测试以匹配"读输出"边界——断言终端横幅 "Succinix terminal ready" 出现 + 用 agent 路径（runShell）验证 cwd/env 语义；或显式标注跳过终端交互段（注明物理边界原因）。
+
+### N2. sync-succinix-assets 未接线（部署/全新克隆链路断，必修）
+
+**问题**：`scripts/sync-succinix-assets.mjs` 未挂进 `predev`/`prebuild`/CI（package.json scripts、`.github/workflows/quality.yml` 均无引用），且 `public/succinix/` 被 gitignore。全新克隆/部署 → `/succinix/host.js` 404 → boot 直接抛错。
+
+**修复**：把 sync-succinix-assets 接进 `predev`/`prebuild` 脚本 + CI（quality.yml 的 check/build 步骤前）；确保全新克隆后 `npm install && npm run dev` 能自动同步资产并 boot 成功。
+
+### N3. boot 失败路径：超时数学错 + host 泄漏（低-中，建议修）
+
+**问题**：`succinixHost.ts:56-62` `attempts=60` 意图 6s，但每次 ping 走 doExec 截止 = 5s+5s = 10s/次，最坏挂 ~600s；`waitForHostReady` 抛错时 `hostProcess` 未被 kill，重试会拉起第二个 host 争抢 `/cmd.json`（id 冲突）。
+
+**修复**：修正超时数学（ping 用短超时或独立 deadline 6s）；抛错路径 kill hostProcess 防重复 host。
+
+### N4/N5/N6（低，尽力修）
+
+- **N4**：host 崩溃看门狗自动重启（运行中 host 死 → 全部 RPC 超时，只能整体重启 runtime）
+- **N5**：cd 前缀使 run 全部走 Lifo 混合链（runtime 标 'lifo'、node 默认超时 25s），代码注释说明
+- **N6**：`tailDelta` 补单测；后台服务端口检测补实证
+
+修复后重跑 `npm run check:all`（含 `test:runtime` 必须绿）。提交信息：`fix: TASK-M1 复审二轮（冒烟测试对齐读输出边界 + 资产同步接线 + boot 失败路径）`

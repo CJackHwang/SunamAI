@@ -5,10 +5,11 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "predev": "kill-port 7891 || true",
+    "predev": "node scripts/sync-succinix-assets.mjs && (kill-port 7891 || true)",
     "dev": "vite",
     "typecheck": "tsc -b",
     "build": "npm run typecheck && vite build",
+    "prebuild": "node scripts/sync-succinix-assets.mjs",
     "lint": "oxlint",
     "test": "vitest run",
     "test:watch": "vitest",

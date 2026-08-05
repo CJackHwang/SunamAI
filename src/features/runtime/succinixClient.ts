@@ -44,6 +44,10 @@ const RPC_TIMEOUT_BUFFER_MS = 5_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
 // 非 run 协议命令（spawn/ps/kill/cwd/setCwd/ping）的浏览器侧 RPC 等待上限。
 const PROTOCOL_COMMAND_TIMEOUT_MS = 5_000;
+// ping 是 host 存活探测：host 就绪时 ~50ms 应答。boot 探活要多次快速尝试，
+// 故 ping 走独立短截止且不附加 5s 协议缓冲（未就绪 ~500ms 判负），
+// 否则 waitForHostReady 单次 ping 最坏阻塞 5s+5s=10s，60 次尝试最坏挂 ~600s（N3）。
+const PING_TIMEOUT_MS = 500;
 // host 侧超时消息（node 子进程 / lifo 沙箱）统一含 "timed out"。
 const TIMEOUT_MESSAGE_PATTERN = /timed out|timeout/i;
 
@@ -168,7 +172,7 @@ export class SuccinixClient {
   /** host 存活探测（协议 ping，返回 pong 即就绪；用于 boot 探活）。 */
   async ping(): Promise<boolean> {
     try {
-      const result = await this.exec('ping', undefined, PROTOCOL_COMMAND_TIMEOUT_MS);
+      const result = await this.exec('ping', undefined, PING_TIMEOUT_MS, 0);
       return result.kind === 'pong';
     } catch {
       return false;
@@ -209,13 +213,13 @@ export class SuccinixClient {
   }
 
   /** 排队执行：前一个请求 settle（成功或超时）后才写下一个 /cmd.json。 */
-  private exec(cmd: string, opts: Record<string, unknown> | undefined, timeoutMs?: number): Promise<SuccinixResponse> {
-    const run = this.chain.then(() => this.doExec(cmd, opts, timeoutMs));
+  private exec(cmd: string, opts: Record<string, unknown> | undefined, timeoutMs?: number, bufferMs = RPC_TIMEOUT_BUFFER_MS): Promise<SuccinixResponse> {
+    const run = this.chain.then(() => this.doExec(cmd, opts, timeoutMs, bufferMs));
     this.chain = run.then(() => undefined, () => undefined);
     return run;
   }
 
-  private async doExec(cmd: string, opts: Record<string, unknown> | undefined, timeoutMs?: number): Promise<SuccinixResponse> {
+  private async doExec(cmd: string, opts: Record<string, unknown> | undefined, timeoutMs?: number, bufferMs = RPC_TIMEOUT_BUFFER_MS): Promise<SuccinixResponse> {
     const id = ++this.requestId;
     // 写请求前清理可能残留的旧 /cmd.json（上次超时遗留），host 读到即处理。
     try {
@@ -225,7 +229,7 @@ export class SuccinixClient {
     }
     await this.fs.writeFile(CMD_FILE, JSON.stringify({ protocol: 1, id, cmd, opts }));
     const resultFile = `${RESULT_PREFIX}${id}.json`;
-    const deadline = Date.now() + (timeoutMs ?? DEFAULT_TIMEOUT_MS) + RPC_TIMEOUT_BUFFER_MS;
+    const deadline = Date.now() + (timeoutMs ?? DEFAULT_TIMEOUT_MS) + bufferMs;
     for (;;) {
       try {
         const raw = await this.fs.readFile(resultFile, 'utf-8');

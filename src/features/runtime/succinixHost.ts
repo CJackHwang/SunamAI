@@ -14,6 +14,8 @@ const HOST_JS = '/host.js';
 const LIFO_CORE_JS = '/lifo-core.js';
 // host 侧 python 运行时约定目录（host.ts：PYTHON_DAEMON_JS = process.cwd()/usr/lib/succinix/python/python-daemon.js）。
 const PYTHON_RUNTIME_DIR = '/usr/lib/succinix/python';
+// boot 探活独立 deadline：host 未在 6s 内就绪即判失败（对应原 60×100ms 的意图值）。
+const BOOT_READY_DEADLINE_MS = 6_000;
 
 const PYTHON_ASSETS: ReadonlyArray<{ path: string; url: string }> = [
   { path: `${PYTHON_RUNTIME_DIR}/python-daemon.js`, url: 'pyodide/python-daemon.js' },
@@ -52,13 +54,16 @@ async function ensureAsset(webcontainer: WebContainer, containerPath: string, as
   await webcontainer.fs.writeFile(containerPath, await fetchText(`${ASSET_BASE}/${assetUrl}`));
 }
 
-/** 等待 host 就绪：命令轮询循环可响应（ping → pong）。 */
-async function waitForHostReady(client: SuccinixClient, attempts = 60): Promise<void> {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
+/** 等待 host 就绪：ping 探活（单次已走短 RPC 截止，host 未就绪 ~500ms 判负），
+ *  整体带独立 deadline（默认 6s）。原实现 attempts=60 意图 6s，但每次 ping 走
+ *  doExec 截止 = 5s+5s = 10s/次，最坏挂 ~600s；现按 deadline 硬截断（N3）。 */
+export async function waitForHostReady(client: SuccinixClient, deadlineMs = BOOT_READY_DEADLINE_MS): Promise<void> {
+  const deadline = Date.now() + deadlineMs;
+  for (;;) {
     if (await client.ping()) return;
+    if (Date.now() >= deadline) throw new Error('Succinix host did not become ready.');
     await sleep(100);
   }
-  throw new Error('Succinix host did not become ready.');
 }
 
 export interface SuccinixHostHandle {
@@ -70,15 +75,22 @@ export interface SuccinixHostHandle {
  * 注入 host.js → spawn `node host.js` 常驻进程 → ping 探活 → 注入 lifo-core.js。
  * lifo-core.js 同步等待完成（run 的 cd 前缀依赖 Lifo 内核，首条命令即可用）；
  * python 资产后台懒注入（首个 python 命令前由 ensurePythonRuntime 兜底 await）。
+ * readyDeadlineMs 仅用于测试注入短 deadline；生产用默认 6s。
  */
-export async function bootSuccinixHost(webcontainer: WebContainer, client: SuccinixClient): Promise<SuccinixHostHandle> {
+export async function bootSuccinixHost(webcontainer: WebContainer, client: SuccinixClient, readyDeadlineMs = BOOT_READY_DEADLINE_MS): Promise<SuccinixHostHandle> {
   await ensureAsset(webcontainer, HOST_JS, 'host.js');
   const hostProcess = await webcontainer.spawn('node', ['host.js']);
-  await waitForHostReady(client);
-  await ensureAsset(webcontainer, LIFO_CORE_JS, 'lifo-core.js');
-  // python 运行时约 13MB，首用前懒注入；此处后台预热，失败不影响 host 拉起。
-  void ensurePythonRuntime(webcontainer.fs).catch(() => {});
-  return { hostProcess };
+  try {
+    await waitForHostReady(client, readyDeadlineMs);
+    await ensureAsset(webcontainer, LIFO_CORE_JS, 'lifo-core.js');
+    // python 运行时约 13MB，首用前懒注入；此处后台预热，失败不影响 host 拉起。
+    void ensurePythonRuntime(webcontainer.fs).catch(() => {});
+    return { hostProcess };
+  } catch (error) {
+    // boot 失败路径：杀掉刚拉起的 host，避免重试时第二个 host 争抢 /cmd.json（id 冲突）。
+    try { hostProcess.kill(); } catch { /* host 已死或不可终止 */ }
+    throw error;
+  }
 }
 
 // ─── python 运行时懒注入（首用幂等）───

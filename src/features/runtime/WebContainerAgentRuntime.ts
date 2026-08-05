@@ -58,6 +58,10 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
   private userTerminalBuffer = '';
   private psTimer: ReturnType<typeof setTimeout> | null = null;
   private hostHandle: SuccinixHostHandle | null = null;
+  // dispose 后不再自动重启 host（看门狗退出守卫，N4）。
+  private disposed = false;
+  // 防止 host 连续崩溃时并发重启（重启中不重复触发）。
+  private hostRestartInFlight = false;
 
   constructor(webcontainer: WebContainer, repository: V3PersistenceRepository = v3Persistence) {
     this.webcontainer = webcontainer;
@@ -72,6 +76,30 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
   /** 拉起 Succinix host 守护进程（H1-1）：注入 host.js → spawn node host.js → ping 探活 → lifo-core。 */
   async bootSuccinixHost(): Promise<void> {
     this.hostHandle = await bootSuccinixHost(this.webcontainer, this.succinix);
+    this.watchHost(this.hostHandle.hostProcess);
+  }
+
+  /**
+   * N4：host 崩溃看门狗——常驻 host 进程意外退出时自动重启，避免运行中 host 死 →
+   * 全部 RPC 超时只能整体重启 runtime。若 crash 时恰有在途请求，重启的 ping 会排队在
+   * 该请求之后（受其 deadline 约束），属已知边界；空闲崩溃则立即重启。
+   */
+  private watchHost(hostProcess: Awaited<ReturnType<WebContainer['spawn']>>): void {
+    void hostProcess.exit.then(async () => {
+      if (this.disposed || this.hostRestartInFlight || this.hostHandle?.hostProcess !== hostProcess) return;
+      this.hostRestartInFlight = true;
+      this.publishError('Succinix host exited unexpectedly; restarting the terminal executor.');
+      await this.restartHost().finally(() => { this.hostRestartInFlight = false; });
+    }, () => undefined);
+  }
+
+  private async restartHost(): Promise<void> {
+    try {
+      this.hostHandle = await bootSuccinixHost(this.webcontainer, this.succinix);
+      this.watchHost(this.hostHandle.hostProcess);
+    } catch (error) {
+      this.publishError(`Succinix host restart failed: ${toErrorMessage(error)}`);
+    }
   }
 
   getUserTerminalBuffer(): string {
@@ -146,6 +174,7 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
   }
 
   dispose(): void {
+    this.disposed = true;
     if (this.psTimer) { clearTimeout(this.psTimer); this.psTimer = null; }
     this.services.dispose();
     this.snapshots.dispose();

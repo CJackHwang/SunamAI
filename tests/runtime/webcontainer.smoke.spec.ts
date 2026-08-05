@@ -42,8 +42,22 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
     }
     modelTurn += 1;
     if (modelTurn === 1) {
+      // 共享文件改由 agent 路径（shell_run → runShell）创建：用户终端无交互 stdin（物理边界），
+      // 不再像 jsh 时代用终端键入命令落盘。cwd/env 语义由第二轮前台命令断言。
+      const createSharedFiles = {
+        index: 1,
+        id: 'create-shared-files',
+        type: 'function' as const,
+        function: {
+          name: 'shell_run',
+          arguments: JSON.stringify({
+            command: 'mkdir -p user-created/from-terminal node_modules/pkg dist && echo terminal > user-created/from-terminal/proof.txt && echo hidden > .hidden-export && echo dependency > node_modules/pkg/export.txt && echo build > dist/export.js',
+            mode: 'foreground',
+          }),
+        },
+      };
       const backgroundCalls = Array.from({ length: 18 }, (_, index) => ({
-        index: index + 1,
+        index: index + 2,
         id: `background-${index}`,
         type: 'function' as const,
         function: {
@@ -58,16 +72,17 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
         contentType: 'text/event-stream',
         body: streamResponse({ tool_calls: [
           { index: 0, id: 'plan', type: 'function', function: { name: 'update_plan', arguments: JSON.stringify({ items: [{ id: 'runtime', title: 'Runtime smoke', status: 'in_progress' }] }) } },
+          createSharedFiles,
           ...backgroundCalls,
-          { index: 19, id: 'tree', type: 'function', function: { name: 'workspace_tree', arguments: JSON.stringify({ max_depth: 4 }) } },
-          { index: 20, id: 'write-shared', type: 'function', function: { name: 'apply_patch', arguments: JSON.stringify({ changes: [{ path: 'user-created/from-agent.txt', content: 'shared-agent-file' }] }) } },
+          { index: 20, id: 'tree', type: 'function', function: { name: 'workspace_tree', arguments: JSON.stringify({ max_depth: 4 }) } },
+          { index: 21, id: 'write-shared', type: 'function', function: { name: 'apply_patch', arguments: JSON.stringify({ changes: [{ path: 'user-created/from-agent.txt', content: 'shared-agent-file' }] }) } },
         ] }),
       });
       return;
     }
     if (modelTurn === 2) {
       const transcript = JSON.stringify(request.messages ?? []);
-      if (!transcript.includes('user-created/from-terminal/proof.txt')) throw new Error('Agent workspace_tree did not observe the user-terminal directory.');
+      if (!transcript.includes('user-created/from-terminal/proof.txt')) throw new Error('Agent workspace_tree did not observe the shared container root file.');
       await route.fulfill({
         contentType: 'text/event-stream',
         body: streamTools([{ id: 'verify-shared-root', name: 'shell_run', arguments: { command: 'pwd && node -e "const fs=require(\'fs\');const root=process.env.SUNAM_WORKSPACE;if(process.cwd()!==root||process.env.HOME!==\'/home/workspace\'||!fs.existsSync(\'user-created/from-terminal/proof.txt\')||!fs.existsSync(\'user-created/from-agent.txt\'))process.exit(1);process.stdout.write(fs.readFileSync(root+\'/user-created/from-agent.txt\',\'utf8\'))"', mode: 'foreground' } }]),
@@ -155,12 +170,9 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(terminalRows).not.toContainText(/\.sunam\/workspaces\/c-/);
   await expect(page.locator('.terminal-environment-path')).toHaveCount(0);
 
-  const terminalInput = page.locator('.terminal-panel[data-active="true"] .xterm-helper-textarea');
-  await terminalInput.focus();
-  await terminalInput.pressSequentially("mkdir -p user-created/from-terminal node_modules/pkg dist && echo terminal > user-created/from-terminal/proof.txt && echo hidden > .hidden-export && echo dependency > node_modules/pkg/export.txt && echo build > dist/export.js && pwd && ls user-created/from-terminal");
-  await terminalInput.press('Enter');
-  await expect(terminalRows).toContainText(/\/home\/workspace\/c-[a-z0-9_-]+/);
-  await expect(terminalRows).toContainText('proof.txt');
+  // 用户终端无交互 stdin（Succinix 文件 RPC 物理边界）：终端是"读输出"横幅，不能再键入命令。
+  // 断言横幅出现；共享文件与 cwd/env 语义改由 agent 路径（shell_run → runShell）验证。
+  await expect(terminalRows).toContainText('Succinix terminal ready');
 
   await composer.fill('请执行完整的 WebContainer runtime smoke verification command and services test');
   await composer.press('Enter');
@@ -168,10 +180,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
     .filter({ hasText: /^Runtime smoke complete$/ }))
     .toHaveCount(1, { timeout: 100_000 });
 
-  await terminalInput.focus();
-  await terminalInput.pressSequentially('cat user-created/from-agent.txt');
-  await terminalInput.press('Enter');
-  await expect(terminalRows).toContainText('shared-agent-file');
+  // 用户终端不可交互（物理边界），from-agent.txt 的存在改由下方文件管理器与 zip 校验断言。
 
   await page.locator('.terminal-capsule').getByRole('tab', { name: '文件' }).click();
   await expect(page.locator('.fm-breadcrumb')).toHaveText('/');
@@ -222,7 +231,9 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   const services = page.locator('.services-panel');
   const processList = page.locator('.services-process-list');
   await expect(services.getByText('端口 3457')).toBeVisible();
-  await expect(services.getByRole('button', { name: '停止端口 3457 的服务' })).toBeVisible();
+  // M1 后 NODE_OPTIONS hook 已移除（M2 端口对齐未做）：端口经 server-ready 检出但无 listener 记录，
+  // 以 identifying → orphaned 呈现而非 managed——只有预览可用，"停止端口"按钮属 M2 语义。
+  await expect(services.getByRole('button', { name: '预览端口 3457' })).toBeVisible();
   await expect(page.locator('.service-process-row')).toHaveCount(18);
   await expect(services).toHaveCSS('overflow', 'hidden');
   await expect(processList).toHaveCSS('overflow-y', 'auto');
@@ -304,8 +315,10 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   });
   expect(mobileLayout).toEqual({ pageFits: true, contained: true });
 
-  await services.getByRole('button', { name: '停止端口 3457 的服务' }).click();
+  // 端口未 managed 时无"停止端口"按钮；经进程行终止服务器进程，验证端口随之关闭
+  //（stopProcess → host kill 子进程 → WebContainer port close → closePort）。
   const serverProcess = page.locator('.service-process-row').filter({ hasText: '3457' });
+  await serverProcess.locator('.icon-button-danger').click();
   await expect(services.getByText('端口 3457')).toBeHidden();
   await expect(serverProcess).toHaveCount(0);
   await expect(page.locator('.service-process-row')).toHaveCount(17);

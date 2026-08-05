@@ -121,6 +121,12 @@ describe('SuccinixClient file RPC', () => {
     await expect(client.ping()).resolves.toBe(true);
   });
 
+  it('returns false when the host answers the liveness probe with a non-pong kind', async () => {
+    const { fs } = createHostFixture({ ping: { ok: true, kind: 'error' } });
+    const client = new SuccinixClient(fs as never);
+    await expect(client.ping()).resolves.toBe(false);
+  });
+
   it('writes /etc/succinix.env before the run RPC when env is passed', async () => {
     const { fs, files, writtenCmds } = createHostFixture();
     const client = new SuccinixClient(fs as never);
