@@ -45,6 +45,11 @@ export default defineConfig({
         'icon-bg-svg.svg',
         'icon-nobg-svg.svg',
       ],
+      workbox: {
+        // Succinix host 运行时资产（host.js / lifo-core.js / pyodide）是注入 WebContainer
+        // 的懒加载基础设施，不进 SW 预缓存（单文件可达 9.6MB，超出 workbox 默认上限）。
+        globIgnores: ['**/succinix/**'],
+      },
       manifest: {
         name: 'Sunam',
         short_name: 'Sunam',

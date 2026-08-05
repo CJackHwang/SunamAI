@@ -13,6 +13,7 @@ vi.mock('@/shared/lib/webcontainer', () => ({
 
 vi.mock('@/features/runtime/WebContainerAgentRuntime', () => ({
   WebContainerAgentRuntime: class {
+    readonly bootSuccinixHost = vi.fn(async () => undefined);
     readonly flushSnapshots = vi.fn(async () => undefined);
     readonly dispose = vi.fn();
     constructor() { mocks.instances.push(this); }

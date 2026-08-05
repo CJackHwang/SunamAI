@@ -5,6 +5,8 @@ import type { FileSystemAPI } from '@webcontainer/api';
 // （每请求独立结果文件）→ 浏览器读到即删。
 // 协议权威契约见 ~/Desktop/MyProject/WebUnix/docs/PROTOCOL.md；host 忽略非数字 id
 // （`typeof req.id !== 'number'` 直接 return），故请求 id 用严格递增的数字而非 createId 字符串。
+// 单实例共享：/cmd.json 是单槽信箱，同一容器内必须共享唯一 SuccinixClient 实例——
+// 多实例并发会互相覆盖在途 /cmd.json，且各自 id 从 1 递增会撞上 host 的 id 去重，丢请求。
 
 export interface SuccinixRunResult {
   ok: boolean;
@@ -24,12 +26,23 @@ export interface SuccinixProcessEntry {
   outputTail?: string;
 }
 
+export interface SuccinixRunOptions {
+  /** host 侧命令超时（node/lifo 按路由应用，缺省用 host 默认）。 */
+  timeoutMs?: number;
+  /** 会话 cwd（run 由调用方 cd 前缀承担，spawn 走 setCwd）。 */
+  cwd?: string;
+  /** 透传到 node/python 子进程的环境（写入 /etc/succinix.env，host spawn 时合并）。 */
+  env?: Record<string, string>;
+}
+
 const CMD_FILE = '/cmd.json';
 const RESULT_PREFIX = '/result-';
+// host 侧 /etc/succinix.env 合并文件：browser wc.fs 根 == host cwd，写到容器根即被 host 读到。
+const ENV_FILE = '/etc/succinix.env';
 const POLL_INTERVAL_MS = 50;
 const RPC_TIMEOUT_BUFFER_MS = 5_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
-// 非 run 协议命令（spawn/ps/kill/cwd/setCwd）的浏览器侧 RPC 等待上限。
+// 非 run 协议命令（spawn/ps/kill/cwd/setCwd/ping）的浏览器侧 RPC 等待上限。
 const PROTOCOL_COMMAND_TIMEOUT_MS = 5_000;
 // host 侧超时消息（node 子进程 / lifo 沙箱）统一含 "timed out"。
 const TIMEOUT_MESSAGE_PATTERN = /timed out|timeout/i;
@@ -68,30 +81,35 @@ export class SuccinixClient {
   }
 
   /** 执行命令（统一路由：node|npm|npx → 真 Node，其余 → Lifo 沙箱），等待完成返回。 */
-  async run(command: string, opts?: { timeoutMs?: number }): Promise<SuccinixRunResult> {
+  async run(command: string, opts?: SuccinixRunOptions): Promise<SuccinixRunResult> {
     let result: SuccinixResponse;
     try {
+      await this.applyContext(opts);
       result = await this.exec('run', { command, ...(opts?.timeoutMs !== undefined ? { timeout: opts.timeoutMs } : {}) }, opts?.timeoutMs);
     } catch {
       // 轮询超时：host 无响应（未拉起或已崩溃）。
       return { ok: false, exitCode: -1, stdout: '', stderr: 'Succinix RPC timed out.', timedOut: true };
     }
     const stderr = asString(result.stderr);
+    const exitCode = typeof result.exitCode === 'number' ? result.exitCode : -1;
     const runtime = result.runtime;
     return {
       ok: result.ok === true,
-      exitCode: typeof result.exitCode === 'number' ? result.exitCode : -1,
+      exitCode,
       stdout: asString(result.stdout),
       stderr,
       ...(runtime === 'node' || runtime === 'lifo' || runtime === 'python' ? { runtime } : {}),
-      timedOut: TIMEOUT_MESSAGE_PATTERN.test(stderr),
+      // H1-2：Lifo 超时以 exitCode 130（AbortError）结算且 stderr 可能为空，需与 stderr 超时消息、
+      // 轮询超时（外层 catch）一起判定 timedOut，对齐协议 R1 语义。
+      timedOut: exitCode === 130 || TIMEOUT_MESSAGE_PATTERN.test(stderr),
     };
   }
 
   /** 后台启动 node 系长驻进程，立即返回 pid。 */
-  async spawn(command: string, opts?: { timeoutMs?: number }): Promise<{ ok: boolean; pid: number }> {
+  async spawn(command: string, opts?: SuccinixRunOptions): Promise<{ ok: boolean; pid: number }> {
     let result: SuccinixResponse;
     try {
+      await this.applyContext(opts);
       result = await this.exec('spawn', { command, ...(opts?.timeoutMs !== undefined ? { timeout: opts.timeoutMs } : {}) }, PROTOCOL_COMMAND_TIMEOUT_MS);
     } catch {
       return { ok: false, pid: -1 };
@@ -145,6 +163,49 @@ export class SuccinixClient {
     } catch {
       return { ok: false };
     }
+  }
+
+  /** host 存活探测（协议 ping，返回 pong 即就绪；用于 boot 探活）。 */
+  async ping(): Promise<boolean> {
+    try {
+      const result = await this.exec('ping', undefined, PROTOCOL_COMMAND_TIMEOUT_MS);
+      return result.kind === 'pong';
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * run/spawn 前置上下文：与命令同一 FIFO 链内先 setCwd（spawn 语义）、写 /etc/succinix.env
+   * （env 透传，host spawn 子进程时合并）。best-effort：任一步失败不阻断命令（命令会在原
+   * cwd / 缺 env 下继续，避免把一次可用的执行误报为 RPC 超时）。
+   */
+  private async applyContext(opts?: SuccinixRunOptions): Promise<void> {
+    if (opts?.cwd) {
+      try {
+        await this.exec('setCwd', { cwd: opts.cwd }, PROTOCOL_COMMAND_TIMEOUT_MS);
+      } catch {
+        // 会话 cwd 设置失败不阻断命令
+      }
+    }
+    if (opts?.env && Object.keys(opts.env).length > 0) {
+      try {
+        await this.writeEnvFile(opts.env);
+      } catch {
+        // env 文件写入失败不阻断命令
+      }
+    }
+  }
+
+  /** 把环境写入 host 合并文件 /etc/succinix.env（与命令同一 FIFO 链，保证 host 读到最新值）。 */
+  private writeEnvFile(entries: Record<string, string>): Promise<void> {
+    const write = this.chain.then(async () => {
+      await this.fs.mkdir('/etc', { recursive: true }).catch(() => {});
+      const content = `${Object.entries(entries).map(([key, value]) => `${key}=${value}`).join('\n')}\n`;
+      await this.fs.writeFile(ENV_FILE, content);
+    });
+    this.chain = write.then(() => undefined, () => undefined);
+    return write;
   }
 
   /** 排队执行：前一个请求 settle（成功或超时）后才写下一个 /cmd.json。 */

@@ -2,16 +2,18 @@ import type { WebContainer } from '@webcontainer/api';
 import type { RuntimePortStatus, RuntimeServiceSource } from '@/shared/contracts/terminal';
 import { createId } from '@/shared/lib/ids';
 import { SuccinixClient } from './succinixClient';
+import { ensurePythonRuntime, mentionsPython } from './succinixHost';
 import { type SuccinixProcessShim } from './processRegistry';
 
 type WebContainerProcess = Awaited<ReturnType<WebContainer['spawn']>>;
 
 const RUNTIME_DIRECTORY = '.sunam/runtime';
-const SERVICE_HOOK_PATH = `${RUNTIME_DIRECTORY}/service-hook.cjs`;
 const SERVICE_EVENT_PATH = `${RUNTIME_DIRECTORY}/service-events.jsonl`;
 const ORPHAN_RECONCILIATION_MS = 1_500;
 const STOP_WAIT_MS = 3_000;
 const MAX_EVENT_FILE_BYTES = 256 * 1024;
+// 后台/终端 spawn 进程输出尾部同步轮询间隔（host ps() 的 outputTail 字段，M2/M3）。
+const SPAWN_OUTPUT_POLL_MS = 1_000;
 
 interface ListenerRecord {
   action: 'listening' | 'closed';
@@ -65,37 +67,6 @@ export interface ManagedSpawnResult {
   process: WebContainerProcess;
 }
 
-const SERVICE_HOOK_SOURCE = String.raw`
-'use strict';
-const fs = require('node:fs');
-const net = require('node:net');
-const marker = Symbol.for('sunam.service-listener-hook');
-if (!net.Server.prototype[marker]) {
-  const originalListen = net.Server.prototype.listen;
-  net.Server.prototype.listen = function (...args) {
-    const server = this;
-    let listeningPort = 0;
-    server.once('listening', () => {
-      const address = server.address();
-      listeningPort = address && typeof address === 'object' ? address.port : 0;
-      record('listening', listeningPort);
-    });
-    server.once('close', () => record('closed', listeningPort));
-    return originalListen.apply(server, args);
-  };
-  Object.defineProperty(net.Server.prototype, marker, { value: true });
-}
-function record(action, port) {
-  try {
-    const eventFile = process.env.SUNAM_SERVICE_EVENT_FILE;
-    const launchId = process.env.SUNAM_LAUNCH_ID;
-    const containerId = process.env.SUNAM_CONTAINER_ID;
-    if (!eventFile || !launchId || !containerId || !Number.isInteger(port) || port < 1) return;
-    fs.appendFileSync(eventFile, JSON.stringify({ action, launchId, containerId, pid: process.pid, port, timestamp: Date.now() }) + '\n');
-  } catch {}
-}
-`;
-
 function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -103,8 +74,9 @@ function sleep(milliseconds: number): Promise<void> {
 /**
  * run 语义进程适配：异步执行 Succinix `run`（统一路由），完成后一次性放出合并输出并结算 exit。
  * Succinix run 无 host pid，无法中途终止（host 侧超时已兜底）；进程对象结构与 WebContainerProcess 兼容。
+ * 命令已由调用方按容器根 cd 前缀（M-1），env 由 client 在命令前写入 /etc/succinix.env。
  */
-function createRunShim(client: SuccinixClient, command: string, timeoutMs?: number): SuccinixProcessShim {
+function createRunShim(client: SuccinixClient, command: string, timeoutMs?: number, env?: Record<string, string>): SuccinixProcessShim {
   let resolveExit!: (code: number) => void;
   let controller!: ReadableStreamDefaultController<string>;
   const exit = new Promise<number>((resolve) => { resolveExit = resolve; });
@@ -117,7 +89,7 @@ function createRunShim(client: SuccinixClient, command: string, timeoutMs?: numb
     succinixPid: null,
     succinixTimedOut: false,
   };
-  void client.run(command, { ...(timeoutMs !== undefined ? { timeoutMs } : {}) }).then((result) => {
+  void client.run(command, { ...(timeoutMs !== undefined ? { timeoutMs } : {}), ...(env && Object.keys(env).length > 0 ? { env } : {}) }).then((result) => {
     const merged = `${result.stdout}${result.stderr}`;
     try {
       if (merged) controller.enqueue(merged);
@@ -136,34 +108,95 @@ function createRunShim(client: SuccinixClient, command: string, timeoutMs?: numb
   return shim;
 }
 
+/** outputTail（host 保留最近 ~500 字符）相对已放流内容的增量：最长后缀-前缀去重，滚动尾部不丢新内容。 */
+function tailDelta(emitted: string, candidate: string): string {
+  if (emitted.endsWith(candidate)) return '';
+  let overlap = Math.min(emitted.length, candidate.length);
+  while (overlap > 0 && !candidate.startsWith(emitted.slice(-overlap))) overlap -= 1;
+  return candidate.slice(overlap);
+}
+
 /**
  * spawn 语义进程适配：后台 node 系长驻进程，立即返回 host pid。
- * 交互 stdin 不受支持（文件 RPC 物理边界）；输出经 ps() 对账（M5），此处仅放出初始提示。
+ * 交互 stdin 不受支持（文件 RPC 物理边界）；输出经 host ps() 的 outputTail 字段轮询同步
+ * （M2/M3）：输出流保持打开按尾部增量放流，进程从 host 进程表消失即结算 exit。
  */
 function createSpawnShim(client: SuccinixClient, pid: number, initialOutput = ''): SuccinixProcessShim {
   let killed = false;
+  let outputController: ReadableStreamDefaultController<string> | null = null;
   let resolveExit!: (code: number) => void;
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  // 已放流内容：计算 outputTail 增量用（initialOutput 计入，避免首拍重复放 banner）。
+  let emitted = '';
+  let lastTail = '';
   const exit = pid === -1
     ? Promise.resolve(-1)
     : new Promise<number>((resolve) => { resolveExit = resolve; });
+
+  const stopPolling = (): void => {
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+  };
+
+  const emit = (chunk: string): void => {
+    if (!outputController) return;
+    try { outputController.enqueue(chunk); } catch { /* 输出流已取消 */ }
+  };
+
+  const finish = (code: number): void => {
+    if (killed) return;
+    killed = true;
+    stopPolling();
+    try { outputController?.close(); } catch { /* 输出流已取消 */ }
+    resolveExit(code);
+  };
+
   const shim: SuccinixProcessShim = {
     exit,
     input: new WritableStream<string>({ write() { /* 无交互 stdin，输入丢弃 */ } }),
     output: new ReadableStream<string>({
       start(controller) {
-        if (initialOutput) controller.enqueue(initialOutput);
-        controller.close();
+        outputController = controller;
+        if (initialOutput) { emitted = initialOutput; emit(initialOutput); }
       },
+      cancel() { stopPolling(); },
     }),
     kill() {
       if (killed) return;
       killed = true;
-      void client.kill(pid).then(() => resolveExit(-1), () => resolveExit(-1));
+      stopPolling();
+      try { outputController?.close(); } catch { /* 输出流已取消 */ }
+      if (pid === -1) resolveExit(-1);
+      else void client.kill(pid).then(() => resolveExit(-1), () => resolveExit(-1));
     },
     resize() {},
     succinixPid: pid === -1 ? null : pid,
     succinixTimedOut: false,
   };
+
+  if (pid !== -1) {
+    const tick = async (): Promise<void> => {
+      if (killed) return;
+      try {
+        const entries = await client.ps();
+        const entry = entries.find((candidate) => candidate.pid === pid);
+        if (!entry || entry.status !== 'running') {
+          // host 进程表已消失：自然退出结算（exitCode 缺省 -1）。
+          finish(entry?.exitCode ?? -1);
+          return;
+        }
+        const candidate = entry.outputTail ?? '';
+        if (candidate && candidate !== lastTail) {
+          const delta = tailDelta(emitted, candidate);
+          if (delta) { emitted += delta; emit(delta); }
+          lastTail = candidate;
+        }
+      } catch {
+        // 单次 ps 查询失败：下一拍重试
+      }
+      if (!killed) pollTimer = setTimeout(() => { void tick(); }, SPAWN_OUTPUT_POLL_MS);
+    };
+    pollTimer = setTimeout(() => { void tick(); }, SPAWN_OUTPUT_POLL_MS);
+  }
   return shim;
 }
 
@@ -202,8 +235,9 @@ export class RuntimeServiceRegistry {
   }
 
   private async initializeInternal(): Promise<void> {
+    // 端口对齐（M2）：service-events 通道保留给 host 端口监听记录。NODE_OPTIONS hook 注入已随
+    // jsh 迁移移除，生产环境无进程写该文件，处于休眠；不删以免提前动 M2 的端口归属逻辑。
     await this.webcontainer.fs.mkdir(RUNTIME_DIRECTORY, { recursive: true });
-    await this.webcontainer.fs.writeFile(SERVICE_HOOK_PATH, SERVICE_HOOK_SOURCE);
     await this.webcontainer.fs.writeFile(SERVICE_EVENT_PATH, '');
     this.eventWatcher = this.webcontainer.fs.watch(RUNTIME_DIRECTORY, () => this.queueReadEvents());
     this.unsubscribeReady = this.webcontainer.on('server-ready', (port, url) => this.openPort(port, url));
@@ -228,9 +262,20 @@ export class RuntimeServiceRegistry {
     // run 语义：source=agent 且 args 为 jsh 式 `-c <cmd>` 组合命令 → Succinix run（统一路由，前台完成）。
     // spawn 语义：其余（后台 node 服务 / 用户终端）→ Succinix spawn（后台长驻进程）。
     const isRunSemantics = request.source === 'agent' && request.args?.length === 2 && request.args[0] === '-c';
-    const process = isRunSemantics
-      ? createRunShim(this.succinix, request.args![1]!, request.timeoutMs)
-      : createSpawnShim(this.succinix, await this.spawnBackground(request), request.source === 'terminal' ? 'Succinix terminal ready.\r\n' : '');
+    let process: SuccinixProcessShim;
+    if (isRunSemantics) {
+      const command = request.args![1]!;
+      // python/pip 首用前确保运行时资产已注入（幂等，失败不阻断命令——host 会给明确错误）。
+      if (mentionsPython(command)) {
+        await ensurePythonRuntime(this.webcontainer.fs).catch((error) => this.onError(error));
+      }
+      // M-1：run 前按容器根 cd 前缀（/workspace/<containerId>）。Lifo 侧 cd 会把会话 cwd 同步到
+      // 容器根，node 段经 Lifo 转发时用会话 cwd（真实路径 /home/workspace/<id>）——多容器隔离恢复。
+      const cwdPrefixed = request.cwd ? `cd ${request.cwd} && ${command}` : command;
+      process = createRunShim(this.succinix, cwdPrefixed, request.timeoutMs, request.env);
+    } else {
+      process = createSpawnShim(this.succinix, await this.spawnBackground(request), request.source === 'terminal' ? 'Succinix terminal ready\n' : '');
+    }
     const launch: ManagedLaunch = {
       id: launchId,
       source: request.source,
@@ -306,7 +351,13 @@ export class RuntimeServiceRegistry {
 
   private async spawnBackground(request: ManagedSpawnRequest): Promise<number> {
     const command = assembleCommand(request.command, request.args);
-    const result = await this.succinix.spawn(command, { ...(request.timeoutMs !== undefined ? { timeoutMs: request.timeoutMs } : {}) });
+    // M-1：spawn 无法用 cd 前缀（host 只接受 node 前缀命令），改在命令前 setCwd 到容器根；
+    // env 由 client 写入 /etc/succinix.env。
+    const result = await this.succinix.spawn(command, {
+      ...(request.timeoutMs !== undefined ? { timeoutMs: request.timeoutMs } : {}),
+      ...(request.cwd ? { cwd: request.cwd } : {}),
+      ...(request.env && Object.keys(request.env).length > 0 ? { env: request.env } : {}),
+    });
     return result.ok ? result.pid : -1;
   }
 

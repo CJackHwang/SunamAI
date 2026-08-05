@@ -20,12 +20,19 @@ import { WorkspaceSnapshotCoordinator } from './snapshotCoordinator';
 import { WorkspaceFileSystem } from './workspaceFileSystem';
 import { RuntimeServiceRegistry, type ManagedSpawnRequest } from './serviceRegistry';
 import { SuccinixClient } from './succinixClient';
+import { bootSuccinixHost, type SuccinixHostHandle } from './succinixHost';
 
 const MAX_PROCESS_OUTPUT = 20_000;
 // 后台进程表对账间隔：host ps() 数据源映射注册表，检测进程自然退出。
 const PS_MONITOR_MS = 1_000;
 // 用户终端无交互 stdin（文件 RPC 物理边界），spawn 一个常驻 node 进程作为"只读"终端底座。
+// 输出文案与 createSpawnShim 的初始 banner 保持一致，避免 ps() outputTail 首拍重复放流。
 const USER_SHELL_COMMAND = `node -e "console.log('Succinix terminal ready');setInterval(()=>{},1e9)"`;
+
+/** Succinix host 视角的容器根绝对路径（Lifo /workspace 挂载下，host 映射到 process.cwd()/<id>）。 */
+function containerSuccinixCwd(containerId: string): string {
+  return `/workspace/${getContainerRoot(containerId)}`;
+}
 
 function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -37,8 +44,10 @@ function sleep(milliseconds: number): Promise<void> {
  *
  * 执行底层已从 WebContainer jsh 切换到 Succinix TerminalExecutor 文件 RPC：
  * 前台命令走 `run`（统一路由），后台服务走 `spawn`；进程注册表经 host `ps()` 对账。
+ * 容器 boot 后需调用 `bootSuccinixHost()` 拉起 host 守护进程（注入 host.js + spawn + ping）。
  */
 export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
+  private readonly webcontainer: WebContainer;
   private readonly files: WorkspaceFileSystem;
   private readonly processes = new ProcessRegistry();
   private readonly snapshots: WorkspaceSnapshotCoordinator;
@@ -48,14 +57,21 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
   private readonly errorListeners = new Set<(error: string) => void>();
   private userTerminalBuffer = '';
   private psTimer: ReturnType<typeof setTimeout> | null = null;
+  private hostHandle: SuccinixHostHandle | null = null;
 
   constructor(webcontainer: WebContainer, repository: V3PersistenceRepository = v3Persistence) {
+    this.webcontainer = webcontainer;
     this.files = new WorkspaceFileSystem(webcontainer);
     this.repository = repository;
     this.snapshots = new WorkspaceSnapshotCoordinator(webcontainer, repository);
     // 与 serviceRegistry 共享同一客户端：/cmd.json 是单槽信箱，并发链会覆盖在途请求。
     this.succinix = new SuccinixClient(webcontainer.fs);
     this.services = new RuntimeServiceRegistry(webcontainer, (error) => this.publishError(toErrorMessage(error)), this.succinix);
+  }
+
+  /** 拉起 Succinix host 守护进程（H1-1）：注入 host.js → spawn node host.js → ping 探活 → lifo-core。 */
+  async bootSuccinixHost(): Promise<void> {
+    this.hostHandle = await bootSuccinixHost(this.webcontainer, this.succinix);
   }
 
   getUserTerminalBuffer(): string {
@@ -135,6 +151,8 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
     this.snapshots.dispose();
     this.processes.dispose();
     this.errorListeners.clear();
+    this.hostHandle?.hostProcess.kill();
+    this.hostHandle = null;
   }
 
   getPorts(): RuntimePortStatus[] { return this.services.getPorts(); }
@@ -148,7 +166,7 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
       containerId,
       command: USER_SHELL_COMMAND,
       args: [],
-      cwd: getContainerRoot(containerId),
+      cwd: containerSuccinixCwd(containerId),
       env: { HOME: WEB_CONTAINER_HOME, SUNAM_WORKSPACE: getContainerPublicPath(containerId) },
     });
   }
@@ -184,7 +202,7 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
       containerId: request.containerId,
       command: request.command,
       args: request.mode === 'background' ? [] : ['-c', request.command],
-      cwd: getContainerRoot(request.containerId),
+      cwd: containerSuccinixCwd(request.containerId),
       env: { HOME: WEB_CONTAINER_HOME, SUNAM_WORKSPACE: getContainerPublicPath(request.containerId) },
       processId: id,
       sessionId: request.sessionId,

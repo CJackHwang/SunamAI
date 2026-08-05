@@ -5,6 +5,7 @@ import { SuccinixClient } from '@/features/runtime/succinixClient';
 function createHostFixture(overrides?: Partial<Record<string, Record<string, unknown>>>) {
   const files = new Map<string, string>();
   const writtenIds: unknown[] = [];
+  const writtenCmds: string[] = [];
   const readPaths: string[] = [];
   const responses: Record<string, Record<string, unknown>> = {
     run: { ok: true, exitCode: 0, stdout: 'out', stderr: '', runtime: 'lifo' },
@@ -12,15 +13,18 @@ function createHostFixture(overrides?: Partial<Record<string, Record<string, unk
     ps: { ok: true, kind: 'ps', processes: [{ pid: 99, cmd: 'node -e x', status: 'running', startTime: 1 }] },
     kill: { ok: true, killed: true, message: 'killed' },
     cwd: { ok: true, kind: 'cwd', cwd: '/home/workspace' },
-    setCwd: { ok: true, kind: 'cwd', cwd: '/home/workspace/c-1' },
+    setCwd: { ok: true, kind: 'cwd', cwd: '/workspace/c-1' },
+    ping: { ok: true, kind: 'pong' },
     ...overrides,
   };
   const fs = {
+    mkdir: vi.fn(async () => undefined),
     rm: vi.fn(async (path: string) => { files.delete(path); }),
     writeFile: vi.fn(async (path: string, content: string) => {
       if (path === '/cmd.json') {
         const request = JSON.parse(content) as { id: unknown; cmd: string };
         writtenIds.push(request.id);
+        writtenCmds.push(request.cmd);
         const payload = responses[request.cmd] ?? { ok: false, error: 'unknown command' };
         files.set(`/result-${request.id}.json`, JSON.stringify({ id: request.id, ...payload }));
       } else {
@@ -34,7 +38,7 @@ function createHostFixture(overrides?: Partial<Record<string, Record<string, unk
       return value;
     }),
   };
-  return { fs, files, writtenIds, readPaths };
+  return { fs, files, writtenIds, writtenCmds, readPaths };
 }
 
 describe('SuccinixClient file RPC', () => {
@@ -99,5 +103,38 @@ describe('SuccinixClient file RPC', () => {
     expect(writtenIds).toEqual([1, 2]);
     // 每次写请求前先强制清理残留 /cmd.json。
     expect(fs.rm).toHaveBeenCalledWith('/cmd.json', { force: true });
+  });
+
+  it('marks run results timed out when the host settles with exitCode 130 (Lifo AbortError)', async () => {
+    const { fs } = createHostFixture({
+      run: { ok: false, exitCode: 130, stdout: '', stderr: '', runtime: 'lifo' },
+    });
+    const client = new SuccinixClient(fs as never);
+    const result = await client.run('sleep 100');
+    expect(result.timedOut).toBe(true);
+    expect(result.exitCode).toBe(130);
+  });
+
+  it('answers the host liveness probe through ping', async () => {
+    const { fs } = createHostFixture();
+    const client = new SuccinixClient(fs as never);
+    await expect(client.ping()).resolves.toBe(true);
+  });
+
+  it('writes /etc/succinix.env before the run RPC when env is passed', async () => {
+    const { fs, files, writtenCmds } = createHostFixture();
+    const client = new SuccinixClient(fs as never);
+    await client.run('node -e x', { env: { HOME: '/home/workspace', SUNAM_WORKSPACE: '/home/workspace/c-1' } });
+    expect(files.get('/etc/succinix.env')).toBe('HOME=/home/workspace\nSUNAM_WORKSPACE=/home/workspace/c-1\n');
+    // env 写入在 run 请求之前（同一 FIFO 链），host spawn 子进程时能读到最新值。
+    expect(writtenCmds).toEqual(['run']);
+    expect(fs.mkdir).toHaveBeenCalledWith('/etc', { recursive: true });
+  });
+
+  it('sets the session cwd before a spawn when cwd is passed', async () => {
+    const { fs, writtenCmds } = createHostFixture();
+    const client = new SuccinixClient(fs as never);
+    await expect(client.spawn('node server.js', { cwd: '/workspace/c-1' })).resolves.toEqual({ ok: true, pid: 99 });
+    expect(writtenCmds).toEqual(['setCwd', 'spawn']);
   });
 });

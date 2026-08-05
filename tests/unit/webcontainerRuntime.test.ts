@@ -248,7 +248,7 @@ describe('WebContainerAgentRuntime process ownership', () => {
     expect(events).toEqual(expect.arrayContaining(['started', 'output', 'exited']));
     await runtime.flushSnapshots();
     expect(webcontainer.export).toHaveBeenCalledWith('c-1', expect.objectContaining({ format: 'json', excludes: expect.arrayContaining(['node_modules/**', 'dist/**']) }));
-    expect(mockRun).toHaveBeenCalledWith('echo hi', { timeoutMs: 1_000 });
+    expect(mockRun).toHaveBeenCalledWith('cd /workspace/c-1 && echo hi', { timeoutMs: 1_000, env: { HOME: '/home/workspace', SUNAM_WORKSPACE: '/home/workspace/c-1' } });
     expect(repository.saveSnapshot).toHaveBeenCalledWith('c-1', expect.any(Object), expect.any(Number));
     runtime.dispose();
     expect(watchers[0]?.close).toHaveBeenCalledOnce();

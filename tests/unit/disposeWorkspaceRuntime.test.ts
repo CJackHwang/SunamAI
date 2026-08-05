@@ -13,6 +13,7 @@ vi.mock('@/shared/lib/webcontainer', () => ({ getWebContainer, resetWebContainer
 vi.mock('@/entities/persistence/v3Repository', () => ({ v3Persistence: {} }));
 vi.mock('@/features/runtime/WebContainerAgentRuntime', () => ({
   WebContainerAgentRuntime: class {
+    bootSuccinixHost = vi.fn(async () => undefined);
     flushSnapshots = flushSnapshots;
     dispose = dispose;
   },

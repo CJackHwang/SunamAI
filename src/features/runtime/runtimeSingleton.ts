@@ -14,8 +14,12 @@ let runtimePromise: Promise<WorkspaceRuntimeInstance> | null = null;
 
 export function getWorkspaceRuntime(): Promise<WorkspaceRuntimeInstance> {
   if (runtimeInstance) return Promise.resolve(runtimeInstance);
-  runtimePromise ??= getWebContainer().then((webcontainer) => {
-    const value = { webcontainer, runtime: new WebContainerAgentRuntime(webcontainer) };
+  runtimePromise ??= getWebContainer().then(async (webcontainer) => {
+    const runtime = new WebContainerAgentRuntime(webcontainer);
+    // H1-1：拉起 Succinix host 守护进程（注入 host.js + spawn node 常驻 + ping 探活），
+    // 就绪后才对外暴露 runtime，避免任何文件 RPC 落到无人消费的 /cmd.json。
+    await runtime.bootSuccinixHost();
+    const value = { webcontainer, runtime };
     runtimeInstance = value;
     return value;
   }).catch((error) => {

@@ -35,6 +35,9 @@ blob-report/
 playwright/.auth/
 **/storageState.json
 
+# Succinix host runtime assets (synced from WebUnix by scripts/sync-succinix-assets.mjs)
+public/succinix/
+
 # Temporary files
 .tmp/
 tmp/

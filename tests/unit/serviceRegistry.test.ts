@@ -164,11 +164,12 @@ describe('RuntimeServiceRegistry', () => {
     registry.dispose();
   });
 
-  it('writes the listener preload outside container project roots', async () => {
+  it('keeps runtime scaffolding outside container roots without the dead NODE_OPTIONS hook', async () => {
     const fixture = new FakeWebContainer();
     const registry = new RuntimeServiceRegistry(fixture as unknown as WebContainer, vi.fn());
     await registry.initialize();
-    expect(fixture.files.get('.sunam/runtime/service-hook.cjs')).toContain('net.Server.prototype.listen');
+    // NODE_OPTIONS hook 注入已随 jsh 迁移移除（M3）：不再写 service-hook.cjs。
+    expect(fixture.files.has('.sunam/runtime/service-hook.cjs')).toBe(false);
     expect([...fixture.files.keys()].every((path) => !path.includes('.sunam/workspaces/'))).toBe(true);
     registry.dispose();
   });

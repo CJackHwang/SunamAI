@@ -1,6 +1,6 @@
 import { gzipSync } from 'node:zlib';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { sep, join } from 'node:path';
 
 const distDir = join(process.cwd(), 'dist');
 const assetsDir = join(distDir, 'assets');
@@ -22,7 +22,9 @@ function listFiles(directory) {
   });
 }
 
-const files = listFiles(distDir);
+// Succinix host 运行时资产（dist/succinix/**）是注入 WebContainer 的第三方基础设施，
+// 不进应用加载关键路径，从 dist 体积预算中排除（见 scripts/sync-succinix-assets.mjs）。
+const files = listFiles(distDir).filter((file) => !file.split(sep).includes('succinix'));
 const jsFiles = files.filter((file) => file.endsWith('.js'));
 const totalJsGzipKb = jsFiles.reduce((total, file) => total + gzipSync(readFileSync(file)).byteLength, 0) / 1024;
 const distMiB = files.reduce((total, file) => total + statSync(file).size, 0) / (1024 * 1024);
@@ -31,7 +33,7 @@ const distLimitMiB = Number(process.env.SUNAM_DIST_LIMIT_MIB ?? 1.8);
 
 console.log(`Initial bundle: ${entries[0]} (${gzipKb.toFixed(2)} KiB gzip; limit ${limitKb} KiB)`);
 console.log(`Total JavaScript: ${totalJsGzipKb.toFixed(2)} KiB gzip; limit ${totalJsLimitKb} KiB`);
-console.log(`Production dist: ${distMiB.toFixed(2)} MiB; limit ${distLimitMiB} MiB`);
+console.log(`Production dist: ${distMiB.toFixed(2)} MiB; limit ${distLimitMiB} MiB (excludes deferred /succinix runtime assets)`);
 
 if (gzipKb > limitKb) {
   throw new Error(`Initial bundle exceeds the ${limitKb} KiB gzip performance budget.`);

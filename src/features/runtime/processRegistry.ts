@@ -106,7 +106,8 @@ export class ProcessRegistry {
   /**
    * ps() 数据源对账：把注册表中带 host pid 的进程与 Succinix 进程表对照，
    * host 表里已消失的进程按退出处理（用表中记录的 exitCode，缺省 -1）。
-   * 输出尾部同步不在 M1 范围（进程 UI 对账是 M5）。
+   * 输出尾部同步由 spawn shim 的 ps() 轮询承担（serviceRegistry createSpawnShim），
+   * 经 shim.output 流进入本注册表的 appendOutput，不再在此处重复对账。
    */
   reconcile(entries: SuccinixProcessEntry[]): void {
     const runningPids = new Set(entries.filter((entry) => entry.status === 'running').map((entry) => entry.pid));
