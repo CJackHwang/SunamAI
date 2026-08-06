@@ -14,10 +14,15 @@ import { isActiveAgentPhase, normalizeSubagentRole, type AgentEvent, type AgentR
 import { toErrorMessage } from '@/shared/lib/errors';
 import { AgentFamilyCoordinator } from './subagentCoordinator';
 import { registerWorkspaceDeletionPreparation } from '@/entities/workspace/deletionCoordinator';
+import { createId } from '@/shared/lib/ids';
+import { createChaosContract } from './prompt';
+import { initialTask } from './task';
+import { isPiEngineEnabled } from './pi/featureFlag';
 
 type UpdateSessionStatus = (id: string, status: SessionStatus) => void;
 const MESSAGE_WINDOW_SIZE = 250;
 interface ActiveExecution { sessionId: string; containerId: string; controller: AbortController; engine: AgentEngine; coordinator: AgentFamilyCoordinator; completion: Promise<void>; }
+interface PiExecution { sessionId: string; containerId: string; controller: AbortController; completion: Promise<void>; }
 interface StreamingState { streamId: string; content: string; reasoning: string; toolCalls: NonNullable<Message['tool_calls']>; }
 export type AgentConversationView = { kind: 'root' } | { kind: 'subagent'; sessionId: string; runId: string };
 
@@ -74,6 +79,8 @@ export function useAgentV2(
 ) {
   const storeRef = useRef(new AgentEventStore());
   const executionsRef = useRef(new Map<string, ActiveExecution>());
+  const piExecutionsRef = useRef(new Map<string, PiExecution>());
+  const piRunIdsRef = useRef(new Set<string>());
   const recoveredSessionsRef = useRef(new Set<string>());
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
@@ -100,14 +107,18 @@ export function useAgentV2(
 
   useEffect(() => {
     const executions = executionsRef.current;
+    const piExecutions = piExecutionsRef.current;
     const unregister = registerWorkspaceDeletionPreparation(async (target) => {
       const matches = [...executions.values()].filter((execution) => target.kind === 'session' ? execution.sessionId === target.id : execution.containerId === target.id);
       matches.forEach((execution) => execution.controller.abort(new DOMException(`${target.kind} deleted.`, 'AbortError')));
-      await Promise.all(matches.map((execution) => execution.completion));
+      const piMatches = [...piExecutions.values()].filter((execution) => target.kind === 'session' ? execution.sessionId === target.id : execution.containerId === target.id);
+      piMatches.forEach((execution) => execution.controller.abort(new DOMException(`${target.kind} deleted.`, 'AbortError')));
+      await Promise.all([...matches, ...piMatches].map((execution) => execution.completion));
     });
     return () => {
       unregister();
       executions.forEach((execution) => execution.controller.abort(new DOMException('Agent workspace closed.', 'AbortError')));
+      piExecutions.forEach((execution) => execution.controller.abort(new DOMException('Agent workspace closed.', 'AbortError')));
     };
   }, []);
 
@@ -123,7 +134,8 @@ export function useAgentV2(
     void (async () => {
       const store = storeRef.current;
       const loaded = await store.loadSessionEvents(activeSessionId);
-      const hasActiveExecution = [...executionsRef.current.values()].some((execution) => execution.sessionId === activeSessionId);
+      const hasActiveExecution = [...executionsRef.current.values()].some((execution) => execution.sessionId === activeSessionId)
+        || [...piExecutionsRef.current.values()].some((execution) => execution.sessionId === activeSessionId);
       const restoredRuns = !recoveredSessionsRef.current.has(activeSessionId) && !hasActiveExecution
         ? await store.markInterruptedRuns(activeSessionId)
         : await store.loadSessionRuns(activeSessionId);
@@ -205,11 +217,73 @@ export function useAgentV2(
     }
   }, [updateSessionStatus]);
 
+  const launchPiTask = useCallback(async (userPrompt: string, sessionId: string, containerId: string) => {
+    setPersistenceError(null);
+    const runId = createId('r');
+    const now = Date.now();
+    const task = initialTask(userPrompt.trim());
+    const run: AgentRun = {
+      id: runId,
+      sessionId,
+      containerId,
+      model: apiModel,
+      persona: sunamModel,
+      phase: 'preparing',
+      createdAt: now,
+      updatedAt: now,
+      task,
+      chaos: createChaosContract(sunamModel),
+      budget: { maxModelTurns: 1, maxToolCalls: 0, maxDurationMs: 5 * 60_000 },
+      modelTurns: 0,
+      toolCalls: 0,
+      summary: '',
+      rootRunId: runId,
+      agentRole: 'root',
+      depth: 0,
+      toolPolicy: { role: 'root', allowedTools: [] },
+    };
+    piRunIdsRef.current.add(runId);
+    updateRun(run);
+    const controller = new AbortController();
+    let session: { prompt(text: string): Promise<void> };
+    try {
+      const { PiSession } = await import('./pi/piSession');
+      session = new PiSession({
+        apiKey,
+        baseUrl,
+        apiModel,
+        sessionId,
+        runId,
+        run,
+        signal: controller.signal,
+        onEvent: appendEvent,
+        onRunChange: updateRun,
+      });
+    } catch (error) {
+      piRunIdsRef.current.delete(runId);
+      updateRun({ ...run, phase: 'failed', updatedAt: Date.now(), error: toErrorMessage(error) });
+      setPersistenceError(toErrorMessage(error));
+      return;
+    }
+    const completion = session.prompt(userPrompt.trim())
+      .catch((error) => setPersistenceError(toErrorMessage(error)))
+      .finally(() => {
+        piExecutionsRef.current.delete(runId);
+      });
+    piExecutionsRef.current.set(runId, { sessionId, containerId, controller, completion });
+  }, [apiKey, apiModel, appendEvent, baseUrl, sunamModel, updateRun]);
+
   const launchTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, inheritedMessages?: Message[], attachments?: ChatAttachment[], resume?: AgentResumeState) => {
     const sessionId = overrideSessionId ?? activeSessionId;
     const containerAvailable = capabilities.containerAvailable;
     const containerId = overrideContainerId ?? activeContainerId ?? (containerAvailable ? undefined : CHAT_ONLY_CONTAINER_ID);
     if (!sessionId || !containerId || !runtime || !userPrompt.trim()) return;
+    // R4：pi 通道与现有引擎并行存在。开关默认关；开且无 resume/附件时走 pi，
+    // pi 尚不支持断点恢复与附件，这些情况回退现有引擎。
+    if (isPiEngineEnabled() && !resume && (!attachments || attachments.length === 0)) {
+      void launchPiTask(userPrompt, sessionId, containerId);
+      return;
+    }
     setPersistenceError(null);
     [...executionsRef.current.values()].filter((execution) => execution.sessionId === sessionId).forEach((execution) => execution.controller.abort(new DOMException('Superseded by a newer run.', 'AbortError')));
     const controller = new AbortController();
@@ -261,7 +335,7 @@ export function useAgentV2(
         });
       });
     executionsRef.current.set(runId, { sessionId, containerId, controller, engine, coordinator, completion });
-  }, [activeContainerId, activeSessionId, apiKey, apiModel, appendEvent, baseUrl, capabilities.containerAvailable, enabledTools, events, runs, runtime, sunamModel, updateRun]);
+  }, [activeContainerId, activeSessionId, apiKey, apiModel, appendEvent, baseUrl, capabilities.containerAvailable, enabledTools, events, launchPiTask, runs, runtime, sunamModel, updateRun]);
 
   const startTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, attachments?: ChatAttachment[]) => {
     launchTask(userPrompt, overrideSessionId, overrideContainerId, undefined, attachments);
@@ -270,6 +344,8 @@ export function useAgentV2(
   const resumeTask = useCallback((run?: AgentRun | null) => {
     const target = run ?? runs.find((candidate) => candidate.phase === 'interrupted') ?? runs[0] ?? null;
     if (!target || !runtime) return;
+    // pi 运行无 checkpoint，恢复仍走现有引擎；pi run 直接跳过避免混用引擎。
+    if (piRunIdsRef.current.has(target.id)) return;
     void storeRef.current.latestCheckpoint(target.id).then(async (checkpoint) => {
       await runtime.ensureContainer(target.containerId);
       const currentRevision = await runtime.getWorkspaceRevision(target.containerId);
@@ -292,7 +368,10 @@ export function useAgentV2(
   }, [events, launchTask, runs, runtime]);
 
   const stopTask = useCallback(() => {
-    if (activeSessionId) [...executionsRef.current.values()].filter((execution) => execution.sessionId === activeSessionId).forEach((execution) => execution.controller.abort());
+    if (activeSessionId) {
+      [...executionsRef.current.values()].filter((execution) => execution.sessionId === activeSessionId).forEach((execution) => execution.controller.abort());
+      [...piExecutionsRef.current.values()].filter((execution) => execution.sessionId === activeSessionId).forEach((execution) => execution.controller.abort());
+    }
   }, [activeSessionId]);
 
   const stopSubagent = useCallback(async (runId: string): Promise<boolean> => {
@@ -304,6 +383,8 @@ export function useAgentV2(
 
   const guideActiveTask = useCallback(async (message: string): Promise<boolean> => {
     if (!activeSessionId || !message.trim()) return false;
+    // P1 pi 通道为单 Agent 纯对话，暂无中途引导（steer）；明确返回 false 交由 UI 提示。
+    if ([...piExecutionsRef.current.values()].some((execution) => execution.sessionId === activeSessionId)) return false;
     const execution = [...executionsRef.current.values()].find((candidate) => candidate.sessionId === activeSessionId && isRootRun(candidate.engine.getRun()));
     if (!execution) return false;
     try {
