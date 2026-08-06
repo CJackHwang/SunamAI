@@ -1,10 +1,11 @@
 import { Agent } from '@earendil-works/pi-agent-core';
-import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage } from '@earendil-works/pi-agent-core';
+import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage, Session } from '@earendil-works/pi-agent-core';
 import { createModels, InMemoryCredentialStore } from '@earendil-works/pi-ai';
 import type { Api, Message as PiMessage, Model, Models } from '@earendil-works/pi-ai';
 import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import type { Message } from '@/entities/message/types';
 import type { AgentEvent, AgentPhase, AgentRun } from '../types';
+import { IndexedDbSessionRepo } from './indexedDbSessionStorage';
 
 /**
  * P1 pi 通道：单 Agent 纯对话会话。
@@ -27,6 +28,8 @@ export interface PiAgentLike {
   prompt(input: string | PiAgentMessage | PiAgentMessage[]): Promise<void>;
   abort(): void;
   waitForIdle(): Promise<void>;
+  /** P2 刷新恢复：把持久化会话历史注入 agent 转录，使 Agent 可基于历史继续。 */
+  seedHistory?(messages: PiAgentMessage[]): void;
 }
 
 export type PiAgentFactory = (input: { models: Models; model: Model<Api>; systemPrompt: string }) => PiAgentLike;
@@ -44,6 +47,8 @@ export interface PiSessionOptions {
   onRunChange: (run: AgentRun) => void;
   /** 测试注入点：替换真实 pi Agent 的构造，避免单测走网络。 */
   createAgent?: PiAgentFactory;
+  /** P2 测试注入点：替换会话仓库（默认 IndexedDB 后端）。 */
+  createSessionRepo?: () => IndexedDbSessionRepo;
 }
 
 /** 用于合成中止结算消息的空 usage（pi assistant 消息必填字段）。 */
@@ -211,13 +216,24 @@ export class PiEventBridge {
 }
 
 function defaultCreateAgent({ models, model, systemPrompt }: { models: Models; model: Model<Api>; systemPrompt: string }): PiAgentLike {
-  return new Agent({
+  const agent = new Agent({
     streamFn: (m, context, options) => models.streamSimple(m, context, options),
     // pi 的 AgentMessage 与 LLM Message 同构（CustomAgentMessages 为空），恒等映射即可。
     convertToLlm: (messages) => messages as PiMessage[],
     initialState: { model, systemPrompt, thinkingLevel: 'off' },
     toolExecution: 'sequential',
   });
+  // 包装一层 PiAgentLike：seedHistory 把恢复的会话历史注入 Agent 转录。
+  return {
+    subscribe: (listener) => agent.subscribe(listener),
+    // Agent.prompt 是重载（string | AgentMessage | AgentMessage[]），收敛为联合签名。
+    prompt: (input) => (agent.prompt as (value: string | PiAgentMessage | PiAgentMessage[]) => Promise<void>)(input),
+    abort: () => agent.abort(),
+    waitForIdle: () => agent.waitForIdle(),
+    seedHistory: (messages) => {
+      agent.state.messages = messages;
+    },
+  };
 }
 
 export class PiSession {
@@ -227,14 +243,16 @@ export class PiSession {
   private readonly ready: Promise<unknown>;
   private readonly abortSignal: AbortSignal | undefined;
   private readonly abortListener: () => void;
+  private readonly sessionPromise: Promise<Session>;
+  private session: Session | null = null;
+  private pendingPersist: Promise<void> = Promise.resolve();
   private disposed = false;
 
   constructor(options: PiSessionOptions) {
     const credentials = new InMemoryCredentialStore();
     const models = createModels({ credentials });
     models.setProvider(deepseekProvider());
-    // 复用现有凭据：把应用已配置的 apiKey 注入 pi-ai 凭据存储（deepseek provider 专用）。
-    this.ready = credentials.modify(PI_PROVIDER_ID, async () => ({ type: 'api_key', key: options.apiKey }));
+    const credentialsReady = credentials.modify(PI_PROVIDER_ID, async () => ({ type: 'api_key', key: options.apiKey }));
     const baseModel = models.getModel(PI_PROVIDER_ID, options.apiModel)
       ?? models.getModels(PI_PROVIDER_ID)[0];
     if (!baseModel) throw new Error(`Pi provider ${PI_PROVIDER_ID} exposes no models.`);
@@ -243,6 +261,9 @@ export class PiSession {
     const systemPrompt = options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     const createAgent = options.createAgent ?? defaultCreateAgent;
     this.agent = createAgent({ models, model, systemPrompt });
+    const createSessionRepo = options.createSessionRepo ?? (() => new IndexedDbSessionRepo());
+    // 会话 ID 与现有 UI 会话 ID 对齐：按 sessionId 打开或创建持久化 pi 会话。
+    this.sessionPromise = createSessionRepo().openOrCreate(options.sessionId);
     this.bridge = new PiEventBridge({
       runId: options.runId,
       sessionId: options.sessionId,
@@ -250,13 +271,28 @@ export class PiSession {
       onEvent: options.onEvent,
       onRunChange: options.onRunChange,
     });
-    this.unsubscribe = this.agent.subscribe((event, _signal) => this.bridge.handlePiEvent(event));
+    this.unsubscribe = this.agent.subscribe((event, _signal) => {
+      // P1 事件桥接逻辑不动；P2 仅在桥接之后追加会话持久化（尽力而为）。
+      this.bridge.handlePiEvent(event);
+      this.trackPersist(this.persistEvent(event));
+    });
     this.abortSignal = options.signal;
     this.abortListener = () => this.agent.abort();
     if (options.signal) {
       if (options.signal.aborted) this.agent.abort();
       else options.signal.addEventListener('abort', this.abortListener, { once: true });
     }
+    // P2 刷新恢复：凭据与会话历史就绪后，把历史 seed 进 agent 转录（agent 是内存态，刷新后重建）。
+    this.ready = this.initialize(credentialsReady);
+  }
+
+  private async initialize(credentialsReady: Promise<unknown>): Promise<void> {
+    await credentialsReady;
+    const session = await this.sessionPromise;
+    if (this.disposed) return;
+    this.session = session;
+    const history = await this.loadHistory(session);
+    if (history.length > 0) this.agent.seedHistory?.(history);
   }
 
   /** 发送一条用户消息并等待该次运行结束（含 agent_end 事件监听器 settle）。 */
@@ -271,7 +307,37 @@ export class PiSession {
       this.bridge.handlePiEvent({ type: 'agent_end', messages: [] });
       return;
     }
+    await this.appendUserMessage(text);
     await this.agent.prompt(text);
+    // 冲刷本次运行的会话写入，保证 prompt 返回时历史已完整持久化。
+    await this.pendingPersist;
+  }
+
+  private async loadHistory(session: Session): Promise<PiAgentMessage[]> {
+    const entries = await session.findEntries({ type: 'message', order: 'oldestFirst' });
+    const messages: PiAgentMessage[] = [];
+    for (const entry of entries) {
+      if (entry.type === 'message') messages.push(entry.message);
+    }
+    return messages;
+  }
+
+  private async appendUserMessage(text: string): Promise<void> {
+    await this.session?.appendMessage({ role: 'user', content: text, timestamp: Date.now() });
+  }
+
+  private async persistEvent(event: PiAgentEvent): Promise<void> {
+    if (event.type !== 'message_end' || event.message.role !== 'assistant') return;
+    if (!this.session) return;
+    try {
+      await this.session.appendMessage(event.message);
+    } catch {
+      // 会话持久化失败不阻断事件桥接（尽力而为）；边界见 TASK-P2 R4。
+    }
+  }
+
+  private trackPersist(write: Promise<void>): void {
+    this.pendingPersist = this.pendingPersist.then(() => write).then(() => undefined, () => undefined);
   }
 
   private abortedMessage(): Extract<PiAgentMessage, { role: 'assistant' }> {
