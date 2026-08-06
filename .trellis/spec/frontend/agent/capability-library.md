@@ -21,7 +21,7 @@ defineTool({
 - Missing `capability` is a **compile error** — a tool cannot reach the Agent without a capability declaration.
 - `registerModule` re-validates that each tool's `capability.module` matches the module id (`injection invariant` holds for extensions too: a plugin cannot expose a tool without a declaration).
 - Categories: `agent-runtime` (control-flow + subagent, `warnOnDisable: true`) / `virtual-container` / `resources` / `notes` (reserved extension) / `other` (genuine catch-all, must stay near-empty).
-- `dependencies` auto-enables required tools (e.g. `process_*` depend on `shell_run`).
+- `dependencies` auto-enables required tools (e.g. `manage_process` depends on `run_command`).
 
 ### Registry = module host
 
@@ -45,7 +45,7 @@ The engine receives this set (`enabledTools`) and intersects it with per-role ch
 - `CapabilityAvailability = 'enabled' | 'disabled' | 'restricted'`; session availability is `enabled | restricted` (restricted = boot failed, user may retry via the switch).
 - When the container capability is off/restricted the agent still runs via a `CapabilityAwareRuntime` (chat-only): container methods no-op/empty, **resource methods always work through IndexedDB** (container-independent by design — attachments stay analyzable).
 - Chat-only runs bind to the sentinel `CHAT_ONLY_CONTAINER_ID` (`__chat__`), never registered in the workspace store, never snapshot-materialized — persistence schema untouched.
-- System prompt is capability-aware: chat-only sessions get a "no file system, no terminal" charter and never reference `shell_run`/workspace tools.
+- System prompt is capability-aware: chat-only sessions get a "no file system, no terminal" charter and never reference `run_command`/workspace tools.
 - Completion gate: when `containerAvailable === false` **or** `shellAvailable === false`, workspace-revision verification is skipped (no verification tool → must not deadlock).
 - Close = real shutdown: `disposeWorkspaceRuntime()` flushes snapshots, tears down the WebContainer, and clears singletons; a re-open does a fresh boot and restores from the IndexedDB snapshot.
 
@@ -55,7 +55,7 @@ The engine receives this set (`enabledTools`) and intersects it with per-role ch
 - Do not let the capability UI or allow-set drift from the registry (single source of truth).
 - Do not make a core module removable.
 - Do not treat "resource tools need a container" — read tools are IndexedDB-backed; only `materialize_resource` is container-bound.
-- Do not let `VERIFICATION_RECOVERY_GUIDANCE` reference `shell_run` when it is not exposed.
+- Do not let `VERIFICATION_RECOVERY_GUIDANCE` reference `run_command` when it is not exposed.
 
 ## Required Validation
 

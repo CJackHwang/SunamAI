@@ -25,7 +25,7 @@ function evaluateCompletionGate(input: {
 }): Promise<CompletionGateResult>;
 ```
 
-- `apply_patch`, `materialize_resource`, and `shell_run` use the container mutation lease.
+- `materialize_resource` and `run_command` use the container mutation lease.
 - `TaskContract.workspaceRevision` is progress metadata. `AgentWorkspaceRuntime.getWorkspaceRevision()` is authoritative for checkpoints, recovery drift, child notifications, and completion.
 - Shell exit is an explicit revision boundary because filesystem watchers may lag.
 - Verification evidence binds to the post-command revision. Any later parent/child mutation or failed child verification invalidates the pass.
@@ -33,7 +33,7 @@ function evaluateCompletionGate(input: {
 - A non-trivial root task requires a recorded plan before completion. A child-local plan is optional: an empty child plan does not block `complete_task`, while every item in a non-empty child plan must be `completed` before the child can finish.
 - `complete_task` is the preferred structured path. For the root Agent, every non-empty plain response is also a completion attempt and passes the same plan/revision/verification gates. A depth-one child plain response is non-terminal; only its successful `complete_task` call may complete delegated work.
 - Immediately before completion, flush/read authoritative revision. Rejected plain drafts never enter durable/UI messages; clear transient output, inject one actionable recovery instruction, and continue within existing budgets.
-- Recovery names foreground `shell_run`, a truthful relevant check, exit code 0, final-write ordering, and retry action.
+- Recovery names foreground `run_command`, a truthful relevant check, exit code 0, final-write ordering, and retry action.
 - Runtime never parses/whitelists command names, scripts, arguments, ports, redirects, or shell composition. The prompt owns relevance, unmasked failure, and re-verification instructions.
 - Current-revision verification gates root completion only. Depth-one children may complete with unverified changes while reporting truthful optional evidence.
 

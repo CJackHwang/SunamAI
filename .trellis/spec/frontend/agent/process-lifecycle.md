@@ -32,7 +32,7 @@ interface RuntimePortStatus {
 ```
 
 - Each registered process retains exact `(sessionId, runId, containerId)` ownership. Runtime observe/input/stop require the original tuple.
-- Root `process_list` queries `{ sessionId, containerId }`, allowing later root Runs to discover earlier-Run processes in the same conversation/container. Other scopes never enter results.
+- Root `manage_process` (action=list) queries `{ sessionId, containerId }`, allowing later root Runs to discover earlier-Run processes in the same conversation/container. Other scopes never enter results.
 - Tools resolve registered Agent process ID, then reuse its stored full ownership. Delegated roles lack cross-Run management. Run cancellation stops only exact Run ownership.
 - Explicit stop kills/removes the entry, advances and flushes one exit revision, and prevents a later natural-exit callback from advancing twice. `process_stop` distinguishes pre-existing/additional drift from its expected single revision.
 - Agent and user shell launches share one service registry with launch ID, source, container, command, handle, state, and time; Agent entries also keep session/run/process IDs.
@@ -48,7 +48,7 @@ interface RuntimePortStatus {
 | Ownership tuple mismatch | Observe `null`; input/stop `false`; no side effect. |
 | Earlier-Run process in same session/container | List with original Run and registered process IDs. |
 | Other session/container | Omit; scoped not-found; no side effect. |
-| Process exits between list and action | Return refreshable message naming `process_list`. |
+| Process exits between list and action | Return refreshable message naming `manage_process` (action=list). |
 | Explicit stop succeeds | Remove, advance/flush once, synchronize process-only task. |
 | Port opens before listener record | Show `identifying`; reconcile independent of event order. |
 | No valid current lifecycle | Mark `orphaned`; offer global restart, not normal stop. |
