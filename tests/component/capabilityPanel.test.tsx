@@ -59,7 +59,7 @@ describe('CapabilityPanel', () => {
   it('labels the panel as the model-tool and module manager and describes each module', () => {
     renderPanel(fakeRuntime());
     expect(screen.getByText(/管理 AI 可调用的模型工具与功能模块/)).toBeInTheDocument();
-    expect(screen.getByText('WebContainer：文件、终端、进程与服务')).toBeInTheDocument();
+    expect(screen.getByText('Succinix：文件、终端、进程与服务（容器环境）')).toBeInTheDocument();
   });
 
   it('shows the tool intro under each tool name', () => {

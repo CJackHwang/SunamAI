@@ -94,12 +94,12 @@ describe('chat-only system prompt', () => {
     expect(prompt).not.toContain('run_command');
     expect(prompt).not.toContain('manage_process');
     expect(prompt).not.toContain('workspace_tree');
-    expect(prompt).not.toContain('WebContainer workspace');
+    expect(prompt).not.toContain('Succinix container workspace');
   });
 
   it('keeps the container charter when the container is available', () => {
     const prompt = buildAgentSystemPrompt({ containerId: 'c-1', task, chaos, summary: '', agentRole: 'root', containerAvailable: true });
     expect(prompt).toContain('run_command');
-    expect(prompt).toContain('WebContainer workspace');
+    expect(prompt).toContain('Succinix container workspace');
   });
 });

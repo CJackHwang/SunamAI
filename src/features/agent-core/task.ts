@@ -8,7 +8,7 @@ export function initialTask(objective: string): TaskContract {
   return {
     objective,
     acceptanceCriteria: ['Address the user request.', 'Do not fabricate results or verification.', ...(isNonTrivial(objective) ? ['Verify relevant workspace changes before completing.'] : [])],
-    constraints: ['Work only inside the active WebContainer.', 'Keep extra chaos reversible and non-destructive.'],
+    constraints: ['Work only inside the active Succinix container.', 'Keep extra chaos reversible and non-destructive.'],
     requiresPlan: isNonTrivial(objective),
     plan: [],
     evidence: [],
