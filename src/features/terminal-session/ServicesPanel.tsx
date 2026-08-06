@@ -7,14 +7,17 @@ import { toErrorMessage } from '@/shared/lib/errors';
 import { EmptyState, ErrorState } from '@/shared/ui/AsyncState';
 import './ServicesPanel.css';
 
+/** 进程行展示视图：ProcessStatus 之上附加 protected（系统进程禁 stop）与 pid/processId（kill 路由用）。 */
+export type ServiceProcessView = ProcessStatus & { protected?: boolean; pid?: number; processId?: string };
+
 interface ServicePanelProps {
   ports: RuntimePortStatus[];
-  processes: ProcessStatus[];
+  processes: ServiceProcessView[];
   isRestarting: boolean;
   onPreview: (port: number, url: string) => void;
   onStopPort: (port: number) => Promise<boolean>;
   onForceRestart: () => Promise<void>;
-  onKillProcess: (process: ProcessStatus) => void;
+  onKillProcess: (process: ServiceProcessView) => void;
 }
 
 export function ServicesPanel({ ports, processes, isRestarting, onPreview, onStopPort, onForceRestart, onKillProcess }: ServicePanelProps) {
@@ -101,10 +104,10 @@ export function ServicesPanel({ ports, processes, isRestarting, onPreview, onSto
         ? <EmptyState className="panel-empty-state services-process-empty">{t('services.noProcesses')}</EmptyState>
         : processes.map((process) => <div className="service-row list-row service-process-row" key={process.id}>
           <div className="service-process-details">
-            <span className="service-process-id">{process.id}</span>
+            <span className="service-process-id">{process.protected ? `[${t('services.systemProcess')}] ${process.id}` : process.id}</span>
             <span className="service-process-command" title={`$ ${process.command}`}>$ {process.command}</span>
           </div>
-          <button className="icon-button icon-button-danger" onClick={() => onKillProcess(process)} title={t('services.kill')} aria-label={`${t('services.kill')} ${process.id}`}><StopCircle size={18} /></button>
+          <button className="icon-button icon-button-danger" onClick={() => onKillProcess(process)} title={process.protected ? t('services.killBlocked') : t('services.kill')} aria-label={`${process.protected ? t('services.killBlocked') : t('services.kill')} ${process.id}`} disabled={process.protected}><StopCircle size={18} /></button>
         </div>)}</div>
     </section>
   </div>;

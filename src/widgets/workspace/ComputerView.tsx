@@ -6,6 +6,7 @@ import { useI18n } from '@/shared/i18n';
 import { toErrorMessage } from '@/shared/lib/errors';
 import { appendAgentTerminalBuffer, flushAgentTerminalBuffers, subscribeAgentTerminalPersistence } from '@/features/terminal-session/agentTerminalBuffer';
 import { WebContainerAgentRuntime } from '@/features/runtime/WebContainerAgentRuntime';
+import type { SuccinixProcessView } from '@/features/runtime/succinixProcesses';
 import { CollapsedTerminalNav, TerminalTabs } from '@/features/terminal-session/TerminalTabs';
 import { ContainerCapsule } from '@/widgets/workspace/ContainerCapsule';
 import { ServicesPanel } from '@/features/terminal-session/ServicesPanel';
@@ -21,6 +22,8 @@ const FileManager = lazy(() => import('@/features/file-manager/FileManager'));
 // Sub-view order inside the merged "Sunam的电脑" tab; unchanged from the former tabs.
 const SEGMENT_ORDER: ContainerSegment[] = ['ai', 'user', 'services', 'files'];
 const SWIPE_THRESHOLD_PX = 48;
+// M5：进程管理区轮询刷新间隔（Succinix 进程表数据源，host ps() 快照）。
+const PROCESS_POLL_MS = 2_500;
 
 interface ComputerViewProps {
   webcontainer: WebContainer | null;
@@ -51,6 +54,7 @@ const ComputerView = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
   const [isBooted, setIsBooted] = useState(false);
   const [, setProcessVersion] = useState(0);
   const [activePorts, setActivePorts] = useState<RuntimePortStatus[]>([]);
+  const [processes, setProcesses] = useState<SuccinixProcessView[]>([]);
   const [activePreview, setActivePreview] = useState<{ port: number; lastUrl: string } | null>(null);
   // Sub-view inside the merged "Sunam的电脑" tab: 电脑 / 终端 / 服务.
   const [containerSegment, setContainerSegment] = useState<ContainerSegment>('ai');
@@ -138,6 +142,24 @@ const ComputerView = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
     return runtime.subscribePorts(project);
   }, [runtime]);
 
+  // M5：进程区数据源绑定 Succinix 进程表（host ps()）+ 轮询刷新 + 生命周期事件即时刷新。
+  useEffect(() => {
+    if (!runtime || !activeContainerId) { setProcesses([]); return; }
+    let active = true;
+    const project = () => {
+      void runtime.getSuccinixProcesses(activeContainerId).then((entries) => {
+        if (active) setProcesses(entries);
+      });
+    };
+    project();
+    const timer = window.setInterval(project, PROCESS_POLL_MS);
+    const unsubscribe = runtime.subscribe((event) => {
+      // 仅进程生命周期事件即时刷新；output 高频事件不触发 ps()（轮询间隔已覆盖）。
+      if (event.type === 'started' || event.type === 'exited' || event.type === 'stopped') project();
+    });
+    return () => { active = false; window.clearInterval(timer); unsubscribe(); };
+  }, [activeContainerId, runtime]);
+
   useEffect(() => {
     if (window.innerWidth <= 900) return;
     // Only autofocus a terminal view; services/files/capability keep focus where it is.
@@ -194,7 +216,6 @@ const ComputerView = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
     };
   }, [activeTab, containerSegment]);
 
-  const processes = activeContainerId ? runtime?.getProcesses({ containerId: activeContainerId }) ?? [] : [];
   const previewService = activePreview ? activePorts.find((entry) => entry.port === activePreview.port) : undefined;
 
   return <><div className="dual-terminal" data-layout={layoutState}>
@@ -204,7 +225,15 @@ const ComputerView = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
       {!isBooted && activeTab !== 'capability' && !(activeTab === 'ai' && containerSegment === 'services') && <div className="terminal-boot-state"><Loader2 className="lucide-spin" /><span>{t('terminal.booting')}</span></div>}
       <div className="terminal-panel terminal-shell-panel" id="terminal-segment-panel-ai" role="tabpanel" aria-labelledby="terminal-segment-ai" data-active={activeTab === 'ai' && containerSegment === 'ai'}><AgentTerminalPanel sessionId={activeSessionId ?? null} terminalRef={aiTermRef} /></div>
       <div className="terminal-panel terminal-shell-panel" id="terminal-segment-panel-user" role="tabpanel" aria-labelledby="terminal-segment-user" data-active={activeTab === 'ai' && containerSegment === 'user'}><TerminalView readOnly={false} onTerminalReady={(terminal) => { userTermRef.current = terminal; setIsUserTermReady(true); }} /></div>
-      {activeTab === 'ai' && <div className="terminal-panel terminal-services-panel" id="terminal-segment-panel-services" role="tabpanel" aria-labelledby="terminal-segment-services" data-active={containerSegment === 'services'}><ServicesPanel ports={activePorts} processes={processes} isRestarting={isRestarting} onPreview={(port, url) => setActivePreview({ port, lastUrl: url })} onStopPort={(port) => runtime?.stopPort(port) ?? Promise.resolve(false)} onForceRestart={onForceRestart} onKillProcess={(process) => { void runtime?.stopProcess(process.id, { sessionId: process.sessionId, runId: process.runId, containerId: process.containerId }); }} /></div>}
+      {activeTab === 'ai' && <div className="terminal-panel terminal-services-panel" id="terminal-segment-panel-services" role="tabpanel" aria-labelledby="terminal-segment-services" data-active={containerSegment === 'services'}><ServicesPanel ports={activePorts} processes={processes} isRestarting={isRestarting} onPreview={(port, url) => setActivePreview({ port, lastUrl: url })} onStopPort={(port) => runtime?.stopPort(port) ?? Promise.resolve(false)} onForceRestart={onForceRestart} onKillProcess={(process) => {
+        // M5：系统进程 UI 已禁 stop，这里再兜底拒绝；agent 进程走所有权 stop，未拥有进程按 pid 停。
+        if (process.protected) return;
+        if (process.processId) {
+          void runtime?.stopProcess(process.processId, { sessionId: process.sessionId, runId: process.runId, containerId: process.containerId });
+        } else if (process.pid !== undefined) {
+          void runtime?.stopProcessByPid(process.pid);
+        }
+      }} /></div>}
       <div className="terminal-panel terminal-file-panel" id="terminal-segment-panel-files" role="tabpanel" aria-labelledby="terminal-segment-files" data-active={activeTab === 'ai' && containerSegment === 'files'}>{isBooted && <Suspense fallback={null}><FileManager wc={webcontainer} rootDir={rootDir} /></Suspense>}</div>
       <div className="terminal-panel terminal-capability-panel" data-active={activeTab === 'capability'}><CapabilityPanel /></div>
       {activeTab === 'ai' && <ContainerCapsule active={containerSegment} onChange={setContainerSegment} />}

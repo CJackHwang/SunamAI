@@ -3,6 +3,7 @@ import type { RuntimePortStatus, RuntimeServiceSource } from '@/shared/contracts
 import { createId } from '@/shared/lib/ids';
 import { SuccinixClient } from './succinixClient';
 import { ensurePythonRuntime, mentionsPython } from './succinixHost';
+import { isSystemProcess } from './succinixProcesses';
 import { type SuccinixProcessShim } from './processRegistry';
 
 type WebContainerProcess = Awaited<ReturnType<WebContainer['spawn']>>;
@@ -441,6 +442,9 @@ export class RuntimeServiceRegistry {
   private async killLaunchProcess(launch: ManagedLaunch, portPid?: number): Promise<void> {
     const hostPid = launch.process.succinixPid;
     if (hostPid !== null && hostPid > 0) {
+      // M5：后端 kill 守卫——launch 命令匹配系统进程（host.js / python daemon / /usr/lib/succinix）
+      // 时拒绝，防止 stopPort/stopLaunch 误杀系统进程（UI 禁 stop + 此处后端拦截双保险）。
+      if (isSystemProcess(launch.command)) return;
       const result = await this.succinix.kill(hostPid);
       if (!result.ok) launch.process.kill();
     } else if (portPid) {

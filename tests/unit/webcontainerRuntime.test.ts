@@ -200,6 +200,57 @@ describe('WebContainerAgentRuntime process ownership', () => {
     runtime.dispose();
   });
 
+  it('merges the Succinix process table with registry ownership and marks system processes protected (M5)', async () => {
+    const { runtime } = createRuntime();
+    const result = await runtime.runShell({ command: 'node server.js', mode: 'background', sessionId: 's-1', runId: 'r-1', containerId: 'c-1' });
+    mockPs.mockResolvedValueOnce([
+      { pid: 1, cmd: 'node server.js', status: 'running', startTime: 20 },
+      { pid: 99, cmd: 'node host.js', status: 'running', startTime: 10 },
+    ]);
+    const views = await runtime.getSuccinixProcesses('c-1');
+    const system = views.find((view) => view.pid === 99);
+    const agent = views.find((view) => view.pid === 1);
+    expect(system).toBeDefined();
+    expect(system?.protected).toBe(true);
+    expect(system?.id).toBe('succinix-99');
+    expect(system?.processId).toBeUndefined();
+    expect(agent).toBeDefined();
+    expect(agent?.protected).toBe(false);
+    expect(agent?.id).toBe(result.process.id);
+    expect(agent?.processId).toBe(result.process.id);
+    expect(agent?.command).toBe('node server.js');
+    expect(agent?.sessionId).toBe('s-1');
+    expect(agent?.runId).toBe('r-1');
+    runtime.dispose();
+  });
+
+  it('refuses to kill a protected system process by pid (M5)', async () => {
+    const { runtime } = createRuntime();
+    mockPs.mockResolvedValueOnce([{ pid: 7, cmd: 'node python-daemon.js', status: 'running', startTime: 1 }]);
+    const result = await runtime.stopProcessByPid(7);
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/protected system process/);
+    expect(mockKill).not.toHaveBeenCalled();
+    runtime.dispose();
+  });
+
+  it('kills a non-system process by pid (M5)', async () => {
+    const { runtime } = createRuntime();
+    mockPs.mockResolvedValueOnce([{ pid: 7, cmd: 'node server.js', status: 'running', startTime: 1 }]);
+    const result = await runtime.stopProcessByPid(7);
+    expect(result.ok).toBe(true);
+    expect(mockKill).toHaveBeenCalledWith(7);
+    runtime.dispose();
+  });
+
+  it('refuses to stop a registered process whose command matches a system process (M5)', async () => {
+    const { runtime } = createRuntime();
+    const result = await runtime.runShell({ command: 'node host.js', mode: 'background', sessionId: 's-1', runId: 'r-1', containerId: 'c-1' });
+    await expect(runtime.stopProcess(result.process.id, { sessionId: 's-1', runId: 'r-1', containerId: 'c-1' })).resolves.toBe(false);
+    expect(mockKill).not.toHaveBeenCalled();
+    runtime.dispose();
+  });
+
   it('stops an owned foreground process when its run signal is aborted', async () => {
     const { runtime } = createRuntime();
     const controller = new AbortController();

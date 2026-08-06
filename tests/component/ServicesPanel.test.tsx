@@ -37,6 +37,14 @@ describe('ServicesPanel', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('permission denied');
   });
 
+  it('marks protected system processes and disables their stop button', () => {
+    render(<I18nProvider><ServicesPanel ports={[]} processes={[{ id: 'succinix-1', sessionId: '', runId: '', containerId: '', command: 'node host.js', isRunning: true, output: '', cursor: 0, protected: true }]} onPreview={vi.fn()} onKillProcess={vi.fn()} {...actions} /></I18nProvider>);
+    expect(screen.getByText('[系统] succinix-1')).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: /系统进程/ });
+    expect(button).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /强制终止 succinix-1/ })).not.toBeInTheDocument();
+  });
+
   it('stops managed ports and reserves force restart for orphaned ports', async () => {
     const onStopPort = vi.fn(async () => true);
     const onForceRestart = vi.fn(async () => undefined);

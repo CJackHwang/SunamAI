@@ -1,6 +1,7 @@
 import type { WebContainer } from '@webcontainer/api';
 import type { ProcessOwnership, ProcessStatus, RuntimeProcessEvent } from '@/shared/contracts/agentRuntime';
 import type { SuccinixProcessEntry } from './succinixClient';
+import { isSystemProcess } from './succinixProcesses';
 
 export type WebContainerProcess = Awaited<ReturnType<WebContainer['spawn']>>;
 
@@ -76,6 +77,8 @@ export class ProcessRegistry {
   stop(processId: string, ownership: ProcessOwnership): boolean {
     const process = this.processes.get(processId);
     if (!process || !this.hasOwnership(process, ownership) || !process.isRunning) return false;
+    // M5：系统进程 protected —— 拒绝 stop（UI 禁 stop + 此处后端拦截双保险）。
+    if (isSystemProcess(process.command)) return false;
     process.process.kill();
     process.isRunning = false;
     this.publish('stopped', process);
@@ -101,6 +104,16 @@ export class ProcessRegistry {
   /** 是否仍有需要 ps() 对账的后台进程（带 host pid 且运行中）。 */
   hasTrackedPids(): boolean {
     return [...this.processes.values()].some((process) => process.isRunning && process.process.succinixPid !== null);
+  }
+
+  /**
+   * 当前运行中且带 host pid 的注册进程（pid → 所有权元数据），供展示层合并 Succinix 进程表。
+   * ProcessRegistry 保留为所有权元数据：展示主源是 host ps()，这里只提供 session/run 关联标注。
+   */
+  listTracked(): Array<ProcessStatus & { pid: number }> {
+    return [...this.processes.values()]
+      .filter((process) => process.isRunning && process.process.succinixPid !== null && process.process.succinixPid > 0)
+      .map((process) => ({ ...this.snapshot(process), pid: process.process.succinixPid as number }));
   }
 
   /**

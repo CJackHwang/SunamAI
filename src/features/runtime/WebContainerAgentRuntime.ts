@@ -19,9 +19,10 @@ import { ProcessRegistry, type SuccinixProcessShim } from './processRegistry';
 import { WorkspaceSnapshotCoordinator } from './snapshotCoordinator';
 import { WorkspaceFileSystem } from './workspaceFileSystem';
 import { RuntimeServiceRegistry, type ManagedSpawnRequest } from './serviceRegistry';
-import { SuccinixClient } from './succinixClient';
+import { SuccinixClient, type SuccinixProcessEntry } from './succinixClient';
 import { SuccinixFileSnapshotCoordinator } from './succinixFileSnapshot';
 import { bootSuccinixHost, type SuccinixHostHandle } from './succinixHost';
+import { isSystemProcess, systemKillRefusal, type SuccinixProcessView } from './succinixProcesses';
 
 const MAX_PROCESS_OUTPUT = 20_000;
 // 后台进程表对账间隔：host ps() 数据源映射注册表，检测进程自然退出。
@@ -339,6 +340,93 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
 
   getProcesses(ownership?: Partial<ProcessOwnership>): ProcessStatus[] {
     return this.processes.list(ownership);
+  }
+
+  /**
+   * M5 R1：展示层进程数据源绑定 Succinix 进程表（host 真实 pid/cmd/status/startTime）。
+   * 合并两源：host ps() 全部真实进程 + ProcessRegistry 所有权标注（session/run 关联）。
+   * 系统进程（host.js / python daemon / /usr/lib/succinix）标记 protected。
+   * 轮询刷新由调用方（ComputerView）按 2-3s 间隔 + 运行时事件驱动调用本方法。
+   */
+  async getSuccinixProcesses(containerId?: string): Promise<SuccinixProcessView[]> {
+    const entries = await this.succinix.ps();
+    const tracked = this.processes.listTracked();
+    const trackedByPid = new Map<number, ProcessStatus & { pid: number }>();
+    for (const process of tracked) {
+      if (containerId && process.containerId !== containerId) continue;
+      trackedByPid.set(process.pid, process);
+    }
+    const views: SuccinixProcessView[] = [];
+    const seen = new Set<number>();
+    for (const entry of entries) {
+      if (entry.status !== 'running') continue;
+      seen.add(entry.pid);
+      const owned = trackedByPid.get(entry.pid);
+      views.push(owned ? this.toOwnedProcessView(owned, entry) : this.toUnownedProcessView(entry));
+    }
+    // ps() 快照缺失（查询失败/退出未反映）时仍保留注册表运行中的 agent 进程，避免 UI 空白。
+    for (const process of trackedByPid.values()) {
+      if (seen.has(process.pid)) continue;
+      views.push(this.toOwnedProcessView(process, {
+        pid: process.pid,
+        cmd: process.command,
+        status: 'running',
+        startTime: 0,
+      }));
+    }
+    return views.sort((left, right) => left.pid - right.pid);
+  }
+
+  /**
+   * M5 R2：按 host pid 停止进程（未拥有/系统进程路径），后端 kill 守卫——
+   * pid 命中系统进程时拒绝并返回说明（UI 禁 stop + 此处后端拦截双保险）。
+   */
+  async stopProcessByPid(pid: number): Promise<{ ok: boolean; message: string }> {
+    const entries = await this.succinix.ps();
+    const refusal = systemKillRefusal(entries, pid);
+    if (refusal) return { ok: false, message: refusal };
+    const result = await this.succinix.kill(pid);
+    return { ok: result.killed, message: result.message };
+  }
+
+  /** agent 拥有进程：保留注册表 id/command 与 session/run 所有权，protected 仍按 host cmd 判定。 */
+  private toOwnedProcessView(process: ProcessStatus & { pid: number }, entry: SuccinixProcessEntry): SuccinixProcessView {
+    const exitCode = entry.exitCode ?? process.exitCode;
+    return {
+      id: process.id,
+      processId: process.id,
+      pid: entry.pid,
+      command: process.command,
+      sessionId: process.sessionId,
+      runId: process.runId,
+      containerId: process.containerId,
+      isRunning: entry.status === 'running' && process.isRunning,
+      output: process.output,
+      cursor: process.cursor,
+      ...(exitCode !== undefined ? { exitCode } : {}),
+      protected: isSystemProcess(entry.cmd),
+      hostStatus: entry.status,
+      startTime: entry.startTime,
+    };
+  }
+
+  /** 未拥有进程（系统进程 / 用户终端底座等）：id 用 succinix-<pid>，protected 按 host cmd 判定。 */
+  private toUnownedProcessView(entry: SuccinixProcessEntry): SuccinixProcessView {
+    return {
+      id: `succinix-${entry.pid}`,
+      pid: entry.pid,
+      command: entry.cmd,
+      sessionId: '',
+      runId: '',
+      containerId: '',
+      isRunning: entry.status === 'running',
+      output: entry.outputTail ?? '',
+      cursor: 0,
+      ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}),
+      protected: isSystemProcess(entry.cmd),
+      hostStatus: entry.status,
+      startTime: entry.startTime,
+    };
   }
 
   /** 后台进程表对账：注册表与 Succinix ps() 同步，检测自然退出；无后台进程时自停。 */
