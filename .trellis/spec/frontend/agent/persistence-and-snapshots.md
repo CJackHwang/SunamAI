@@ -49,3 +49,30 @@ Read this leaf when changing `sunam-v3` stores, record guards, sanitizers, event
 - [Workspace namespace](./workspace-namespace.md)
 - [State ownership and workspace store](../state/ownership-and-workspace-store.md)
 - References: `src/entities/persistence/v3Repository.ts` and `tests/unit/v3Repository.test.ts`.
+
+## M3 双层快照协调（SunamAI checkpoint × Succinix 文件快照）
+
+SunamAI 容器内有两套持久化，职责分离（`src/features/runtime/snapshotCoordinator.ts` +
+`src/features/runtime/succinixFileSnapshot.ts`）：
+
+- **v3 工作区快照**：`webcontainer.export(getContainerRoot(id))` 只导出容器根子树，750ms debounce，
+  存 `sunam-v3` snapshots store（含 revision，agent 验证证据依赖它）。工作区文件以 v3 为准。
+- **Succinix 文件快照**：`SuccinixFileSnapshotCoordinator` 遍历整个容器 FS（~2.5s + pagehide 兜底），
+  存 `succinix-persist` snapshots/current（与 WebUnix persist.ts 同构），覆盖系统层：`/etc/succinix.*`
+  状态、`.pyodide` pip 纯 Python 包、日志、motd 等。**排除 SunamAI 工作区容器目录（c-\*）** ——
+  避免对同一批工作区文件双写（R2 职责分离）。
+
+恢复顺序（R1）：`getWorkspaceRuntime()` 先 `restoreSuccinixFileSnapshot()`（系统层，host 权威）
+→ `bootSuccinixHost()`（host 启动读取已恢复的 /etc 配置）→ 会话开始时 `ensure()` mount v3
+工作区树（SunamAI 权威）。`webcontainer.mount(tree, { mountPoint })` 实测为「作用域限定在
+mountPoint 子树 + merge 语义」：不触碰 /etc、/usr/lib、.pyodide 等系统层，也不删除 mountPoint
+内未收录的既有文件 —— 因此工作区最终以 v3 快照为准、系统层保持 Succinix 快照版本，互不覆盖。
+
+边界如实记录（R4）：
+
+- 依赖与构建产物（node_modules/dist/.git）、host.js/lifo-core.js、cmd.json/result-*.json、
+  `/usr/lib/succinix` python 运行时资产、`.tinbase` 被两套或 Succinix 层排除 —— 不随刷新持久。
+- 二进制文件（utf8 解码出现 U+FFFD，如 Pyodide C 扩展的 `.so`）被 Succinix 层跳过 —— 刷新后
+  编译型 pip 包丢失，只保留纯 Python 包（python-daemon 会提示重新 `pip install`）。
+- 两个 IndexedDB 库（`sunam-v3` / `succinix-persist`）互相独立，写事务不阻塞。
+

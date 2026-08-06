@@ -16,9 +16,16 @@ export function getWorkspaceRuntime(): Promise<WorkspaceRuntimeInstance> {
   if (runtimeInstance) return Promise.resolve(runtimeInstance);
   runtimePromise ??= getWebContainer().then(async (webcontainer) => {
     const runtime = new WebContainerAgentRuntime(webcontainer);
+    // M3 R1 双层恢复顺序：先恢复 Succinix 文件快照（系统层：/etc 状态、.pyodide pip 包、日志，
+    // host 权威）→ 再拉起 host（host 启动读取已恢复的配置）→ 工作区 v3 快照在 ensureContainer
+    // 时 mount（SunamAI 权威）。v3 mount 只作用于工作区容器目录（mountPoint 作用域 + merge 语义，
+    // 实测不会覆盖 /etc 等系统层；见 snapshotCoordinator 注释）。
+    await runtime.restoreSuccinixFileSnapshot();
     // H1-1：拉起 Succinix host 守护进程（注入 host.js + spawn node 常驻 + ping 探活），
     // 就绪后才对外暴露 runtime，避免任何文件 RPC 落到无人消费的 /cmd.json。
     await runtime.bootSuccinixHost();
+    // M3 R2：host 就绪后启动系统层自动快照（~2.5s + pagehide 兜底），与 v3 工作区快照职责分离。
+    runtime.startSuccinixFileSnapshot();
     const value = { webcontainer, runtime };
     runtimeInstance = value;
     return value;
@@ -38,6 +45,7 @@ export async function forceRestartWorkspaceRuntime(onRuntimeDiscarded?: () => vo
   const current = runtimeInstance ?? await runtimePromise;
   if (current) {
     await current.runtime.flushSnapshots();
+    await current.runtime.flushSuccinixFileSnapshot();
     onRuntimeDiscarded?.();
     current.runtime.dispose();
   }
@@ -67,6 +75,8 @@ export async function disposeWorkspaceRuntime(): Promise<void> {
     // torn down (a concurrent getWebContainer() must never hand back a dying instance).
     detachWebContainer(current.webcontainer);
     await current.runtime.flushSnapshots();
+    // M3：关闭前兜底保存系统层快照（/etc、.pyodide 等），与 v3 flush 同为双重保险。
+    await current.runtime.flushSuccinixFileSnapshot();
     current.runtime.dispose();
     await resetWebContainerIfCurrent(current.webcontainer);
   } else {

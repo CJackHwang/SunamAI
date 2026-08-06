@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { dispose, flushSnapshots, resetWebContainer, resetWebContainerIfCurrent, detachWebContainer, getWebContainer } = vi.hoisted(() => ({
+const { dispose, flushSnapshots, flushSuccinixFileSnapshot, resetWebContainer, resetWebContainerIfCurrent, detachWebContainer, getWebContainer } = vi.hoisted(() => ({
   dispose: vi.fn(),
   flushSnapshots: vi.fn(async () => undefined),
+  flushSuccinixFileSnapshot: vi.fn(async () => undefined),
   resetWebContainer: vi.fn(),
   resetWebContainerIfCurrent: vi.fn(async () => undefined),
   detachWebContainer: vi.fn(),
@@ -14,7 +15,10 @@ vi.mock('@/entities/persistence/v3Repository', () => ({ v3Persistence: {} }));
 vi.mock('@/features/runtime/WebContainerAgentRuntime', () => ({
   WebContainerAgentRuntime: class {
     bootSuccinixHost = vi.fn(async () => undefined);
+    restoreSuccinixFileSnapshot = vi.fn(async () => undefined);
+    startSuccinixFileSnapshot = vi.fn();
     flushSnapshots = flushSnapshots;
+    flushSuccinixFileSnapshot = flushSuccinixFileSnapshot;
     dispose = dispose;
   },
 }));
@@ -25,6 +29,7 @@ describe('disposeWorkspaceRuntime (关闭即释放)', () => {
   beforeEach(() => {
     dispose.mockClear();
     flushSnapshots.mockClear();
+    flushSuccinixFileSnapshot.mockClear();
     resetWebContainer.mockClear();
     resetWebContainerIfCurrent.mockClear();
     detachWebContainer.mockClear();

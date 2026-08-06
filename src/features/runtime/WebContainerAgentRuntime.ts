@@ -20,6 +20,7 @@ import { WorkspaceSnapshotCoordinator } from './snapshotCoordinator';
 import { WorkspaceFileSystem } from './workspaceFileSystem';
 import { RuntimeServiceRegistry, type ManagedSpawnRequest } from './serviceRegistry';
 import { SuccinixClient } from './succinixClient';
+import { SuccinixFileSnapshotCoordinator } from './succinixFileSnapshot';
 import { bootSuccinixHost, type SuccinixHostHandle } from './succinixHost';
 
 const MAX_PROCESS_OUTPUT = 20_000;
@@ -54,6 +55,7 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
   private readonly services: RuntimeServiceRegistry;
   private readonly repository: V3PersistenceRepository;
   private readonly succinix: SuccinixClient;
+  private readonly succinixFiles: SuccinixFileSnapshotCoordinator;
   private readonly errorListeners = new Set<(error: string) => void>();
   private userTerminalBuffer = '';
   private psTimer: ReturnType<typeof setTimeout> | null = null;
@@ -70,7 +72,25 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
     this.snapshots = new WorkspaceSnapshotCoordinator(webcontainer, repository);
     // 与 serviceRegistry 共享同一客户端：/cmd.json 是单槽信箱，并发链会覆盖在途请求。
     this.succinix = new SuccinixClient(webcontainer.fs);
+    // M3：Succinix 文件快照层（系统层：/etc 状态、.pyodide pip 包、日志等）。与 v3 工作区快照职责分离。
+    this.succinixFiles = new SuccinixFileSnapshotCoordinator(webcontainer.fs, 2_500, (error) => this.publishError(error));
     this.services = new RuntimeServiceRegistry(webcontainer, (error) => this.publishError(toErrorMessage(error)), this.succinix);
+  }
+
+  /** M3 R1：恢复 Succinix 文件快照（系统层）到容器 FS。须在 bootSuccinixHost 之前调用，
+   *  host 启动时会读取已恢复的 /etc/succinix.env / etc/succinix.cwd / .pyodide 等配置。 */
+  async restoreSuccinixFileSnapshot(): Promise<void> {
+    await this.succinixFiles.restore();
+  }
+
+  /** M3 R2：启动 Succinix 文件快照自动保存（~2.5s + pagehide 兜底）。在 host 就绪后调用。 */
+  startSuccinixFileSnapshot(): void {
+    this.succinixFiles.start();
+  }
+
+  /** M3 R3：立即强制保存系统层快照（关闭/重启前兜底）。 */
+  async flushSuccinixFileSnapshot(): Promise<void> {
+    await this.succinixFiles.flush();
   }
 
   /** 拉起 Succinix host 守护进程（H1-1）：注入 host.js → spawn node host.js → ping 探活 → lifo-core。 */
@@ -178,6 +198,7 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
     if (this.psTimer) { clearTimeout(this.psTimer); this.psTimer = null; }
     this.services.dispose();
     this.snapshots.dispose();
+    this.succinixFiles.dispose();
     this.processes.dispose();
     this.errorListeners.clear();
     this.hostHandle?.hostProcess.kill();

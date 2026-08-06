@@ -45,6 +45,12 @@ export class WorkspaceSnapshotCoordinator {
     await this.webcontainer.fs.mkdir(root, { recursive: true });
     const snapshot = await this.repository.loadSnapshotState(containerId);
     this.revisions.set(containerId, snapshot.value?.revision ?? 0);
+    // M3 R1 双层协调（SunamAI checkpoint × Succinix 文件快照）：
+    // 恢复顺序是 Succinix 文件快照先（runtimeSingleton boot 时 restore → 再拉起 host），
+    // 本方法随后把 v3 工作区树 mount 到容器根。webcontainer.mount(tree, { mountPoint }) 实测为
+    // 「作用域限定在该目录 + merge 语义」：只写 mountPoint 子树，不触碰 /etc、/usr/lib、
+    // .pyodide 等系统层（Succinix host 权威），也不删除 mountPoint 内未收录的既有文件 ——
+    // 因此工作区最终以 v3 快照为准、系统层保持 Succinix 快照版本，互不覆盖。
     if (snapshot.value) await this.webcontainer.mount(snapshot.value.tree, { mountPoint: root });
     await this.webcontainer.fs.mkdir(root, { recursive: true });
     if (!this.watchers.has(containerId)) {
