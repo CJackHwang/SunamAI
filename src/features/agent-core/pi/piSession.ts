@@ -1,11 +1,15 @@
 import { Agent } from '@earendil-works/pi-agent-core';
-import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage, Session } from '@earendil-works/pi-agent-core';
+import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage, AgentTool as PiAgentTool, Session } from '@earendil-works/pi-agent-core';
 import { createModels, InMemoryCredentialStore } from '@earendil-works/pi-ai';
 import type { Api, Message as PiMessage, Model, Models } from '@earendil-works/pi-ai';
 import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
+import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 import type { Message } from '@/entities/message/types';
-import type { AgentEvent, AgentPhase, AgentRun } from '../types';
+import { ContainerMutationLease } from '../agentFamily';
+import type { RegisteredTool, ToolExecutionContext } from '../tools/base';
+import type { AgentEvent, AgentPhase, AgentRun, TaskContract } from '../types';
 import { IndexedDbSessionRepo } from './indexedDbSessionStorage';
+import { createPiAgentTools, resolveEnabledPiTools, UNWIRED_PI_RUNTIME } from './piToolAdapter';
 
 /**
  * P1 pi 通道：单 Agent 纯对话会话。
@@ -32,7 +36,7 @@ export interface PiAgentLike {
   seedHistory?(messages: PiAgentMessage[]): void;
 }
 
-export type PiAgentFactory = (input: { models: Models; model: Model<Api>; systemPrompt: string }) => PiAgentLike;
+export type PiAgentFactory = (input: { models: Models; model: Model<Api>; systemPrompt: string; tools: PiAgentTool[] }) => PiAgentLike;
 
 export interface PiSessionOptions {
   apiKey: string;
@@ -49,6 +53,16 @@ export interface PiSessionOptions {
   createAgent?: PiAgentFactory;
   /** P2 测试注入点：替换会话仓库（默认 IndexedDB 后端）。 */
   createSessionRepo?: () => IndexedDbSessionRepo;
+  /** P3：现有 AgentWorkspaceRuntime（容器/进程/资源）。缺省时容器类工具如实报不可用。 */
+  runtime?: AgentWorkspaceRuntime;
+  /** P3：capability 启用集（resolveEnabledTools 结果）；只注册启用工具（R3）。 */
+  enabledTools?: ReadonlySet<string>;
+  /** P3：覆盖默认工具装配（测试注入点）；缺省按 enabledTools 过滤 18 工具。 */
+  tools?: RegisteredTool[];
+  /** P3：覆盖工具执行上下文供应商（测试注入点）；缺省从本会话上下文注入编排上下文。 */
+  getToolContext?: () => ToolExecutionContext;
+  /** P3：容器可用性（对齐 capability availability），供完成门禁与工具上下文使用。 */
+  containerAvailable?: boolean;
 }
 
 /** 用于合成中止结算消息的空 usage（pi assistant 消息必填字段）。 */
@@ -179,7 +193,8 @@ export class PiEventBridge {
       case 'tool_execution_start':
       case 'tool_execution_update':
       case 'tool_execution_end':
-        // P1 pi 通道未注册工具，模型无法发起工具调用；保留为 no-op。
+        // P3：工具已注册，工具调用结果进入模型转录驱动对话继续；按「UI 视觉零改动」约束，
+        // 不在聊天流中渲染工具消息（现有引擎的 tool 消息渲染不变）。
         break;
       case 'turn_end':
         break;
@@ -215,13 +230,14 @@ export class PiEventBridge {
   }
 }
 
-function defaultCreateAgent({ models, model, systemPrompt }: { models: Models; model: Model<Api>; systemPrompt: string }): PiAgentLike {
+function defaultCreateAgent({ models, model, systemPrompt, tools }: { models: Models; model: Model<Api>; systemPrompt: string; tools: PiAgentTool[] }): PiAgentLike {
   const agent = new Agent({
     streamFn: (m, context, options) => models.streamSimple(m, context, options),
     // pi 的 AgentMessage 与 LLM Message 同构（CustomAgentMessages 为空），恒等映射即可。
     convertToLlm: (messages) => messages as PiMessage[],
-    initialState: { model, systemPrompt, thinkingLevel: 'off' },
-    toolExecution: 'sequential',
+    initialState: { model, systemPrompt, thinkingLevel: 'off', tools },
+    // 并行执行：只读类工具可并发，变更/进程类工具通过 executionMode: 'sequential' 强制串行。
+    toolExecution: 'parallel',
   });
   // 包装一层 PiAgentLike：seedHistory 把恢复的会话历史注入 Agent 转录。
   return {
@@ -237,6 +253,7 @@ function defaultCreateAgent({ models, model, systemPrompt }: { models: Models; m
 }
 
 export class PiSession {
+  private readonly options: PiSessionOptions;
   private readonly agent: PiAgentLike;
   private readonly bridge: PiEventBridge;
   private readonly unsubscribe: () => void;
@@ -244,11 +261,13 @@ export class PiSession {
   private readonly abortSignal: AbortSignal | undefined;
   private readonly abortListener: () => void;
   private readonly sessionPromise: Promise<Session>;
+  private readonly mutationLease = new ContainerMutationLease();
   private session: Session | null = null;
   private pendingPersist: Promise<void> = Promise.resolve();
   private disposed = false;
 
   constructor(options: PiSessionOptions) {
+    this.options = options;
     const credentials = new InMemoryCredentialStore();
     const models = createModels({ credentials });
     models.setProvider(deepseekProvider());
@@ -259,8 +278,13 @@ export class PiSession {
     // 尊重应用侧的 baseUrl 设置（默认与 deepseek 一致），其余字段沿用 pi 目录。
     const model: Model<Api> = { ...baseModel, baseUrl: options.baseUrl.replace(/\/+$/, '') };
     const systemPrompt = options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+    // P3：按 capability 启用集装配 pi 工具（R3），控制类工具所需的编排上下文从本会话注入（R1）。
+    const tools = createPiAgentTools({
+      tools: options.tools ?? resolveEnabledPiTools(options.enabledTools),
+      getContext: options.getToolContext ?? (() => this.buildToolContext()),
+    });
     const createAgent = options.createAgent ?? defaultCreateAgent;
-    this.agent = createAgent({ models, model, systemPrompt });
+    this.agent = createAgent({ models, model, systemPrompt, tools });
     const createSessionRepo = options.createSessionRepo ?? (() => new IndexedDbSessionRepo());
     // 会话 ID 与现有 UI 会话 ID 对齐：按 sessionId 打开或创建持久化 pi 会话。
     this.sessionPromise = createSessionRepo().openOrCreate(options.sessionId);
@@ -293,6 +317,45 @@ export class PiSession {
     this.session = session;
     const history = await this.loadHistory(session);
     if (history.length > 0) this.agent.seedHistory?.(history);
+  }
+
+  /**
+   * P3：构建现有工具执行上下文（控制类工具依赖的编排上下文：runId/sessionId/runtime/task）。
+   * 每次执行时重建，保证 getTask/updateTask 看到最新任务状态。
+   */
+  private buildToolContext(): ToolExecutionContext {
+    const run = this.options.run;
+    const signal = this.abortSignal ?? new AbortController().signal;
+    return {
+      sessionId: this.options.sessionId,
+      runId: this.options.runId,
+      containerId: run.containerId,
+      runtime: this.options.runtime ?? UNWIRED_PI_RUNTIME,
+      signal,
+      agentRole: run.agentRole ?? 'root',
+      ...(this.options.containerAvailable !== undefined ? { containerAvailable: this.options.containerAvailable } : {}),
+      ...(this.options.enabledTools ? { shellAvailable: this.options.enabledTools.has('run_command') } : {}),
+      mutationLease: this.mutationLease,
+      getTask: () => this.options.run.task,
+      updateTask: (updater) => this.applyTaskUpdate(updater),
+    };
+  }
+
+  /** P3：把工具的任务更新写回 run 并通知 UI 层（对齐现有引擎 updateTask 的克隆语义）。 */
+  private applyTaskUpdate(updater: (current: TaskContract) => TaskContract): void {
+    const next = updater(this.options.run.task);
+    const task: TaskContract = {
+      ...next,
+      acceptanceCriteria: [...next.acceptanceCriteria],
+      constraints: [...next.constraints],
+      plan: next.plan.map((item) => ({ ...item, ...(item.evidence ? { evidence: [...item.evidence] } : {}) })),
+      evidence: [...next.evidence],
+      verificationEvidence: next.verificationEvidence.map((evidence) => ({ ...evidence })),
+    };
+    const updated = { ...this.options.run, task, updatedAt: Date.now() };
+    this.options.run.task = task;
+    this.options.run.updatedAt = updated.updatedAt;
+    this.options.onRunChange(updated);
   }
 
   /** 发送一条用户消息并等待该次运行结束（含 agent_end 事件监听器 settle）。 */

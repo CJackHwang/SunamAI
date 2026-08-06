@@ -258,6 +258,11 @@ export function useAgentV2(
         signal: controller.signal,
         onEvent: appendEvent,
         onRunChange: updateRun,
+        // P3：把现有运行时与 capability 启用集交给 pi 通道——只注册启用工具（R3），
+        // 控制类工具依赖的编排上下文（runtime/task）由 PiSession 注入。
+        ...(runtime ? { runtime } : {}),
+        enabledTools,
+        containerAvailable: capabilities.containerAvailable,
       });
     } catch (error) {
       piRunIdsRef.current.delete(runId);
@@ -271,7 +276,7 @@ export function useAgentV2(
         piExecutionsRef.current.delete(runId);
       });
     piExecutionsRef.current.set(runId, { sessionId, containerId, controller, completion });
-  }, [apiKey, apiModel, appendEvent, baseUrl, sunamModel, updateRun]);
+  }, [apiKey, apiModel, appendEvent, baseUrl, capabilities.containerAvailable, enabledTools, runtime, sunamModel, updateRun]);
 
   const launchTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, inheritedMessages?: Message[], attachments?: ChatAttachment[], resume?: AgentResumeState) => {
     const sessionId = overrideSessionId ?? activeSessionId;
