@@ -1,7 +1,7 @@
-import { Agent } from '@earendil-works/pi-agent-core';
-import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage, AgentTool as PiAgentTool, Session } from '@earendil-works/pi-agent-core';
-import { createModels, createProvider, envApiKeyAuth, InMemoryCredentialStore } from '@earendil-works/pi-ai';
-import type { Api, Message as PiMessage, Model, Models } from '@earendil-works/pi-ai';
+import { Agent, buildSessionContext, convertToLlm, estimateContextTokens, prepareCompaction } from '@earendil-works/pi-agent-core';
+import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage, AgentTool as PiAgentTool, CompactionSettings, Session } from '@earendil-works/pi-agent-core';
+import { createModels, createProvider, envApiKeyAuth, InMemoryCredentialStore, uuidv7 } from '@earendil-works/pi-ai';
+import type { Api, Model, Models } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 import type { Message } from '@/entities/message/types';
@@ -10,6 +10,14 @@ import type { AgentEventStore } from '../eventStore';
 import type { RegisteredTool, SubagentHost, ToolExecutionContext } from '../tools/base';
 import type { AgentEvent, AgentPhase, AgentRun, TaskContract } from '../types';
 import { IndexedDbSessionRepo } from './indexedDbSessionStorage';
+import {
+  PI_COMPACTION_CUSTOM_INSTRUCTIONS,
+  buildCompactedAgentMessages,
+  buildPiCompactionConfig,
+  createDefaultCompactionRunner,
+  isCompactionNeeded,
+  type PiCompactionRunner,
+} from './piCompaction';
 import { createPiAgentTools, PI_UNSUPPORTED_SUBAGENTS, resolveEnabledPiTools, UNWIRED_PI_RUNTIME } from './piToolAdapter';
 import { PiSubagentCoordinator, type PiSubagentCoordinatorOptions } from './piSubagentCoordinator';
 
@@ -23,6 +31,9 @@ import { PiSubagentCoordinator, type PiSubagentCoordinatorOptions } from './piSu
  *   并同步写入 v3 event store（P2-M1：刷新后 UI 聊天列表可恢复 pi 消息）；
  * - P4（R2）：根 run 装配 PiSubagentCoordinator 作为子 agent host，子 agent 是
  *   独立 PiSession 实例（persistSession: false，不占独立 pi 会话）。
+ * - P5（R1/R2/R4）：上下文压缩对齐——每次 prompt 前检查 pi compaction 阈值，
+ *   达到阈值先压缩（摘要 + 保留尾）再继续；压缩结果写回 pi 会话（compaction entry），
+ *   刷新后 buildSessionContext 只重建「最新摘要 + 保留尾 + 后续消息」。
  *
  * 本模块是唯一静态依赖 pi 包的位置，由 useAgentV2 通过动态 import 懒加载，
  * 以保证 pi 的 ~100KiB gzip 不进初始 bundle。
@@ -107,6 +118,12 @@ export interface PiSessionOptions {
   createCoordinator?: (deps: PiSubagentCoordinatorOptions) => SubagentHost;
   /** P4：子 agent 场景——跳过 pi 会话仓库持久化（子 run 不占独立 pi 会话，避免历史串扰）。 */
   persistSession?: boolean;
+  /** P5：覆盖压缩设置（测试注入点）；缺省按 apiModel 对齐现有引擎 90% 语义。 */
+  compactionSettings?: CompactionSettings;
+  /** P5：覆盖压缩阈值上下文窗口（测试注入点）；缺省取 profileForModel(apiModel).contextWindowTokens。 */
+  compactionContextWindow?: number;
+  /** P5：覆盖压缩摘要生成器（测试注入点，避免单测走网络）；缺省走 pi compact() 真实 LLM 摘要。 */
+  compactionRunner?: PiCompactionRunner;
 }
 
 /** 用于合成中止结算消息的空 usage（pi assistant 消息必填字段）。 */
@@ -272,13 +289,20 @@ export class PiEventBridge {
       ...payload,
     } as Extract<AgentEvent, { kind: K }>);
   }
+
+  /** P5：压缩开始/结束的 transient 状态事件（驱动现有 UI 的压缩指示；v3 store 会跳过 transient）。 */
+  emitCompactionStatus(active: boolean): void {
+    this.emit('context_compaction_status', { active, transient: true });
+  }
 }
 
 function defaultCreateAgent({ models, model, systemPrompt, tools }: { models: Models; model: Model<Api>; systemPrompt: string; tools: PiAgentTool[] }): PiAgentLike {
   const agent = new Agent({
     streamFn: (m, context, options) => models.streamSimple(m, context, options),
-    // pi 的 AgentMessage 与 LLM Message 同构（CustomAgentMessages 为空），恒等映射即可。
-    convertToLlm: (messages) => messages as PiMessage[],
+    // P5：改用 pi 的 convertToLlm——user/assistant/toolResult 透传，compactionSummary/branchSummary
+    // 等特殊角色转换为 user 消息（compactionSummary → <summary> 包裹的 user 内容），
+    // 否则压缩后的摘要消息会以未知 role 直发 LLM 被供应商拒绝。
+    convertToLlm,
     initialState: { model, systemPrompt, thinkingLevel: 'off', tools },
     // 并行执行：只读类工具可并发，变更/进程类工具通过 executionMode: 'sequential' 强制串行。
     toolExecution: 'parallel',
@@ -310,17 +334,28 @@ export class PiSession {
   private readonly sessionPromise: Promise<Session | null>;
   private readonly coordinator: SubagentHost | undefined;
   private readonly mutationLease = new ContainerMutationLease();
+  /** P5：pi compaction 依赖的 models/model（默认摘要生成器需要，浏览器端纯 JS）。 */
+  private readonly models: Models;
+  private readonly model: Model<Api>;
+  /** P5：压缩设置 / 阈值上下文窗口 / 摘要执行器（缺省对齐现有引擎 90% 语义）。 */
+  private readonly compactionSettings: CompactionSettings;
+  private readonly compactionContextWindow: number;
+  private readonly compactRunner: PiCompactionRunner;
   private session: Session | null = null;
   private pendingPersist: Promise<void> = Promise.resolve();
   private disposed = false;
+  /** P5：最近一次压缩的前后 token 统计（R2 压缩真实性断言用）。 */
+  private lastCompaction: { beforeTokens: number; afterTokens: number; summary: string; at: number } | undefined;
 
   constructor(options: PiSessionOptions) {
     this.options = options;
     // P1-L4：provider 由现有 modelClient 配置派生（baseUrl host → provider id），不硬编码供应商。
     const providerId = deriveProviderId(options.baseUrl);
     const model = buildConfigModel(options.apiModel, options.baseUrl, providerId);
+    this.model = model;
     const credentials = new InMemoryCredentialStore();
     const models = createModels({ credentials });
+    this.models = models;
     models.setProvider(createProvider({
       id: providerId,
       name: options.baseUrl,
@@ -329,6 +364,12 @@ export class PiSession {
       models: [model],
       api: openAICompletionsApi(),
     }));
+    // P5：派生压缩配置（阈值/保留量对齐现有引擎），测试可覆盖。
+    const compactionConfig = buildPiCompactionConfig(options.apiModel);
+    this.compactionSettings = options.compactionSettings ?? compactionConfig.settings;
+    this.compactionContextWindow = options.compactionContextWindow ?? compactionConfig.contextWindow;
+    this.compactRunner = options.compactionRunner
+      ?? createDefaultCompactionRunner(this.models, this.model, PI_COMPACTION_CUSTOM_INSTRUCTIONS, options.signal);
     const credentialsReady = credentials.modify(providerId, async () => ({ type: 'api_key', key: options.apiKey }));
     const systemPrompt = options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     // P3：按 capability 启用集装配 pi 工具（R3），控制类工具所需的编排上下文从本会话注入（R1）。
@@ -472,19 +513,76 @@ export class PiSession {
       this.bridge.handlePiEvent({ type: 'agent_end', messages: [] });
       return;
     }
+    // P5：发送前先检查上下文是否达到压缩阈值；达到则先压缩（摘要 + 保留尾）再继续。
+    await this.compactBeforePrompt();
+    // 压缩的 LLM 摘要可能耗时较长，期间外部信号可能已中止；再检查一次，避免启动注定被取消的运行。
+    if (this.abortSignal?.aborted) {
+      this.bridge.handlePiEvent({ type: 'agent_start' });
+      this.bridge.handlePiEvent({ type: 'message_end', message: this.abortedMessage() });
+      this.bridge.handlePiEvent({ type: 'agent_end', messages: [] });
+      return;
+    }
     await this.appendUserMessage(text);
     await this.agent.prompt(text);
     // 冲刷本次运行的会话写入，保证 prompt 返回时历史已完整持久化。
     await this.pendingPersist;
   }
 
-  private async loadHistory(session: Session): Promise<PiAgentMessage[]> {
-    const entries = await session.findEntries({ type: 'message', order: 'oldestFirst' });
-    const messages: PiAgentMessage[] = [];
-    for (const entry of entries) {
-      if (entry.type === 'message') messages.push(entry.message);
+  /**
+   * P5：压缩编排（对齐现有引擎 90% 压缩语义）。
+   *
+   * 从 pi 会话读取条目，估算上下文 token；超过阈值时用 pi 的
+   * prepareCompaction + compact（摘要生成）产出「摘要 + 保留尾」，并把压缩 entry
+   * 写回会话（持久化），再把 agent 转录重建为压缩上下文——后续 prompt 基于摘要继续（R2）。
+   * 刷新后 loadHistory 走 buildSessionContext，只加载最新摘要 + 保留尾 + 后续消息（R4）。
+   */
+  private async compactBeforePrompt(): Promise<void> {
+    if (!this.session || !this.compactionSettings.enabled) return;
+    const entries = await this.session.findEntries({ order: 'oldestFirst' });
+    if (!isCompactionNeeded(entries, this.compactionContextWindow, this.compactionSettings)) return;
+    this.bridge.emitCompactionStatus(true);
+    try {
+      const preparationResult = prepareCompaction(entries, this.compactionSettings);
+      if (!preparationResult.ok || !preparationResult.value) return;
+      const value = await this.compactRunner(preparationResult.value);
+      const compactedMessages = buildCompactedAgentMessages(value);
+      await this.session.appendEntry({
+        type: 'compaction',
+        id: uuidv7(),
+        summary: value.summary,
+        retainedTail: value.retainedTail,
+        tokensBefore: value.tokensBefore,
+        ...(value.details !== undefined ? { details: value.details } : {}),
+        ...(value.usage !== undefined ? { usage: value.usage } : {}),
+      }, 'main');
+      this.agent.seedHistory?.(compactedMessages);
+      this.lastCompaction = {
+        beforeTokens: value.tokensBefore,
+        afterTokens: estimateContextTokens(compactedMessages).tokens,
+        summary: value.summary,
+        at: Date.now(),
+      };
+    } catch {
+      // 摘要生成失败（网络/中止）：跳过压缩继续对话，不阻断 prompt。
+      // R3 差异如实标注：现有引擎有确定性兜底摘要，pi compact() 只走 LLM 摘要。
+    } finally {
+      this.bridge.emitCompactionStatus(false);
     }
-    return messages;
+  }
+
+  /** P5：最近一次压缩的前后 token 统计（R2 压缩真实性断言用；无压缩时为 undefined）。 */
+  get lastCompactionStats(): Readonly<{ beforeTokens: number; afterTokens: number; summary: string; at: number }> | undefined {
+    return this.lastCompaction;
+  }
+
+  /**
+   * P5：加载刷新恢复所需的上下文（R4）。
+   * 走 pi 的 buildSessionContext：有 compaction entry 时只返回「最新摘要消息 + 保留尾 +
+   * 后续消息」，避免把全量历史重新灌入；无压缩时与旧行为一致（全部 message 条目）。
+   */
+  private async loadHistory(session: Session): Promise<PiAgentMessage[]> {
+    const entries = await session.findEntries({ order: 'oldestFirst' });
+    return buildSessionContext(entries).messages;
   }
 
   private async appendUserMessage(text: string): Promise<void> {
