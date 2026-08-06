@@ -7,10 +7,11 @@ import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 import type { Message } from '@/entities/message/types';
 import { ContainerMutationLease } from '../agentFamily';
 import type { AgentEventStore } from '../eventStore';
-import type { RegisteredTool, ToolExecutionContext } from '../tools/base';
+import type { RegisteredTool, SubagentHost, ToolExecutionContext } from '../tools/base';
 import type { AgentEvent, AgentPhase, AgentRun, TaskContract } from '../types';
 import { IndexedDbSessionRepo } from './indexedDbSessionStorage';
 import { createPiAgentTools, PI_UNSUPPORTED_SUBAGENTS, resolveEnabledPiTools, UNWIRED_PI_RUNTIME } from './piToolAdapter';
+import { PiSubagentCoordinator, type PiSubagentCoordinatorOptions } from './piSubagentCoordinator';
 
 /**
  * P1 pi 通道：单 Agent 纯对话会话。
@@ -19,7 +20,9 @@ import { createPiAgentTools, PI_UNSUPPORTED_SUBAGENTS, resolveEnabledPiTools, UN
  * - 创建：pi-ai Models + 从现有 modelClient 配置派生的 provider（不硬编码供应商）；
  * - prompt() / abort() / destroy()；
  * - 事件订阅：把 pi 事件流翻译成现有 UI 状态层可消费的 AgentEvent，
- *   并同步写入 v3 event store（P2-M1：刷新后 UI 聊天列表可恢复 pi 消息）。
+ *   并同步写入 v3 event store（P2-M1：刷新后 UI 聊天列表可恢复 pi 消息）；
+ * - P4（R2）：根 run 装配 PiSubagentCoordinator 作为子 agent host，子 agent 是
+ *   独立 PiSession 实例（persistSession: false，不占独立 pi 会话）。
  *
  * 本模块是唯一静态依赖 pi 包的位置，由 useAgentV2 通过动态 import 懒加载，
  * 以保证 pi 的 ~100KiB gzip 不进初始 bundle。
@@ -65,6 +68,8 @@ export interface PiAgentLike {
   waitForIdle(): Promise<void>;
   /** P2 刷新恢复：把持久化会话历史注入 agent 转录，使 Agent 可基于历史继续。 */
   seedHistory?(messages: PiAgentMessage[]): void;
+  /** P4 子 agent 编排：把父协调消息排队到当前 assistant turn 之后注入（pi Agent.steer）。 */
+  steer?(message: PiAgentMessage): void;
 }
 
 export type PiAgentFactory = (input: { models: Models; model: Model<Api>; systemPrompt: string; tools: PiAgentTool[] }) => PiAgentLike;
@@ -96,6 +101,12 @@ export interface PiSessionOptions {
   containerAvailable?: boolean;
   /** P2：v3 事件仓库。缺省时 pi 事件只进 pi 会话持久化，不写 v3（刷新后 UI 列表不恢复）。 */
   store?: AgentEventStore;
+  /** P4：覆盖工具上下文里的子 agent host（子 agent 场景注入如实拒绝的哨兵，跳过编排器构造）。 */
+  subagents?: SubagentHost;
+  /** P4 测试注入：替换子 agent 编排器构造（缺省 new PiSubagentCoordinator）。 */
+  createCoordinator?: (deps: PiSubagentCoordinatorOptions) => SubagentHost;
+  /** P4：子 agent 场景——跳过 pi 会话仓库持久化（子 run 不占独立 pi 会话，避免历史串扰）。 */
+  persistSession?: boolean;
 }
 
 /** 用于合成中止结算消息的空 usage（pi assistant 消息必填字段）。 */
@@ -282,6 +293,9 @@ function defaultCreateAgent({ models, model, systemPrompt, tools }: { models: Mo
     seedHistory: (messages) => {
       agent.state.messages = messages;
     },
+    steer: (message) => {
+      agent.steer(message);
+    },
   };
 }
 
@@ -293,7 +307,8 @@ export class PiSession {
   private readonly ready: Promise<unknown>;
   private readonly abortSignal: AbortSignal | undefined;
   private readonly abortListener: () => void;
-  private readonly sessionPromise: Promise<Session>;
+  private readonly sessionPromise: Promise<Session | null>;
+  private readonly coordinator: SubagentHost | undefined;
   private readonly mutationLease = new ContainerMutationLease();
   private session: Session | null = null;
   private pendingPersist: Promise<void> = Promise.resolve();
@@ -325,7 +340,17 @@ export class PiSession {
     this.agent = createAgent({ models, model, systemPrompt, tools });
     const createSessionRepo = options.createSessionRepo ?? (() => new IndexedDbSessionRepo());
     // 会话 ID 与现有 UI 会话 ID 对齐：按 sessionId 打开或创建持久化 pi 会话。
-    this.sessionPromise = createSessionRepo().openOrCreate(options.sessionId);
+    // P4：子 agent 场景（persistSession: false）跳过会话仓库，避免子 run 串扰根会话历史。
+    this.sessionPromise = options.persistSession === false
+      ? Promise.resolve(null)
+      : createSessionRepo().openOrCreate(options.sessionId);
+    // P4（R2）：把根 run 的 pi 子 agent 编排器注入工具上下文（spawn_subagent 等走真实现）。
+    // 子 agent 会话（options.subagents 已注入哨兵）不重复构造编排器。
+    this.coordinator = options.subagents
+      ? undefined
+      : options.createCoordinator
+        ? options.createCoordinator(this.buildCoordinatorOptions())
+        : new PiSubagentCoordinator(this.buildCoordinatorOptions());
     // P2-M1：桥接事件同步写入 v3 event store（store.append/saveRun 走 pendingPersist 队列串行），
     // 使刷新后 UI 聊天列表能从 v3 恢复 pi 消息；写入尽力而为，失败不阻断事件桥接。
     const onEvent = (event: AgentEvent): void => {
@@ -363,17 +388,41 @@ export class PiSession {
     const session = await this.sessionPromise;
     if (this.disposed) return;
     this.session = session;
+    // P4：子 agent（persistSession: false）没有会话仓库，session 为 null，不 seed 历史。
+    if (!session) return;
     const history = await this.loadHistory(session);
     if (history.length > 0) this.agent.seedHistory?.(history);
+  }
+
+  /** P4（R2）：构建根 run 的子 agent 编排器依赖（createSession 注入避免静态循环依赖）。 */
+  private buildCoordinatorOptions(): PiSubagentCoordinatorOptions {
+    return {
+      sessionId: this.options.sessionId,
+      root: this.options.run,
+      apiKey: this.options.apiKey,
+      baseUrl: this.options.baseUrl,
+      apiModel: this.options.apiModel,
+      ...(this.options.systemPrompt !== undefined ? { systemPrompt: this.options.systemPrompt } : {}),
+      runtime: this.options.runtime ?? UNWIRED_PI_RUNTIME,
+      ...(this.options.store ? { store: this.options.store } : {}),
+      ...(this.options.enabledTools ? { enabledTools: this.options.enabledTools } : {}),
+      ...(this.options.containerAvailable !== undefined ? { containerAvailable: this.options.containerAvailable } : {}),
+      // 直接用 this.options.signal：buildCoordinatorOptions 在构造早期调用，this.abortSignal 尚未赋值。
+      signal: this.options.signal ?? new AbortController().signal,
+      onEvent: this.options.onEvent,
+      onRunChange: this.options.onRunChange,
+      ...(this.options.createAgent ? { createAgent: this.options.createAgent } : {}),
+      createSession: (childOptions) => new PiSession(childOptions),
+    };
   }
 
   /**
    * P3：构建现有工具执行上下文（控制类工具依赖的编排上下文：runId/sessionId/runtime/task）。
    * 每次执行时重建，保证 getTask/updateTask 看到最新任务状态。
    *
-   * P3-M2：pi 是单 Agent 自治循环，无子代理编排，`subagents` 注入如实拒绝的哨兵 host，
-   * 使 spawn_subagent/wait_subagents/message_subagent 在被调用时明确报「pi 通道不支持子 agent」
-   * 而非无头失败；R4 边界见 piToolAdapter.ts。
+   * P4（R2）：`subagents` 注入真实 pi 子 agent 编排器（PiSubagentCoordinator），
+   * spawn_subagent/wait_subagents/message_subagent 走真实现；子 agent 会话注入的
+   * 仍是如实拒绝的哨兵（子 agent 不能继续委派）。
    */
   private buildToolContext(): ToolExecutionContext {
     const run = this.options.run;
@@ -387,7 +436,7 @@ export class PiSession {
       agentRole: run.agentRole ?? 'root',
       ...(this.options.containerAvailable !== undefined ? { containerAvailable: this.options.containerAvailable } : {}),
       ...(this.options.enabledTools ? { shellAvailable: this.options.enabledTools.has('run_command') } : {}),
-      subagents: PI_UNSUPPORTED_SUBAGENTS,
+      subagents: this.options.subagents ?? this.coordinator ?? PI_UNSUPPORTED_SUBAGENTS,
       mutationLease: this.mutationLease,
       getTask: () => this.options.run.task,
       updateTask: (updater) => this.applyTaskUpdate(updater),
@@ -493,6 +542,16 @@ export class PiSession {
   /** 中止当前运行；pi 会以 stopReason "aborted" 的 assistant 消息结束并发出 agent_end。 */
   abort(): void {
     this.agent.abort();
+  }
+
+  /**
+   * P4 子 agent 编排：把父协调消息注入运行中的 agent（pi Agent.steer 队列，
+   * 当前 assistant turn 后生效）。运行未启动/已结束或已销毁时返回 false。
+   */
+  steer(message: string): boolean {
+    if (this.disposed || this.abortSignal?.aborted) return false;
+    this.agent.steer?.({ role: 'user', content: message, timestamp: Date.now() });
+    return true;
   }
 
   /** 销毁会话：移除订阅与外部信号转发，并中止未完成的运行。 */

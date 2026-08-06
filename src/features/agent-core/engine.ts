@@ -73,8 +73,8 @@ export interface AgentEngineOptions {
   containerAvailable?: boolean;
 }
 
-const CHILD_COMMON_TOOLS = ['workspace_tree', 'read_file', 'search_workspace', 'list_resources', 'read_resource_text', 'read_resource_image', 'update_plan', 'report_progress', 'ask_parent', 'complete_task'];
-const CHILD_TASK_TOOLS = [...CHILD_COMMON_TOOLS, 'materialize_resource', 'run_command', 'manage_process', 'read_user_terminal'];
+export const CHILD_COMMON_TOOLS = ['workspace_tree', 'read_file', 'search_workspace', 'list_resources', 'read_resource_text', 'read_resource_image', 'update_plan', 'report_progress', 'ask_parent', 'complete_task'];
+export const CHILD_TASK_TOOLS = [...CHILD_COMMON_TOOLS, 'materialize_resource', 'run_command', 'manage_process', 'read_user_terminal'];
 
 function toolsForRole(role: AgentRole): string[] | undefined {
   if (role === 'root') return undefined;

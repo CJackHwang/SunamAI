@@ -29,11 +29,10 @@ import type { AgentToolResult as AppAgentToolResult } from '../types';
  *   摘要作为最终回复，而非在工具批次后静默停住。
  * - `read_resource_image` 的 `modelContent`（image_resource 持久引用）在 pi 工具结果协议中无对应
  *   内容类型，只保留文本描述；图像回传依赖 pi 自身的内容通道，属后续工作。
- * - **pi 通道暂不支持子 agent**（P3-M2）：pi 是单 Agent 自治循环，没有 AgentFamilyCoordinator
- *   子代理编排。`spawn_subagent`/`wait_subagents`/`message_subagent` 虽随 18 工具目录注册
- *   （schema/capability 对齐现有引擎），但 piSession 的 buildToolContext 注入的是如实拒绝的
- *   `PI_UNSUPPORTED_SUBAGENTS` 哨兵 host——模型调用即明确报「pi 通道不支持子 agent」，
- *   不会被当作可用能力。现有引擎（engine.ts/subagentCoordinator）仍完整支持这三个工具。
+ * - P4（R2）：根 agent 的子 agent 工具走真编排器（PiSubagentCoordinator），见
+ *   piSubagentCoordinator.ts；本文件不再注入「pi 通道暂不支持子 agent」的降级标注。
+ *   子 agent 会话注入的哨兵 host（PI_UNSUPPORTED_SUBAGENTS）只用于「子 agent 不能继续委派」，
+ *   对齐现有引擎「children cannot delegate」语义。
  */
 export const PI_TOOL_CATALOG: RegisteredTool[] = [
   ...workspaceTools,
@@ -163,13 +162,14 @@ export const UNWIRED_PI_RUNTIME: AgentWorkspaceRuntime = {
 };
 
 /**
- * pi 通道子 agent 哨兵（P3-M2）：pi 是单 Agent 自治循环，无子代理编排。
- * 注入到 piSession.buildToolContext，使 spawn_subagent/wait_subagents/message_subagent
- * 在被调用时如实拒绝（明确报「pi 通道不支持子 agent」），而非因缺少 host 无头失败。
- * snapshot 返回空列表（pi 通道不存在活跃子代理）。
+ * 子 agent host 哨兵（P4，仅限子 agent）：pi 子 agent 不能再委派（对齐现有引擎
+ * 「children cannot delegate」）。根 agent 的工具上下文注入的是真编排器
+ * （PiSubagentCoordinator，见 piSession.buildToolContext）；此哨兵只注入到子 agent
+ * 会话，使任何意外暴露的委派调用如实拒绝。
+ * snapshot 返回空列表（子 agent 不存在活跃孙代）。
  */
 const subagentUnavailable = (tool: string): never => {
-  throw new Error(`Tool ${tool} is unavailable: the pi channel is a single-agent loop and does not support subagent delegation.`);
+  throw new Error(`Tool ${tool} is unavailable: subagent delegation is allowed only from the root agent, not from a child agent.`);
 };
 
 export const PI_UNSUPPORTED_SUBAGENTS: SubagentHost = {

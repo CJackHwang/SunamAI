@@ -8,7 +8,7 @@ import { createPiAgentTools, PI_TOOL_CATALOG, PI_UNSUPPORTED_SUBAGENTS, resolveE
 import { PiSession, type PiAgentLike } from '@/features/agent-core/pi/piSession';
 import type { AgentRun, TaskContract } from '@/features/agent-core/types';
 import { ContainerMutationLease } from '@/features/agent-core/agentFamily';
-import type { ToolExecutionContext } from '@/features/agent-core/tools/base';
+import type { ToolExecutionContext, SubagentHost } from '@/features/agent-core/tools/base';
 import type { AgentWorkspaceRuntime, ProcessStatus } from '@/shared/contracts/agentRuntime';
 import { initialTask } from '@/features/agent-core/task';
 import { createChaosContract } from '@/features/agent-core/prompt';
@@ -359,15 +359,15 @@ describe('PiSession tool wiring (R2)', () => {
   });
 });
 
-describe('pi subagent boundary (P3-M2)', () => {
-  it('rejects subagent host calls with an explicit pi-channel message', () => {
-    expect(() => PI_UNSUPPORTED_SUBAGENTS.spawn({ taskId: 't', role: 'explore', prompt: 'p' })).toThrow(/does not support subagent delegation/);
-    expect(() => PI_UNSUPPORTED_SUBAGENTS.wait(['r1'])).toThrow(/does not support subagent delegation/);
-    expect(() => PI_UNSUPPORTED_SUBAGENTS.message('r1', 'hi')).toThrow(/does not support subagent delegation/);
+describe('pi subagent host wiring (P4-R2)', () => {
+  it('keeps the child-agent sentinel rejecting (children cannot delegate)', () => {
+    expect(() => PI_UNSUPPORTED_SUBAGENTS.spawn({ taskId: 't', role: 'explore', prompt: 'p' })).toThrow(/allowed only from the root agent/);
+    expect(() => PI_UNSUPPORTED_SUBAGENTS.wait(['r1'])).toThrow(/allowed only from the root agent/);
+    expect(() => PI_UNSUPPORTED_SUBAGENTS.message('r1', 'hi')).toThrow(/allowed only from the root agent/);
     expect(PI_UNSUPPORTED_SUBAGENTS.snapshot()).toEqual([]);
   });
 
-  it('wires the rejecting host into the pi session tool context so subagent calls fail loudly', async () => {
+  it('injects the real subagent coordinator into the root pi session tool context', async () => {
     const agent = new FakePiAgent();
     let capturedTools: PiAgentTool[] | undefined;
     const session = new PiSession({
@@ -386,8 +386,51 @@ describe('pi subagent boundary (P3-M2)', () => {
     });
     await session.prompt('ignored');
     const spawn = capturedTools!.find((tool) => tool.name === 'spawn_subagent')!;
+    const wait = capturedTools!.find((tool) => tool.name === 'wait_subagents')!;
+    const message = capturedTools!.find((tool) => tool.name === 'message_subagent')!;
     expect(spawn).toBeDefined();
-    await expect(spawn.execute('call-1', { task_id: 't', role: 'explore', prompt: 'p' }, undefined)).rejects.toThrow(/does not support subagent delegation/);
+    expect(wait).toBeDefined();
+    expect(message).toBeDefined();
+    // 子 agent 三工具走真 host：spawn 不再抛「不支持」，而是排队创建子 agent。
+    const result = await spawn.execute('call-1', { task_id: 't', role: 'explore', prompt: 'p' }, undefined);
+    expect(result.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('queued as explore') });
+    expect(result.details).toMatchObject({ taskId: 't', status: 'queued' });
+    expect(result.details).toHaveProperty('runId');
+    session.destroy();
+  });
+
+  it('spawn_subagent routes to the injected coordinator (createCoordinator injection)', async () => {
+    const agent = new FakePiAgent();
+    let capturedTools: PiAgentTool[] | undefined;
+    const spyHost: SubagentHost = {
+      spawn: vi.fn(async () => ({ runId: 'r-child-1', taskId: 't', status: 'queued' })),
+      wait: vi.fn(async () => []),
+      message: vi.fn(async () => true),
+      stop: vi.fn(async () => true),
+      stopAll: vi.fn(async () => undefined),
+      snapshot: vi.fn(() => []),
+    };
+    const session = new PiSession({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiModel: 'deepseek-v4-flash',
+      sessionId: 's1',
+      runId: 'r1',
+      run: createRun(),
+      onEvent: () => undefined,
+      onRunChange: () => undefined,
+      createAgent: (input) => {
+        capturedTools = input.tools;
+        return agent;
+      },
+      createCoordinator: () => spyHost,
+    });
+    await session.prompt('ignored');
+    const spawn = capturedTools!.find((tool) => tool.name === 'spawn_subagent')!;
+    const result = await spawn.execute('call-1', { task_id: 't', role: 'explore', prompt: 'p' }, undefined);
+    expect(spyHost.spawn).toHaveBeenCalledWith({ taskId: 't', role: 'explore', prompt: 'p' });
+    expect(result.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('queued as explore') });
+    expect(result.details).toMatchObject({ runId: 'r-child-1', taskId: 't', status: 'queued' });
     session.destroy();
   });
 });
