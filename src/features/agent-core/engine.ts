@@ -74,7 +74,7 @@ export interface AgentEngineOptions {
 }
 
 const CHILD_COMMON_TOOLS = ['workspace_tree', 'read_file', 'search_workspace', 'list_resources', 'read_resource_text', 'read_resource_image', 'update_plan', 'report_progress', 'ask_parent', 'complete_task'];
-const CHILD_TASK_TOOLS = [...CHILD_COMMON_TOOLS, 'apply_patch', 'materialize_resource', 'shell_run', 'process_list', 'process_observe', 'process_input', 'process_stop', 'read_user_terminal'];
+const CHILD_TASK_TOOLS = [...CHILD_COMMON_TOOLS, 'materialize_resource', 'run_command', 'manage_process', 'read_user_terminal'];
 
 function toolsForRole(role: AgentRole): string[] | undefined {
   if (role === 'root') return undefined;
@@ -464,7 +464,7 @@ export class AgentEngine {
       signal: this.executionController.signal,
       agentRole: this.run.agentRole ?? 'root',
       ...(this.options.containerAvailable !== undefined ? { containerAvailable: this.options.containerAvailable } : {}),
-      ...(this.options.enabledTools ? { shellAvailable: this.options.enabledTools.has('shell_run') } : {}),
+      ...(this.options.enabledTools ? { shellAvailable: this.options.enabledTools.has('run_command') } : {}),
       ...(this.run.toolPolicy?.writeScope ? { writeScope: this.run.toolPolicy.writeScope } : {}),
       ...(this.subagentHost ? { subagents: this.subagentHost } : {}),
       mutationLease: this.mutationLease,
@@ -692,7 +692,7 @@ export class AgentEngine {
             await this.phase('observing', 'Processing queued user guidance before completion.');
             continue;
           }
-          const gate = await evaluateCompletionGate({ task: this.task, agentRole: this.run.agentRole ?? 'root', runtime: this.options.runtime, containerId: this.options.containerId, containerAvailable: this.options.containerAvailable ?? true, shellAvailable: this.options.enabledTools?.has('shell_run') ?? true });
+          const gate = await evaluateCompletionGate({ task: this.task, agentRole: this.run.agentRole ?? 'root', runtime: this.options.runtime, containerId: this.options.containerId, containerAvailable: this.options.containerAvailable ?? true, shellAvailable: this.options.enabledTools?.has('run_command') ?? true });
           this.updateTask(() => gate.task);
           if (!gate.ok) {
             await this.emitter.emit('assistant_delta', { streamId: response.streamId, content: '', reasoningContent: '', transient: true });

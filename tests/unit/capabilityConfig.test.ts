@@ -18,8 +18,8 @@ describe('capabilityConfig', () => {
   });
 
   it('round-trips a persisted config', () => {
-    saveCapabilityConfig({ modules: { 'virtual-container': { enabled: false } }, tools: { shell_run: false } });
-    expect(readCapabilityConfig()).toEqual({ modules: { 'virtual-container': { enabled: false } }, tools: { shell_run: false } });
+    saveCapabilityConfig({ modules: { 'virtual-container': { enabled: false } }, tools: { run_command: false } });
+    expect(readCapabilityConfig()).toEqual({ modules: { 'virtual-container': { enabled: false } }, tools: { run_command: false } });
   });
 
   it('falls back to defaults on malformed JSON', () => {
@@ -47,7 +47,7 @@ describe('capabilityConfig', () => {
   });
 
   it('sets a tool override without mutating the input', () => {
-    const after = setCapabilityTool(readCapabilityConfig(), 'shell_run', false);
-    expect(after.tools.shell_run).toBe(false);
+    const after = setCapabilityTool(readCapabilityConfig(), 'run_command', false);
+    expect(after.tools.run_command).toBe(false);
   });
 });

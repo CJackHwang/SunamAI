@@ -79,7 +79,7 @@ capability: {
 }
 ```
 
-`registerModule` 会**强制校验**每个工具的 `capability.module === module.descriptor.id`，不匹配即抛错——插件不可能绕过能力库直接把工具暴露给 AI。依赖示例：`process_*` 依赖 `shell_run`，容器 shell 关闭时随依赖关闭。
+`registerModule` 会**强制校验**每个工具的 `capability.module === module.descriptor.id`，不匹配即抛错——插件不可能绕过能力库直接把工具暴露给 AI。依赖示例：`manage_process` 依赖 `run_command`，容器 shell 关闭时随依赖关闭。
 
 ## 4. 配置持久化
 
@@ -128,7 +128,7 @@ export interface SunamExtension {
 
 - `descriptor: { id: 'notes', kind: 'extension' }`（面板当前以预留占位展示，合并时 `registerModule` 同 id 覆盖为真实模块）。
 - 工具族 `note_search` / `note_read` / `note_write` / `note_pin` 等，存储独立于容器（IndexedDB notes store）。
-- 笔记↔容器联动：`note_materialize` 可把笔记落盘到容器工作区，声明 `dependencies: ['apply_patch']`，容器文件关 → 该工具随依赖关闭。
+- 笔记↔容器联动：`note_materialize` 可把笔记落盘到容器工作区，声明 `dependencies: ['run_command']`，容器文件关 → 该工具随依赖关闭。
 - 它验证扩展 API 后，MCP / 第三方插件直接复用同一范式。
 
 ## 8. 参考

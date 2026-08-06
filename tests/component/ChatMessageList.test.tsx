@@ -177,11 +177,11 @@ describe('ChatMessageList', () => {
   it('keeps pending tools labelled as running and ask_user prompts directly visible', () => {
     const { container } = render(<I18nProvider><ChatMessageList messages={[
       { role: 'assistant', content: '', tool_calls: [
-        { id: 'call-1', type: 'function', function: { name: 'shell_run', arguments: '{"command":"npm test"}' } },
+        { id: 'call-1', type: 'function', function: { name: 'run_command', arguments: '{"command":"npm test"}' } },
         { id: 'call-2', type: 'function', function: { name: 'ask_user', arguments: '{"question":"继续吗？"}' } },
       ] },
     ]} isRunning containerRef={createRef<HTMLDivElement>()} onScroll={vi.fn()} /></I18nProvider>);
-    expect(screen.getByText('执行中: shell_run')).toBeInTheDocument();
+    expect(screen.getByText('执行中: run_command')).toBeInTheDocument();
     expect(screen.getByText(/继续吗/)).toBeInTheDocument();
     expect(container.querySelectorAll('details.chat-tool')).toHaveLength(1);
   });

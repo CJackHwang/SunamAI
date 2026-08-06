@@ -42,14 +42,14 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
     }
     modelTurn += 1;
     if (modelTurn === 1) {
-      // 共享文件改由 agent 路径（shell_run → runShell）创建：用户终端无交互 stdin（物理边界），
+      // 共享文件改由 agent 路径（run_command → runShell）创建：用户终端无交互 stdin（物理边界），
       // 不再像 jsh 时代用终端键入命令落盘。cwd/env 语义由第二轮前台命令断言。
       const createSharedFiles = {
         index: 1,
         id: 'create-shared-files',
         type: 'function' as const,
         function: {
-          name: 'shell_run',
+          name: 'run_command',
           arguments: JSON.stringify({
             command: 'mkdir -p user-created/from-terminal node_modules/pkg dist && echo terminal > user-created/from-terminal/proof.txt && echo hidden > .hidden-export && echo dependency > node_modules/pkg/export.txt && echo build > dist/export.js',
             mode: 'foreground',
@@ -61,7 +61,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
         id: `background-${index}`,
         type: 'function' as const,
         function: {
-          name: 'shell_run',
+          name: 'run_command',
           arguments: JSON.stringify({
             command: index === 0 ? `node -e "require('http').createServer((_,r)=>r.end('ok')).listen(3457)"` : `node -e "setInterval(()=>{},1000)" # runtime-${index}`,
             mode: 'background',
@@ -75,7 +75,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
           createSharedFiles,
           ...backgroundCalls,
           { index: 20, id: 'tree', type: 'function', function: { name: 'workspace_tree', arguments: JSON.stringify({ max_depth: 4 }) } },
-          { index: 21, id: 'write-shared', type: 'function', function: { name: 'apply_patch', arguments: JSON.stringify({ changes: [{ path: 'user-created/from-agent.txt', content: 'shared-agent-file' }] }) } },
+          { index: 21, id: 'write-shared', type: 'function', function: { name: 'run_command', arguments: JSON.stringify({ command: 'echo shared-agent-file > user-created/from-agent.txt', mode: 'foreground' }) } },
         ] }),
       });
       return;
@@ -85,7 +85,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
       if (!transcript.includes('user-created/from-terminal/proof.txt')) throw new Error('Agent workspace_tree did not observe the shared container root file.');
       await route.fulfill({
         contentType: 'text/event-stream',
-        body: streamTools([{ id: 'verify-shared-root', name: 'shell_run', arguments: { command: 'pwd && node -e "const fs=require(\'fs\');const root=process.env.SUNAM_WORKSPACE;if(process.cwd()!==root||process.env.HOME!==\'/home/workspace\'||!fs.existsSync(\'user-created/from-terminal/proof.txt\')||!fs.existsSync(\'user-created/from-agent.txt\'))process.exit(1);process.stdout.write(fs.readFileSync(root+\'/user-created/from-agent.txt\',\'utf8\'))"', mode: 'foreground' } }]),
+        body: streamTools([{ id: 'verify-shared-root', name: 'run_command', arguments: { command: 'pwd && node -e "const fs=require(\'fs\');const root=process.env.SUNAM_WORKSPACE;if(process.cwd()!==root||process.env.HOME!==\'/home/workspace\'||!fs.existsSync(\'user-created/from-terminal/proof.txt\')||!fs.existsSync(\'user-created/from-agent.txt\'))process.exit(1);process.stdout.write(fs.readFileSync(root+\'/user-created/from-agent.txt\',\'utf8\'))"', mode: 'foreground' } }]),
       });
       return;
     }
@@ -171,7 +171,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(page.locator('.terminal-environment-path')).toHaveCount(0);
 
   // 用户终端无交互 stdin（Succinix 文件 RPC 物理边界）：终端是"读输出"横幅，不能再键入命令。
-  // 断言横幅出现；共享文件与 cwd/env 语义改由 agent 路径（shell_run → runShell）验证。
+  // 断言横幅出现；共享文件与 cwd/env 语义改由 agent 路径（run_command → runShell）验证。
   await expect(terminalRows).toContainText('Succinix terminal ready');
 
   await composer.fill('请执行完整的 WebContainer runtime smoke verification command and services test');
@@ -366,7 +366,7 @@ test('real WebContainer materializes a resource and excludes generated directori
       return;
     }
     if (turn === 2) {
-      await route.fulfill({ contentType: 'text/event-stream', body: streamTools([{ id: 'verify', name: 'shell_run', arguments: { command: 'npm test', mode: 'foreground' } }]) });
+      await route.fulfill({ contentType: 'text/event-stream', body: streamTools([{ id: 'verify', name: 'run_command', arguments: { command: 'npm test', mode: 'foreground' } }]) });
       return;
     }
     await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
@@ -439,7 +439,7 @@ test('real WebContainer cascades parent cancellation into a task child process',
     }
     const lastUser = [...(body.messages ?? [])].reverse().find((message) => message.role === 'user');
     if (String(lastUser?.content).includes('Run the long verification command.')) {
-      await route.fulfill({ contentType: 'text/event-stream', body: streamTools([{ id: 'child-shell', name: 'shell_run', arguments: { command: 'npm test', mode: 'foreground', timeout_ms: 300_000 } }]) });
+      await route.fulfill({ contentType: 'text/event-stream', body: streamTools([{ id: 'child-shell', name: 'run_command', arguments: { command: 'npm test', mode: 'foreground', timeout_ms: 300_000 } }]) });
       return;
     }
     rootTurn += 1;

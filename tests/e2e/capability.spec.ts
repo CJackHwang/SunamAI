@@ -64,7 +64,7 @@ test('module rows expand to reveal agent-visible tools and warn on agent-runtime
   const rail = page.locator('.capability-rail');
   // Expanding the container module reveals its agent-visible tools.
   await rail.getByText('虚拟容器').click();
-  await expect(rail.getByRole('switch', { name: 'shell_run' })).toBeVisible();
+  await expect(rail.getByRole('switch', { name: 'run_command' })).toBeVisible();
   await rail.getByText('虚拟容器').click();
 
   // The agent-runtime module warns that disabling is not recommended.

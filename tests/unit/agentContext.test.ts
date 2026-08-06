@@ -36,7 +36,7 @@ describe('ContextComposer', () => {
     const messages = [
       ...round('old-read', 'read_file', 'a.ts', 'same body'),
       ...round('same-read', 'read_file', 'a.ts', 'same body'),
-      ...round('write', 'apply_patch', 'a.ts', 'created a.ts'),
+      ...round('write', 'run_command', 'a.ts', 'created a.ts'),
       ...round('failure', 'read_file', 'missing.ts', 'Error: not found'),
       ...round('other-1', 'workspace_tree', '', 'tree'),
       ...round('other-2', 'workspace_tree', '', 'tree'),
@@ -59,8 +59,8 @@ describe('ContextComposer', () => {
       ] },
       { role: 'tool', tool_call_id: 'a-1', name: 'read_file', content: 'A old' },
       { role: 'tool', tool_call_id: 'b-1', name: 'read_file', content: 'B body' },
-      { role: 'assistant', content: '', tool_calls: [{ id: 'write-a', type: 'function', function: { name: 'apply_patch', arguments: '{"changes":[{"path":"a.ts","content":"A new"}]}' } }] },
-      { role: 'tool', tool_call_id: 'write-a', name: 'apply_patch', content: 'Updated a.ts' },
+      { role: 'assistant', content: '', tool_calls: [{ id: 'write-a', type: 'function', function: { name: 'run_command', arguments: '{"command":"cat > a.ts << \'EOF\'","mode":"foreground"}' } }] },
+      { role: 'tool', tool_call_id: 'write-a', name: 'run_command', content: 'Updated a.ts' },
       { role: 'assistant', content: '', tool_calls: [{ id: 'a-2', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.ts"}' } }] },
       { role: 'tool', tool_call_id: 'a-2', name: 'read_file', content: 'A old' },
     ];

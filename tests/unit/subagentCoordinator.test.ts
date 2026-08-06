@@ -19,7 +19,7 @@ class RuntimeStub implements AgentWorkspaceRuntime {
   async listResources(): Promise<[]> { return []; }
   async readResourceText(): Promise<string> { return ''; }
   async readResourceImage() { return { id: 'resource', name: 'image.png', kind: 'image' as const, mimeType: 'image/png', size: 1, sha256: 'hash', createdAt: 1 }; }
-  async materializeResource(_containerId: string, _resourceId: string, path: string) { return { path, kind: 'created' as const, beforeBytes: 0, afterBytes: 1 }; }
+  async materializeResource(_sessionId: string, _containerId: string, _resourceId: string, path: string) { return { path, kind: 'created' as const, beforeBytes: 0, afterBytes: 1 }; }
   async listWorkspace(): Promise<WorkspaceTreeEntry[]> { return []; }
   async readWorkspaceFile(): Promise<string> { return ''; }
   async searchWorkspace(): Promise<[]> { return []; }
@@ -182,7 +182,7 @@ describe('AgentFamilyCoordinator', () => {
     await Promise.all([first.started, second.started]);
     first.finish();
     const verifyCalls = [
-      { id: 'verify-command', name: 'shell_run', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground' }) },
+      { id: 'verify-command', name: 'run_command', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground' }) },
       { id: 'verify-complete', name: 'complete_task', arguments: JSON.stringify({ summary: 'Verification passed.', evidence: ['npm test passed'] }) },
     ];
     second.finish({ message: { role: 'assistant', content: '', tool_calls: verifyCalls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })) }, toolCalls: verifyCalls });
@@ -339,7 +339,7 @@ describe('AgentFamilyCoordinator', () => {
 
   it('merges child changed paths and evidence', async () => {
     const implementation = new ScriptedClient([
-      tool('patch', 'apply_patch', { changes: [{ path: 'src/new.ts', content: 'export {}' }] }),
+      tool('patch', 'materialize_resource', { resource_id: 'resource', path: 'src/new.ts' }),
       tool('finish', 'complete_task', { summary: 'implemented', evidence: ['file created'] }),
     ]);
     const family = coordinator([implementation]);

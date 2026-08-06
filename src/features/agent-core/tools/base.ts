@@ -22,7 +22,7 @@ export interface ToolExecutionContext {
   agentRole: AgentRole;
   /** Whether the container capability is usable (false = chat-only session). */
   containerAvailable?: boolean;
-  /** Whether `shell_run` is exposed (false → no verification tool). */
+  /** Whether `run_command` is exposed (false → no verification tool). */
   shellAvailable?: boolean;
   writeScope?: string[];
   subagents?: SubagentHost;

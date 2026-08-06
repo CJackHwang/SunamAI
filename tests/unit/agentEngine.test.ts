@@ -94,14 +94,17 @@ class FakeRuntime implements AgentWorkspaceRuntime {
   async listResources(): Promise<[]> { return []; }
   async readResourceText(): Promise<string> { return ''; }
   async readResourceImage() { return { id: 'res', name: 'image.png', kind: 'image' as const, mimeType: 'image/png', size: 1, sha256: 'x', createdAt: 1 }; }
-  async materializeResource(_containerId: string, _resourceId: string, path: string) { return { path, kind: 'created' as const, beforeBytes: 0, afterBytes: 1 }; }
+  async materializeResource(_sessionId: string, _containerId: string, _resourceId: string, path: string) { this.files.set(path, 'materialized'); return { path, kind: 'created' as const, beforeBytes: 0, afterBytes: 1 }; }
   async listWorkspace(): Promise<WorkspaceTreeEntry[]> { return []; }
   getUserTerminalBuffer(): string { return ''; }
   appendUserTerminalBuffer(_data: string): void {}
   async readWorkspaceFile(_containerId: string, path: string): Promise<string> { return this.files.get(path) ?? ''; }
   async searchWorkspace(): Promise<Array<{ path: string; line: number; content: string }>> { return []; }
   async applyWorkspaceChanges(_containerId: string, changes: Array<{ path: string; content: string }>) { changes.forEach((change) => this.files.set(change.path, change.content)); return changes.map((change) => ({ path: change.path, kind: 'updated' as const, beforeBytes: 0, afterBytes: change.content.length })); }
-  async runShell(request: ShellRunRequest): Promise<ShellRunResult> { this.commands.push(request.command); return { timedOut: false, process: { id: 'p-1', sessionId: request.sessionId, runId: request.runId, containerId: request.containerId, command: request.command, isRunning: false, output: 'passed', cursor: 6, exitCode: 0 } }; }
+  async runShell(request: ShellRunRequest): Promise<ShellRunResult> {
+    this.commands.push(request.command);
+    return { timedOut: false, process: { id: 'p-1', sessionId: request.sessionId, runId: request.runId, containerId: request.containerId, command: request.command, isRunning: false, output: 'passed', cursor: 6, exitCode: 0 } };
+  }
   observeProcess(): ProcessStatus | null { return null; }
   async sendProcessInput(): Promise<boolean> { return false; }
   async stopProcess(): Promise<boolean> { return false; }
@@ -212,8 +215,8 @@ describe('Agent Core v2', () => {
     const exploreTools = exploreClient.tools.map((tool) => tool.function.name);
     const taskTools = taskClient.tools.map((tool) => tool.function.name);
     expect(exploreTools).toEqual(expect.arrayContaining(['workspace_tree', 'read_file', 'search_workspace', 'ask_parent', 'complete_task']));
-    expect(exploreTools).not.toEqual(expect.arrayContaining(['ask_user', 'apply_patch', 'shell_run', 'process_list', 'spawn_subagent']));
-    expect(taskTools).toEqual(expect.arrayContaining(['apply_patch', 'materialize_resource', 'shell_run', 'process_list', 'process_stop', 'read_user_terminal', 'ask_parent', 'complete_task']));
+    expect(exploreTools).not.toEqual(expect.arrayContaining(['ask_user', 'run_command', 'manage_process', 'spawn_subagent']));
+    expect(taskTools).toEqual(expect.arrayContaining(['materialize_resource', 'run_command', 'manage_process', 'read_user_terminal', 'ask_parent', 'complete_task']));
     expect(taskTools).not.toEqual(expect.arrayContaining(['ask_user', 'spawn_subagent', 'wait_subagents', 'message_subagent', 'stop_subagent']));
   });
 
@@ -310,7 +313,7 @@ describe('Agent Core v2', () => {
     const runtime = new BackgroundServerRuntime();
     const events: AgentEvent[] = [];
     const client = new ScriptedClient([
-      tool('server', 'shell_run', { command: 'npm run dev', mode: 'background' }),
+      tool('server', 'run_command', { command: 'npm run dev', mode: 'background' }),
       { message: { role: 'assistant', content: 'Server is running at http://localhost:3000.' }, toolCalls: [] },
     ]);
     const engine = new AgentEngine({ sessionId: 'server-session', containerId: 'c-server-container', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Start the server', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
@@ -327,8 +330,8 @@ describe('Agent Core v2', () => {
     const events: AgentEvent[] = [];
     const client = new ScriptedClient([
       tool('plan', 'update_plan', { items: [{ id: 'deliver', title: 'Implement and verify', status: 'in_progress' }] }),
-      tool('patch', 'apply_patch', { changes: [{ path: 'demo.txt', content: 'done' }] }),
-      tool('verify', 'shell_run', { command: 'npm test', mode: 'foreground' }),
+      tool('patch', 'materialize_resource', { resource_id: 'res', path: 'demo.txt' }),
+      tool('verify', 'run_command', { command: 'npm test', mode: 'foreground' }),
       tool('plan-done', 'update_plan', { items: [{ id: 'deliver', title: 'Implement and verify', status: 'completed' }] }),
       { message: { role: 'assistant', content: 'Implemented and verified.' }, toolCalls: [] },
     ]);
@@ -364,9 +367,9 @@ describe('Agent Core v2', () => {
     const events: AgentEvent[] = [];
     const client = new ScriptedClient([
       tool('plan', 'update_plan', { items: [{ id: 'deliver', title: 'Implement and verify', status: 'completed' }] }),
-      tool('patch', 'apply_patch', { changes: [{ path: 'demo.txt', content: 'done' }] }),
+      tool('patch', 'materialize_resource', { resource_id: 'res', path: 'demo.txt' }),
       { message: { role: 'assistant', content: 'Finished too early.' }, toolCalls: [] },
-      tool('verify', 'shell_run', { command: 'npm test', mode: 'foreground' }),
+      tool('verify', 'run_command', { command: 'npm test', mode: 'foreground' }),
       { message: { role: 'assistant', content: 'Finished after verification.' }, toolCalls: [] },
     ]);
     const engine = new AgentEngine({ sessionId: 's-withheld', containerId: 'c-withheld', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Implement and test the requested workspace change.', initialMessages: [], client, runtime: new FakeRuntime(), store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
@@ -397,9 +400,9 @@ describe('Agent Core v2', () => {
     const events: AgentEvent[] = [];
     const client = new ScriptedClient([
       tool('plan', 'update_plan', { items: [{ id: 'deliver', title: 'Make and verify the workspace change', status: 'in_progress' }] }),
-      tool('patch', 'apply_patch', { changes: [{ path: 'demo.txt', content: 'works' }] }),
+      tool('patch', 'materialize_resource', { resource_id: 'res', path: 'demo.txt' }),
       tool('early-complete', 'complete_task', { summary: 'definitely done', evidence: ['trust me'] }),
-      tool('verify', 'shell_run', { command: 'npm test', mode: 'foreground' }),
+      tool('verify', 'run_command', { command: 'npm test', mode: 'foreground' }),
       tool('plan-complete', 'update_plan', { items: [{ id: 'deliver', title: 'Make and verify the workspace change', status: 'completed' }] }),
       tool('finish', 'complete_task', { summary: 'Done with evidence.', evidence: ['npm test passed'] }),
     ]);
@@ -408,7 +411,7 @@ describe('Agent Core v2', () => {
     });
     await engine.execute();
     expect(engine.getRun().phase).toBe('completed');
-    expect(runtime.files.get('demo.txt')).toBe('works');
+    expect(runtime.files.get('demo.txt')).toBe('materialized');
     expect(runtime.commands).toEqual(['npm test']);
     expect(events.some((event) => event.kind === 'tool_finished' && event.toolCall.function.name === 'complete_task' && !event.result.ok)).toBe(true);
     expect(events.some((event) => event.kind === 'verification' && event.passed)).toBe(true);
@@ -461,8 +464,8 @@ describe('Agent Core v2', () => {
     const events: AgentEvent[] = [];
     const client = new ScriptedClient([
       tool('plan', 'update_plan', { items: [{ id: 'deliver', title: 'Change file', status: 'completed' }] }),
-      tool('patch', 'apply_patch', { changes: [{ path: 'broken.txt', content: 'broken' }] }),
-      tool('verify', 'shell_run', { command: 'npm test', mode: 'foreground' }),
+      tool('patch', 'materialize_resource', { resource_id: 'res', path: 'broken.txt' }),
+      tool('verify', 'run_command', { command: 'npm test', mode: 'foreground' }),
       tool('finish', 'complete_task', { summary: 'not actually done', evidence: ['npm test failed'] }),
     ]);
     const engine = new AgentEngine({ sessionId: 's-4', containerId: 'c-4', persona: 'Sunam 6.9 Pron', model: 'model', input: 'Implement and test a workspace change.', initialMessages: [], client, runtime, store: new AgentEventStore(), signal: new AbortController().signal, onEvent: (event) => events.push(event), onRunChange: () => undefined });
@@ -532,7 +535,7 @@ describe('Agent Core v2', () => {
       workspaceRevision: 2, verified: true, verifiedRevision: 2, verificationEvidence: [{ command: 'npm test', passed: true, workspaceRevision: 2, createdAt: 1 }],
     };
     const client = new CapturingClient([
-      tool('verify-again', 'shell_run', { command: 'npm test', mode: 'foreground' }),
+      tool('verify-again', 'run_command', { command: 'npm test', mode: 'foreground' }),
       tool('finish', 'complete_task', { summary: 'Resumed and complete.', evidence: ['Resumed workspace was verified again.'] }),
     ]);
     const engine = new AgentEngine({
@@ -618,7 +621,7 @@ describe('Agent Core v2', () => {
     const events: AgentEvent[] = [];
     const unsafe = [
       { id: 'finish-early', name: 'complete_task', arguments: JSON.stringify({ summary: 'Done too early.', evidence: ['claim'] }) },
-      { id: 'write-late', name: 'apply_patch', arguments: JSON.stringify({ changes: [{ path: 'late.txt', content: 'unverified' }] }) },
+      { id: 'write-late', name: 'run_command', arguments: JSON.stringify({ command: "cat > late.txt << 'EOF'\nunverified\nEOF", mode: 'foreground' }) },
     ];
     const client = new ScriptedClient([
       { message: { role: 'assistant', content: '', tool_calls: unsafe.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })) }, toolCalls: unsafe },

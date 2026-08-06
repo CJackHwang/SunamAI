@@ -41,14 +41,12 @@ export class AgentToolRegistry {
     const parsed = tool.schema.safeParse(input);
     if (!parsed.success) return { ok: false, content: `Tool ${call.name} input validation failed: ${parsed.error.issues.map((issue) => issue.message).join('; ')}` };
     try {
-      if (context.agentRole === 'verify' && call.name === 'shell_run') {
+      if (context.agentRole === 'verify' && call.name === 'run_command') {
         const shell = parsed.data as { mode?: unknown; command?: unknown };
         if (shell.mode !== 'foreground' || typeof shell.command !== 'string') return { ok: false, content: 'Verify agents may run foreground shell checks only.' };
       }
-      if (context.writeScope?.length && (call.name === 'apply_patch' || call.name === 'materialize_resource')) {
-        const paths = call.name === 'apply_patch'
-          ? ((parsed.data as { changes?: Array<{ path: string }> }).changes ?? []).map((change) => change.path)
-          : [String((parsed.data as { path?: unknown }).path ?? '')];
+      if (context.writeScope?.length && call.name === 'materialize_resource') {
+        const paths = [String((parsed.data as { path?: unknown }).path ?? '')];
         const scopes = context.writeScope.map((scope) => resolveContainerPath(context.containerId, scope));
         if (paths.some((path) => {
           const target = resolveContainerPath(context.containerId, path);
@@ -56,7 +54,7 @@ export class AgentToolRegistry {
         })) return { ok: false, content: 'Tool call is outside the delegated write scope.' };
       }
       const execute = () => tool.execute(parsed.data, context);
-      return ['apply_patch', 'materialize_resource', 'shell_run'].includes(call.name) ? await context.mutationLease.run(context.containerId, execute) : await execute();
+      return ['materialize_resource', 'run_command'].includes(call.name) ? await context.mutationLease.run(context.containerId, execute) : await execute();
     } catch (error) {
       return { ok: false, content: error instanceof Error ? error.message : String(error) };
     }

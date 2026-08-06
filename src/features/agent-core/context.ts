@@ -107,7 +107,7 @@ function toolIdentity(call: NonNullable<Message['tool_calls']>[number]): { name:
 }
 
 function isProtectedToolOutput(name: string, content: string): boolean {
-  return /apply_patch|write|edit|shell_run|verify|test/i.test(name) || /\b(error|failed|failure|exception|not found|exit code [1-9])\b/i.test(content);
+  return /run_command|write|edit|verify|test/i.test(name) || /\b(error|failed|failure|exception|not found|exit code [1-9])\b/i.test(content);
 }
 
 export function microCompact(messages: Message[], estimate: (value: string) => number): { messages: Message[]; changed: boolean } {
@@ -119,11 +119,11 @@ export function microCompact(messages: Message[], estimate: (value: string) => n
   groups.forEach((group, groupIndex) => {
     const calls = new Map((group.messages[0]?.tool_calls ?? []).map((call) => [call.id, call]));
     for (const call of calls.values()) {
-      if (call.function.name === 'shell_run') { globalGeneration += 1; continue; }
-      if (!/apply_patch|materialize_resource/i.test(call.function.name)) continue;
+      if (call.function.name === 'run_command') { globalGeneration += 1; continue; }
+      if (!/materialize_resource/i.test(call.function.name)) continue;
       try {
-        const input = JSON.parse(call.function.arguments) as { path?: unknown; changes?: Array<{ path?: unknown }> };
-        const paths = call.function.name === 'apply_patch' ? (input.changes ?? []).map((change) => String(change.path ?? '')) : [String(input.path ?? '')];
+        const input = JSON.parse(call.function.arguments) as { path?: unknown };
+        const paths = [String(input.path ?? '')];
         paths.filter(Boolean).forEach((path) => pathGenerations.set(path, (pathGenerations.get(path) ?? 0) + 1));
       } catch { globalGeneration += 1; }
     }
@@ -183,7 +183,7 @@ function deterministicSummary(groups: MessageGroup[], estimate: (value: string) 
       const line = persistedResourceMarker(message) ?? clipTokens(stripHeavyPayloads(message.content), 180, estimate);
       if (message.role === 'user') userFeedback.push(line);
       if (/\b(error|failed|failure|exception|exit code [1-9])\b/i.test(line)) failures.push(line);
-      if (/apply_patch|changed|modified|created|deleted/i.test(`${message.name ?? ''} ${line}`)) changes.push(line);
+      if (/changed|modified|created|deleted/i.test(`${message.name ?? ''} ${line}`)) changes.push(line);
       if (/test|verify|passed|build/i.test(`${message.name ?? ''} ${line}`)) verification.push(line);
     }
   }

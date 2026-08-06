@@ -49,21 +49,4 @@ export const workspaceTools: RegisteredTool[] = [
       return { ok: true, content: matches.map((match) => `${match.path}:${match.line}: ${match.content}`).join('\n') || '(no matches)', data: matches };
     },
   }),
-  defineTool({
-    name: 'apply_patch',
-    description: 'Apply one or more full-file changes atomically within the active workspace. Use this for ALL file edits. Group multiple file changes into a single array payload to save time.',
-    schema: z.object({ changes: z.array(z.object({ path: z.string().min(1), content: z.string(), expected_content: z.string().optional() })).min(1).max(12) }),
-    readOnly: false,
-    concurrencySafe: false,
-    dataImpact: 'workspace',
-    timeoutMs: 30_000,
-    resultType: 'changes',
-    capability: VIRTUAL_CONTAINER,
-    async execute(input, context) {
-      const changes = await context.runtime.applyWorkspaceChanges(context.containerId, input.changes.map((change) => ({ path: change.path, content: change.content, ...(change.expected_content !== undefined ? { expectedContent: change.expected_content } : {}) })));
-      const workspaceRevision = await context.runtime.getWorkspaceRevision(context.containerId);
-      context.updateTask((task) => ({ ...task, changedWorkspace: true, workspaceRevision, verified: false, verifiedRevision: -1 }));
-      return { ok: true, content: changes.map((change) => `${change.kind === 'created' ? 'Created' : 'Updated'} ${change.path} (${change.beforeBytes} → ${change.afterBytes} bytes)`).join('\n'), data: changes, changedWorkspace: true };
-    },
-  }),
 ];

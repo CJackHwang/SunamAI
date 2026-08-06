@@ -37,7 +37,7 @@ const shellDependentTool: RegisteredTool = defineTool({
   dataImpact: 'none',
   timeoutMs: 1_000,
   resultType: 'text',
-  capability: { module: 'ext:echo', defaultEnabled: true, dependencies: ['shell_run'] },
+  capability: { module: 'ext:echo', defaultEnabled: true, dependencies: ['run_command'] },
   async execute() { return { ok: true, content: 'ok' }; },
 });
 
@@ -55,7 +55,7 @@ describe('capabilityRegistry', () => {
         expect(tool.capability.module).toBe(module.descriptor.id);
       }
     }
-    expect(names.size).toBeGreaterThan(20);
+    expect(names.size).toBeGreaterThan(15);
     expect(capabilityRegistry.hasModule('agent-runtime')).toBe(true);
     expect(capabilityRegistry.hasModule('virtual-container')).toBe(true);
     expect(capabilityRegistry.hasModule('resources')).toBe(true);
@@ -93,8 +93,8 @@ describe('capabilityRegistry', () => {
 
   it('resolveEnabledTools: default config enables all manifest-default tools', () => {
     const enabled = capabilityRegistry.resolveEnabledTools({ modules: {}, tools: {} });
-    expect(enabled.has('shell_run')).toBe(true);
-    expect(enabled.has('apply_patch')).toBe(true);
+    expect(enabled.has('run_command')).toBe(true);
+    expect(enabled.has('workspace_tree')).toBe(true);
     expect(enabled.has('read_resource_text')).toBe(true);
     expect(enabled.has('complete_task')).toBe(true);
   });
@@ -102,33 +102,33 @@ describe('capabilityRegistry', () => {
   it('resolveEnabledTools: disabling the container module forces its tools off', () => {
     const config: CapabilityConfig = { modules: { 'virtual-container': { enabled: false } }, tools: {} };
     const enabled = capabilityRegistry.resolveEnabledTools(config);
-    expect(enabled.has('shell_run')).toBe(false);
-    expect(enabled.has('apply_patch')).toBe(false);
+    expect(enabled.has('run_command')).toBe(false);
+    expect(enabled.has('workspace_tree')).toBe(false);
     expect(enabled.has('materialize_resource')).toBe(false);
     expect(enabled.has('read_resource_text')).toBe(true);
   });
 
   it('resolveEnabledTools: per-tool override wins over the default', () => {
-    const config: CapabilityConfig = { modules: {}, tools: { apply_patch: false } };
+    const config: CapabilityConfig = { modules: {}, tools: { workspace_tree: false } };
     const enabled = capabilityRegistry.resolveEnabledTools(config);
-    expect(enabled.has('apply_patch')).toBe(false);
-    expect(enabled.has('shell_run')).toBe(true);
+    expect(enabled.has('workspace_tree')).toBe(false);
+    expect(enabled.has('run_command')).toBe(true);
   });
 
   it('resolveEnabledTools: a dependency can be disabled together with its dependents', () => {
     const config: CapabilityConfig = {
       modules: {},
-      tools: { shell_run: false, process_list: false, process_observe: false, process_input: false, process_stop: false, read_user_terminal: false },
+      tools: { run_command: false, manage_process: false, read_user_terminal: false },
     };
     const enabled = capabilityRegistry.resolveEnabledTools(config);
-    expect(enabled.has('shell_run')).toBe(false);
-    expect(enabled.has('process_list')).toBe(false);
+    expect(enabled.has('run_command')).toBe(false);
+    expect(enabled.has('manage_process')).toBe(false);
   });
 
   it('resolveEnabledTools: restricted availability excludes the container module even when enabled', () => {
     const config: CapabilityConfig = { modules: {}, tools: {} };
     const enabled = capabilityRegistry.resolveEnabledTools(config, 'restricted');
-    expect(enabled.has('shell_run')).toBe(false);
+    expect(enabled.has('run_command')).toBe(false);
     expect(enabled.has('workspace_tree')).toBe(false);
     expect(enabled.has('read_resource_text')).toBe(true);
     expect(enabled.has('complete_task')).toBe(true);
@@ -138,10 +138,10 @@ describe('capabilityRegistry', () => {
     const extension = makeExtensionModule('ext:echo', [shellDependentTool]);
     capabilityRegistry.registerModule(extension);
     try {
-      const config: CapabilityConfig = { modules: {}, tools: { ext_shell_user: true, shell_run: false } };
+      const config: CapabilityConfig = { modules: {}, tools: { ext_shell_user: true, run_command: false } };
       const enabled = capabilityRegistry.resolveEnabledTools(config);
       expect(enabled.has('ext_shell_user')).toBe(true);
-      expect(enabled.has('shell_run')).toBe(true);
+      expect(enabled.has('run_command')).toBe(true);
     } finally {
       capabilityRegistry.unregisterModule('ext:echo');
     }

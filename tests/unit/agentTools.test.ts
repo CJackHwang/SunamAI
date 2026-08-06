@@ -5,6 +5,11 @@ import type { AgentWorkspaceRuntime, ProcessOwnership, ProcessStatus } from '@/s
 import { ContainerMutationLease } from '@/features/agent-core/agentFamily';
 import { buildAgentSystemPrompt, createChaosContract } from '@/features/agent-core/prompt';
 
+/** A materialize_resource call that simulates creating a workspace file. */
+function writeFile(path: string): string {
+  return JSON.stringify({ resource_id: 'res-1', path });
+}
+
 function createContext() {
   let task: TaskContract = { objective: 'work', acceptanceCriteria: [], constraints: [], requiresPlan: true, plan: [], evidence: [], changedWorkspace: false, workspaceRevision: 0, verified: false, verifiedRevision: -1, verificationEvidence: [] };
   let workspaceRevision = 0;
@@ -39,12 +44,12 @@ describe('AgentToolRegistry', () => {
   it('does not hardcode verification command names, arguments, or ports', async () => {
     const registry = new AgentToolRegistry();
     const { context, getTask } = createContext();
-    await registry.execute({ id: 'patch', name: 'apply_patch', arguments: '{"changes":[{"path":"a.ts","content":"next"}]}' }, context);
+    await registry.execute({ id: 'patch', name: 'materialize_resource', arguments: writeFile('a.ts') }, context);
     for (const [index, command] of ['node --check a.ts', 'curl http://localhost:4173/health', 'custom-project-validator --port 9081', "npm test && echo 'passed'"].entries()) {
-      const result = await registry.execute({ id: `verify-${index}`, name: 'shell_run', arguments: JSON.stringify({ command, mode: 'foreground' }) }, context);
+      const result = await registry.execute({ id: `verify-${index}`, name: 'run_command', arguments: JSON.stringify({ command, mode: 'foreground' }) }, context);
       expect(result.verification).toMatchObject({ command, passed: true });
     }
-    const inspection = await registry.execute({ id: 'inspect', name: 'shell_run', arguments: '{"command":"cat package.json && git status --short","mode":"foreground"}' }, context);
+    const inspection = await registry.execute({ id: 'inspect', name: 'run_command', arguments: '{"command":"cat package.json && git status --short","mode":"foreground"}' }, context);
     expect(inspection.verification?.passed).toBe(true);
     expect(getTask()).toMatchObject({ changedWorkspace: true, verified: true });
     await registry.execute({ id: 'plan', name: 'update_plan', arguments: '{"items":[{"id":"done","title":"Done","status":"completed"}]}' }, context);
@@ -58,7 +63,7 @@ describe('AgentToolRegistry', () => {
     expect(prompt).toContain('ports, and shell composition are not restricted');
     expect(prompt).toContain('never use forced success or unrelated commands as fake evidence');
     expect(prompt).toContain('later workspace mutation requires another foreground check');
-    expect(prompt).toContain('Before managing a previously started service, call `process_list`');
+    expect(prompt).toContain('Before managing a previously started service, call `manage_process`');
     expect(prompt).toContain('Do not guess OS PIDs or kill by port');
     expect(prompt).toContain('Use `explore` for independent read-only investigation and `task` for work that may edit files');
     expect(prompt).toContain('issue every `spawn_subagent` call before `wait_subagents`');
@@ -74,41 +79,43 @@ describe('AgentToolRegistry', () => {
     expect(childPrompt).toContain('call `ask_parent`');
     expect(childPrompt).toContain('plain response never completes a child');
     expect(childPrompt).toContain('/home/workspace/c-1');
-    expect(childPrompt).not.toContain('After making changes, you MUST use `shell_run`');
+    expect(childPrompt).not.toContain('After making changes, you MUST use `run_command`');
   });
 
   it('executes workspace, shell, process, and control tools with truthful task updates', async () => {
     const registry = new AgentToolRegistry();
     const { context, runtime, getTask } = createContext();
-    expect(registry.getApiDefinitions()).toHaveLength(22);
+    expect(registry.getApiDefinitions()).toHaveLength(18);
     expect(registry.getMetadata('workspace_tree')).toMatchObject({ concurrencySafe: true, dataImpact: 'none', timeoutMs: 10_000, resultType: 'tree' });
-    expect(registry.getMetadata('apply_patch')).toMatchObject({ readOnly: false, dataImpact: 'workspace', resultType: 'changes' });
+    expect(registry.getMetadata('materialize_resource')).toMatchObject({ readOnly: false, dataImpact: 'workspace', resultType: 'changes' });
     expect(registry.getMetadata('missing')).toBeNull();
     expect((await registry.execute({ id: '1', name: 'workspace_tree', arguments: '{bad' }, context)).ok).toBe(false);
     expect((await registry.execute({ id: '1', name: 'missing', arguments: '{}' }, context)).content).toContain('not available');
     expect((await registry.execute({ id: '1', name: 'workspace_tree', arguments: JSON.stringify({ max_depth: 2 }) }, context)).content).toContain('a.ts');
     expect((await registry.execute({ id: '2', name: 'read_file', arguments: JSON.stringify({ path: 'a.ts' }) }, context)).content).toBe('content');
     expect((await registry.execute({ id: '3', name: 'search_workspace', arguments: JSON.stringify({ query: 'needle' }) }, context)).content).toContain('needle');
-    expect((await registry.execute({ id: '4', name: 'apply_patch', arguments: JSON.stringify({ changes: [{ path: 'a.ts', content: 'next' }] }) }, context)).changedWorkspace).toBe(true);
+    expect((await registry.execute({ id: '4', name: 'materialize_resource', arguments: writeFile('a.ts') }, context)).changedWorkspace).toBe(true);
     expect(getTask().changedWorkspace).toBe(true);
-    const shell = await registry.execute({ id: '5', name: 'shell_run', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground', timeout_ms: 12_345 }) }, context);
+    const shell = await registry.execute({ id: '5', name: 'run_command', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground', timeout_ms: 12_345 }) }, context);
     expect(shell.verification?.passed).toBe(true);
     expect(runtime.runShell).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 12_345 }));
     expect(getTask().verificationEvidence).toHaveLength(1);
     const previousRunProcess: ProcessStatus = { id: 'p-1', sessionId: 's-1', runId: 'r-previous', containerId: 'c-1', command: 'npm run dev -- --port 1919', isRunning: true, output: 'ready on 1919', cursor: 13 };
     runtime.getProcesses = vi.fn(() => [previousRunProcess]);
     runtime.observeProcess = vi.fn(() => previousRunProcess);
-    expect((await registry.execute({ id: 'process-list', name: 'process_list', arguments: '{}' }, context)).content).toContain('r-previous');
-    expect((await registry.execute({ id: '6', name: 'process_observe', arguments: JSON.stringify({ process_id: 'p-1' }) }, context)).ok).toBe(true);
-    expect((await registry.execute({ id: '7', name: 'process_input', arguments: JSON.stringify({ process_id: 'p-1', input: 'y' }) }, context)).ok).toBe(true);
-    expect((await registry.execute({ id: '8', name: 'process_stop', arguments: JSON.stringify({ process_id: 'p-1' }) }, context)).ok).toBe(true);
+    expect((await registry.execute({ id: 'process-list', name: 'manage_process', arguments: '{"action":"list"}' }, context)).content).toContain('r-previous');
+    expect((await registry.execute({ id: '6', name: 'manage_process', arguments: JSON.stringify({ action: 'observe', process_id: 'p-1' }) }, context)).ok).toBe(true);
+    const inputResult = await registry.execute({ id: '7', name: 'manage_process', arguments: JSON.stringify({ action: 'input', process_id: 'p-1', input: 'y' }) }, context);
+    expect(inputResult.ok).toBe(false);
+    expect(inputResult.content).toContain('stdin is not supported');
+    expect((await registry.execute({ id: '8', name: 'manage_process', arguments: JSON.stringify({ action: 'stop', process_id: 'p-1' }) }, context)).ok).toBe(true);
     expect(runtime.stopProcess).toHaveBeenCalledWith('p-1', { sessionId: 's-1', runId: 'r-previous', containerId: 'c-1' });
     expect((await registry.execute({ id: '9', name: 'update_plan', arguments: JSON.stringify({ items: [{ id: 'plan', title: 'Done', status: 'completed' }] }) }, context)).ok).toBe(true);
     expect((await registry.execute({ id: 'resource-list', name: 'list_resources', arguments: '{}' }, context)).content).toBe('(no resources)');
     expect((await registry.execute({ id: 'resource-text', name: 'read_resource_text', arguments: '{"resource_id":"res-1","start_line":1}' }, context)).content).toBe('resource content');
     expect((await registry.execute({ id: 'resource-image', name: 'read_resource_image', arguments: '{"resource_id":"res-1"}' }, context)).modelContent).toEqual([{ type: 'image_resource', resourceId: 'res-1' }]);
     expect((await registry.execute({ id: 'resource-file', name: 'materialize_resource', arguments: '{"resource_id":"res-1","path":"assets/image.png"}' }, context)).changedWorkspace).toBe(true);
-    expect((await registry.execute({ id: 'resource-verify', name: 'shell_run', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground' }) }, context)).verification?.passed).toBe(true);
+    expect((await registry.execute({ id: 'resource-verify', name: 'run_command', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground' }) }, context)).verification?.passed).toBe(true);
     expect((await registry.execute({ id: '10', name: 'report_progress', arguments: JSON.stringify({ message: 'progress' }) }, context)).content).toBe('progress');
     expect((await registry.execute({ id: '11', name: 'ask_user', arguments: JSON.stringify({ question: 'Need input?' }) }, context)).stopRun).toBe('awaiting_user');
     expect((await registry.execute({ id: 'ask-parent-root', name: 'ask_parent', arguments: JSON.stringify({ question: 'Need parent?' }) }, context)).ok).toBe(false);
@@ -140,23 +147,25 @@ describe('AgentToolRegistry', () => {
     runtime.stopProcess = vi.fn(async () => { runtimeRevision += 1; return true; });
     context.updateTask((task) => ({ ...task, workspaceRevision: runtimeRevision }));
 
-    const listed = await registry.execute({ id: 'list-old', name: 'process_list', arguments: '{}' }, context);
+    const listed = await registry.execute({ id: 'list-old', name: 'manage_process', arguments: '{"action":"list"}' }, context);
     expect(listed.content).toContain('p-old');
     expect(listed.content).toContain('1919');
     expect(listed.content).not.toContain('p-other-session');
     expect(listed.content).not.toContain('p-other-container');
     expect(runtime.getProcesses).toHaveBeenCalledWith({ sessionId: 's-1', containerId: 'c-1' });
 
-    expect((await registry.execute({ id: 'observe-old', name: 'process_observe', arguments: '{"process_id":"p-old"}' }, context)).ok).toBe(true);
-    expect((await registry.execute({ id: 'input-old', name: 'process_input', arguments: '{"process_id":"p-old","input":"\\u0003"}' }, context)).ok).toBe(true);
-    expect((await registry.execute({ id: 'stop-old', name: 'process_stop', arguments: '{"process_id":"p-old"}' }, context)).ok).toBe(true);
+    expect((await registry.execute({ id: 'observe-old', name: 'manage_process', arguments: '{"action":"observe","process_id":"p-old"}' }, context)).ok).toBe(true);
+    const inputOld = await registry.execute({ id: 'input-old', name: 'manage_process', arguments: '{"action":"input","process_id":"p-old","input":"\\u0003"}' }, context);
+    expect(inputOld.ok).toBe(false);
+    expect(inputOld.content).toContain('stdin is not supported');
+    expect((await registry.execute({ id: 'stop-old', name: 'manage_process', arguments: '{"action":"stop","process_id":"p-old"}' }, context)).ok).toBe(true);
     expect(runtime.observeProcess).toHaveBeenCalledWith('p-old', { sessionId: 's-1', runId: 'r-old', containerId: 'c-1' }, undefined);
-    expect(runtime.sendProcessInput).toHaveBeenCalledWith('p-old', { sessionId: 's-1', runId: 'r-old', containerId: 'c-1' }, '\u0003');
+    expect(runtime.sendProcessInput).not.toHaveBeenCalled();
     expect(runtime.stopProcess).toHaveBeenCalledWith('p-old', { sessionId: 's-1', runId: 'r-old', containerId: 'c-1' });
     expect(getTask()).toMatchObject({ workspaceRevision: 8, changedWorkspace: false, verified: false, verifiedRevision: -1 });
 
     context.agentRole = 'verify';
-    const restricted = await registry.execute({ id: 'list-restricted', name: 'process_list', arguments: '{}' }, context);
+    const restricted = await registry.execute({ id: 'list-restricted', name: 'manage_process', arguments: '{"action":"list"}' }, context);
     expect(restricted.data).toEqual([]);
     expect(runtime.getProcesses).toHaveBeenLastCalledWith({ sessionId: 's-1', containerId: 'c-1', runId: 'r-1' });
   });
@@ -171,7 +180,7 @@ describe('AgentToolRegistry', () => {
     runtime.stopProcess = vi.fn(async () => { runtimeRevision += 1; return true; });
     context.updateTask((task) => ({ ...task, workspaceRevision: 3, changedWorkspace: false }));
 
-    expect((await registry.execute({ id: 'stop-drift', name: 'process_stop', arguments: '{"process_id":"p-drift"}' }, context)).ok).toBe(true);
+    expect((await registry.execute({ id: 'stop-drift', name: 'manage_process', arguments: '{"action":"stop","process_id":"p-drift"}' }, context)).ok).toBe(true);
     expect(getTask()).toMatchObject({ workspaceRevision: 5, changedWorkspace: true, verified: false, verifiedRevision: -1 });
   });
 
@@ -185,7 +194,7 @@ describe('AgentToolRegistry', () => {
     runtime.stopProcess = vi.fn(async () => { runtimeRevision += 2; return true; });
     context.updateTask((task) => ({ ...task, workspaceRevision: runtimeRevision, changedWorkspace: false }));
 
-    expect((await registry.execute({ id: 'stop-with-drift', name: 'process_stop', arguments: '{"process_id":"p-stop-drift"}' }, context)).ok).toBe(true);
+    expect((await registry.execute({ id: 'stop-with-drift', name: 'manage_process', arguments: '{"action":"stop","process_id":"p-stop-drift"}' }, context)).ok).toBe(true);
     expect(getTask()).toMatchObject({ workspaceRevision: 8, changedWorkspace: true, verified: false, verifiedRevision: -1 });
   });
 
@@ -193,12 +202,12 @@ describe('AgentToolRegistry', () => {
     const registry = new AgentToolRegistry();
     const { context, runtime, getTask } = createContext();
     runtime.runShell = vi.fn(async (request) => ({ timedOut: false, process: { id: 'p-2', sessionId: request.sessionId, runId: request.runId, containerId: request.containerId, command: request.command, isRunning: false, output: 'bad', cursor: 3, exitCode: 1 } }));
-    await registry.execute({ id: 'patch', name: 'apply_patch', arguments: JSON.stringify({ changes: [{ path: 'a.ts', content: 'next' }] }) }, context);
-    await registry.execute({ id: 'shell', name: 'shell_run', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground' }) }, context);
+    await registry.execute({ id: 'patch', name: 'materialize_resource', arguments: writeFile('a.ts') }, context);
+    await registry.execute({ id: 'shell', name: 'run_command', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground' }) }, context);
     await registry.execute({ id: 'plan', name: 'update_plan', arguments: JSON.stringify({ items: [{ id: 'plan', title: 'Done', status: 'completed' }] }) }, context);
     const result = await registry.execute({ id: 'complete', name: 'complete_task', arguments: JSON.stringify({ summary: 'done', evidence: ['failed test'] }) }, context);
     expect(result.ok).toBe(false);
-    expect(result.content).toContain('shell_run');
+    expect(result.content).toContain('run_command');
     expect(result.content).toContain('mode "foreground"');
     expect(result.content).toContain('exits 0');
     expect(result.content).toContain('does not restrict command names');
@@ -222,11 +231,11 @@ describe('AgentToolRegistry', () => {
   it('invalidates successful verification after a later workspace write and blocks stale completion', async () => {
     const registry = new AgentToolRegistry();
     const { context, getTask } = createContext();
-    await registry.execute({ id: 'patch-1', name: 'apply_patch', arguments: JSON.stringify({ changes: [{ path: 'a.ts', content: 'one' }] }) }, context);
-    await registry.execute({ id: 'verify-1', name: 'shell_run', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground' }) }, context);
+    await registry.execute({ id: 'patch-1', name: 'materialize_resource', arguments: writeFile('a.ts') }, context);
+    await registry.execute({ id: 'verify-1', name: 'run_command', arguments: JSON.stringify({ command: 'npm test', mode: 'foreground' }) }, context);
     expect(getTask()).toMatchObject({ workspaceRevision: 1, verifiedRevision: 1, verified: true });
 
-    await registry.execute({ id: 'patch-2', name: 'apply_patch', arguments: JSON.stringify({ changes: [{ path: 'a.ts', content: 'two' }] }) }, context);
+    await registry.execute({ id: 'patch-2', name: 'materialize_resource', arguments: writeFile('a.ts') }, context);
     await registry.execute({ id: 'plan', name: 'update_plan', arguments: JSON.stringify({ items: [{ id: 'plan', title: 'Done', status: 'completed' }] }) }, context);
     expect(getTask()).toMatchObject({ workspaceRevision: 2, verifiedRevision: -1, verified: false });
     const stale = await registry.execute({ id: 'complete-stale', name: 'complete_task', arguments: JSON.stringify({ summary: 'done', evidence: ['old test'] }) }, context);
@@ -236,11 +245,11 @@ describe('AgentToolRegistry', () => {
   it('invalidates an earlier pass when a later verification fails on the same revision', async () => {
     const registry = new AgentToolRegistry();
     const { context, runtime, getTask } = createContext();
-    await registry.execute({ id: 'patch', name: 'apply_patch', arguments: '{"changes":[{"path":"a.ts","content":"one"}]}' }, context);
-    await registry.execute({ id: 'pass', name: 'shell_run', arguments: '{"command":"npm test","mode":"foreground"}' }, context);
+    await registry.execute({ id: 'patch', name: 'materialize_resource', arguments: writeFile('a.ts') }, context);
+    await registry.execute({ id: 'pass', name: 'run_command', arguments: '{"command":"npm test","mode":"foreground"}' }, context);
     expect(getTask().verified).toBe(true);
     runtime.runShell = vi.fn(async (request) => ({ timedOut: false, process: { id: 'p-fail', sessionId: request.sessionId, runId: request.runId, containerId: request.containerId, command: request.command, isRunning: false, output: 'failed', cursor: 6, exitCode: 1 } }));
-    await registry.execute({ id: 'fail', name: 'shell_run', arguments: '{"command":"npm test","mode":"foreground"}' }, context);
+    await registry.execute({ id: 'fail', name: 'run_command', arguments: '{"command":"npm test","mode":"foreground"}' }, context);
     expect(getTask()).toMatchObject({ verified: false, verifiedRevision: -1 });
   });
 
@@ -262,17 +271,19 @@ describe('AgentToolRegistry', () => {
     expect((await registry.execute({ id: 'default-json', name: 'report_progress', arguments: '' }, context)).ok).toBe(false);
     expect((await registry.execute({ id: 'tree', name: 'workspace_tree', arguments: '{"max_depth":2}' }, context)).content).toBe('(workspace is empty)');
     expect((await registry.execute({ id: 'search', name: 'search_workspace', arguments: '{"query":"none"}' }, context)).content).toBe('(no matches)');
-    const timedOutForeground = await registry.execute({ id: 'foreground-timeout', name: 'shell_run', arguments: '{"command":"custom-validator","mode":"foreground"}' }, context);
+    const timedOutForeground = await registry.execute({ id: 'foreground-timeout', name: 'run_command', arguments: '{"command":"custom-validator","mode":"foreground"}' }, context);
     expect(timedOutForeground.verification).toMatchObject({ command: 'custom-validator', passed: false });
     expect(getTask()).toMatchObject({ verified: false, verifiedRevision: -1 });
-    const timedOut = await registry.execute({ id: 'timeout', name: 'shell_run', arguments: '{"command":"serve","mode":"background"}' }, context);
+    const timedOut = await registry.execute({ id: 'timeout', name: 'run_command', arguments: '{"command":"serve","mode":"background"}' }, context);
     expect(timedOut.content).toContain('Command still running');
     expect(timedOut.verification).toBeUndefined();
     expect(timedOut.changedWorkspace).toBeUndefined();
     expect(getTask()).toMatchObject({ changedWorkspace: false, verified: false, verifiedRevision: -1 });
-    expect((await registry.execute({ id: 'observe', name: 'process_observe', arguments: '{"process_id":"p-live"}' }, context)).content).toContain('(no new output)');
-    expect((await registry.execute({ id: 'input', name: 'process_input', arguments: '{"process_id":"p-live","input":"y"}' }, context)).content).toContain('exited before input');
-    expect((await registry.execute({ id: 'stop', name: 'process_stop', arguments: '{"process_id":"p-live"}' }, context)).content).toContain('exited before it could be stopped');
+    expect((await registry.execute({ id: 'observe', name: 'manage_process', arguments: '{"action":"observe","process_id":"p-live"}' }, context)).content).toContain('(no new output)');
+    const inputResult = await registry.execute({ id: 'input', name: 'manage_process', arguments: '{"action":"input","process_id":"p-live","input":"y"}' }, context);
+    expect(inputResult.ok).toBe(false);
+    expect(inputResult.content).toContain('stdin is not supported');
+    expect((await registry.execute({ id: 'stop', name: 'manage_process', arguments: '{"action":"stop","process_id":"p-live"}' }, context)).content).toContain('exited before it could be stopped');
 
     context.updateTask((task) => ({ ...task, changedWorkspace: false }));
     expect((await registry.execute({ id: 'no-plan', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context)).content).toContain('needs a recorded execution plan');
@@ -327,7 +338,7 @@ describe('AgentToolRegistry', () => {
     expect((await registry.execute({ id: 'stop', name: 'stop_subagent', arguments: '{"run_id":"child-1"}' }, context)).ok).toBe(false);
 
     context.agentRole = 'task';
-    expect((await registry.execute({ id: 'background', name: 'shell_run', arguments: '{"command":"npm run dev","mode":"background"}' }, context)).ok).toBe(true);
+    expect((await registry.execute({ id: 'background', name: 'run_command', arguments: '{"command":"npm run dev","mode":"background"}' }, context)).ok).toBe(true);
     context.updateTask((task) => ({ ...task, changedWorkspace: true, plan: [{ id: 'verify', title: 'Verify', status: 'completed' }] }));
     const unverified = await registry.execute({ id: 'unverified-complete', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context);
     expect(unverified.stopRun).toBe('completed');
@@ -335,18 +346,16 @@ describe('AgentToolRegistry', () => {
 
     context.agentRole = 'root';
     const rootUnverified = await registry.execute({ id: 'root-unverified-complete', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context);
-    expect(rootUnverified.content).toContain('shell_run');
+    expect(rootUnverified.content).toContain('run_command');
     expect(rootUnverified.content).toContain('foreground');
-    await registry.execute({ id: 'verify-pass', name: 'shell_run', arguments: '{"command":"custom-project-validator --port 4173","mode":"foreground"}' }, context);
+    await registry.execute({ id: 'verify-pass', name: 'run_command', arguments: '{"command":"custom-project-validator --port 4173","mode":"foreground"}' }, context);
     expect((await registry.execute({ id: 'verified-complete', name: 'complete_task', arguments: '{"summary":"done","evidence":["x"]}' }, context)).stopRun).toBe('completed');
     expect(runtime.runShell).toHaveBeenCalledWith(expect.objectContaining({ mode: 'background' }));
 
     context.agentRole = 'task';
     context.writeScope = ['src/allowed'];
-    expect((await registry.execute({ id: 'outside', name: 'apply_patch', arguments: '{"changes":[{"path":"src/other/a.ts","content":"x"}]}' }, context)).content).toContain('outside');
-    expect((await registry.execute({ id: 'scope-traversal', name: 'apply_patch', arguments: '{"changes":[{"path":"src/allowed/../other.ts","content":"x"}]}' }, context)).content).toContain('escapes');
     expect((await registry.execute({ id: 'outside-resource', name: 'materialize_resource', arguments: '{"resource_id":"res-1","path":"public/a.png"}' }, context)).content).toContain('outside');
-    expect((await registry.execute({ id: 'inside', name: 'apply_patch', arguments: '{"changes":[{"path":"src/allowed/a.ts","content":"x"}]}' }, context)).ok).toBe(true);
+    expect((await registry.execute({ id: 'inside-resource', name: 'materialize_resource', arguments: '{"resource_id":"res-1","path":"src/allowed/a.ts"}' }, context)).ok).toBe(true);
   });
 
   it('supports role-specific registries and converts thrown tool errors into results', async () => {

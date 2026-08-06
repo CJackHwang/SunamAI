@@ -43,7 +43,7 @@ test('refresh keeps workspace + /etc state + .pyodide package, with a correct v3
     if (turn === 1) {
       await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
         { id: 'plan', name: 'update_plan', arguments: { items: [{ id: 'create', title: 'Create data across both snapshot layers', status: 'in_progress' }] } },
-        { id: 'create', name: 'shell_run', arguments: { command: CREATE_COMMAND, mode: 'foreground' } },
+        { id: 'create', name: 'run_command', arguments: { command: CREATE_COMMAND, mode: 'foreground' } },
       ]) });
       return;
     }
@@ -73,7 +73,7 @@ test('refresh keeps workspace + /etc state + .pyodide package, with a correct v3
     }
     await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
       { id: 'plan-verify', name: 'update_plan', arguments: { items: [{ id: 'verify', title: 'Verify refresh recovery', status: 'in_progress' }] } },
-      { id: 'verify', name: 'shell_run', arguments: { command: VERIFY_COMMAND, mode: 'foreground' } },
+      { id: 'verify', name: 'run_command', arguments: { command: VERIFY_COMMAND, mode: 'foreground' } },
     ]) });
     return;
   });
