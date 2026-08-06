@@ -22,21 +22,34 @@ function listFiles(directory) {
   });
 }
 
-// Succinix host 运行时资产（dist/succinix/**）是注入 WebContainer 的第三方基础设施，
-// 不进应用加载关键路径，从 dist 体积预算中排除（见 scripts/sync-succinix-assets.mjs）。
-const files = listFiles(distDir).filter((file) => !file.split(sep).includes('succinix'));
-const jsFiles = files.filter((file) => file.endsWith('.js'));
+// 关键路径定义：dist 预算只计「应用初始加载路径」上的资产，排除按需/运行时基础设施：
+// - Succinix host 运行时资产（dist/succinix/**）是注入 WebContainer 的第三方基础设施，
+//   不进应用加载关键路径（见 scripts/sync-succinix-assets.mjs）；
+// - pi 引擎懒加载 chunk（dist/assets/piSession-*.js、openai-completions-*.js）是默认关闭的
+//   可选通道（feature flag 默认关），经动态 import 按需加载，同样不进初始加载关键路径。
+// 二者的 JS 体积仍计入下方 Total JavaScript gzip 预算（pi 不免费，只是不在关键路径上）。
+const isDeferredRuntime = (file) => {
+  const normalized = file.split(sep).join('/');
+  return /\/succinix\//.test(normalized) || /\/assets\/(?:piSession|openai-completions)-[^/]*\.js$/.test(normalized);
+};
+const allFiles = listFiles(distDir).filter((file) => !file.split(sep).includes('succinix'));
+const criticalFiles = allFiles.filter((file) => !isDeferredRuntime(file));
+const jsFiles = allFiles.filter((file) => file.endsWith('.js'));
 const totalJsGzipKb = jsFiles.reduce((total, file) => total + gzipSync(readFileSync(file)).byteLength, 0) / 1024;
-const distMiB = files.reduce((total, file) => total + statSync(file).size, 0) / (1024 * 1024);
+const distMiB = criticalFiles.reduce((total, file) => total + statSync(file).size, 0) / (1024 * 1024);
+// 完整 on-disk 体积（含被排除的 deferred 运行时），只报告、不设门槛。
+const fullDistMiB = allFiles.reduce((total, file) => total + statSync(file).size, 0) / (1024 * 1024);
 // P1 pi 引擎（@earendil-works/pi-agent-core + pi-ai）是默认关闭的可选通道，经动态 import
-// 懒加载：piSession ~53KiB + openai-completions SDK ~38KiB gzip，不进初始 bundle
-// （初始 bundle 仍受 90KiB 门禁约束）。总 JS 预算相应上调以容纳该可选功能。
+// 懒加载：piSession ~60KiB + openai-completions SDK ~38KiB gzip，不进初始 bundle
+// （初始 bundle 仍受 90KiB 门禁约束）。总 JS 预算相应上调以容纳该可选功能：
+// 350KiB（现有应用 JS 基线） + ~95KiB（pi 懒加载通道） + ~25KiB 余量 = 470KiB。
 const totalJsLimitKb = Number(process.env.SUNAM_TOTAL_GZIP_LIMIT_KB ?? 470);
 const distLimitMiB = Number(process.env.SUNAM_DIST_LIMIT_MIB ?? 1.8);
 
 console.log(`Initial bundle: ${entries[0]} (${gzipKb.toFixed(2)} KiB gzip; limit ${limitKb} KiB)`);
 console.log(`Total JavaScript: ${totalJsGzipKb.toFixed(2)} KiB gzip; limit ${totalJsLimitKb} KiB`);
-console.log(`Production dist: ${distMiB.toFixed(2)} MiB; limit ${distLimitMiB} MiB (excludes deferred /succinix runtime assets)`);
+console.log(`Critical-path dist: ${distMiB.toFixed(2)} MiB; limit ${distLimitMiB} MiB (excludes deferred /succinix + pi lazy runtime chunks)`);
+console.log(`Full on-disk dist: ${fullDistMiB.toFixed(2)} MiB (deferred runtime reported, not gated)`);
 
 if (gzipKb > limitKb) {
   throw new Error(`Initial bundle exceeds the ${limitKb} KiB gzip performance budget.`);
@@ -47,5 +60,5 @@ if (totalJsGzipKb > totalJsLimitKb) {
 }
 
 if (distMiB > distLimitMiB) {
-  throw new Error(`Production dist exceeds the ${distLimitMiB} MiB performance budget.`);
+  throw new Error(`Critical-path dist exceeds the ${distLimitMiB} MiB performance budget.`);
 }

@@ -1,31 +1,62 @@
 import { Agent } from '@earendil-works/pi-agent-core';
 import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage, AgentTool as PiAgentTool, Session } from '@earendil-works/pi-agent-core';
-import { createModels, InMemoryCredentialStore } from '@earendil-works/pi-ai';
+import { createModels, createProvider, envApiKeyAuth, InMemoryCredentialStore } from '@earendil-works/pi-ai';
 import type { Api, Message as PiMessage, Model, Models } from '@earendil-works/pi-ai';
-import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
+import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 import type { Message } from '@/entities/message/types';
 import { ContainerMutationLease } from '../agentFamily';
+import type { AgentEventStore } from '../eventStore';
 import type { RegisteredTool, ToolExecutionContext } from '../tools/base';
 import type { AgentEvent, AgentPhase, AgentRun, TaskContract } from '../types';
 import { IndexedDbSessionRepo } from './indexedDbSessionStorage';
-import { createPiAgentTools, resolveEnabledPiTools, UNWIRED_PI_RUNTIME } from './piToolAdapter';
+import { createPiAgentTools, PI_UNSUPPORTED_SUBAGENTS, resolveEnabledPiTools, UNWIRED_PI_RUNTIME } from './piToolAdapter';
 
 /**
  * P1 pi 通道：单 Agent 纯对话会话。
  *
  * 封装 pi 框架（@earendil-works/pi-agent-core + pi-ai）的 Agent 生命周期：
- * - 创建：pi-ai Models + deepseekProvider + 现有 API key（不硬编码 key）；
+ * - 创建：pi-ai Models + 从现有 modelClient 配置派生的 provider（不硬编码供应商）；
  * - prompt() / abort() / destroy()；
- * - 事件订阅：把 pi 事件流翻译成现有 UI 状态层可消费的 AgentEvent。
+ * - 事件订阅：把 pi 事件流翻译成现有 UI 状态层可消费的 AgentEvent，
+ *   并同步写入 v3 event store（P2-M1：刷新后 UI 聊天列表可恢复 pi 消息）。
  *
  * 本模块是唯一静态依赖 pi 包的位置，由 useAgentV2 通过动态 import 懒加载，
  * 以保证 pi 的 ~100KiB gzip 不进初始 bundle。
  */
 
-/** 现有设置默认指向 DeepSeek OpenAI 兼容端点；pi-ai deepseek 提供者与之同源。 */
-const PI_PROVIDER_ID = 'deepseek';
 const DEFAULT_SYSTEM_PROMPT = 'You are Sunam, a coding assistant. Answer the user request directly, honestly, and concisely.';
+
+/**
+ * P1-L4：从现有 modelClient 配置（baseUrl/apiModel）派生 pi provider id。
+ * 应用侧统一走 OpenAI 兼容端点（callLLM 发 /chat/completions），pi 通道复用同一配置；
+ * 以 baseUrl host 派生稳定 provider id（配置驱动，不硬编码 deepseek），
+ * 换供应商时只需改设置，无需改代码。
+ */
+function deriveProviderId(baseUrl: string): string {
+  try {
+    const slug = new URL(baseUrl).hostname.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
+    return slug || 'openai-compatible';
+  } catch {
+    return 'openai-compatible';
+  }
+}
+
+/** 从配置构造 pi 模型（api = openai-completions，与 app 的 /chat/completions 端点同构）。 */
+function buildConfigModel(apiModel: string, baseUrl: string, providerId: string): Model<Api> {
+  return {
+    id: apiModel,
+    name: apiModel,
+    api: 'openai-completions',
+    provider: providerId,
+    baseUrl: baseUrl.replace(/\/+$/, ''),
+    reasoning: false,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 8_192,
+  };
+}
 
 export interface PiAgentLike {
   subscribe(listener: (event: PiAgentEvent, signal: AbortSignal) => void | Promise<void>): () => void;
@@ -63,6 +94,8 @@ export interface PiSessionOptions {
   getToolContext?: () => ToolExecutionContext;
   /** P3：容器可用性（对齐 capability availability），供完成门禁与工具上下文使用。 */
   containerAvailable?: boolean;
+  /** P2：v3 事件仓库。缺省时 pi 事件只进 pi 会话持久化，不写 v3（刷新后 UI 列表不恢复）。 */
+  store?: AgentEventStore;
 }
 
 /** 用于合成中止结算消息的空 usage（pi assistant 消息必填字段）。 */
@@ -268,15 +301,20 @@ export class PiSession {
 
   constructor(options: PiSessionOptions) {
     this.options = options;
+    // P1-L4：provider 由现有 modelClient 配置派生（baseUrl host → provider id），不硬编码供应商。
+    const providerId = deriveProviderId(options.baseUrl);
+    const model = buildConfigModel(options.apiModel, options.baseUrl, providerId);
     const credentials = new InMemoryCredentialStore();
     const models = createModels({ credentials });
-    models.setProvider(deepseekProvider());
-    const credentialsReady = credentials.modify(PI_PROVIDER_ID, async () => ({ type: 'api_key', key: options.apiKey }));
-    const baseModel = models.getModel(PI_PROVIDER_ID, options.apiModel)
-      ?? models.getModels(PI_PROVIDER_ID)[0];
-    if (!baseModel) throw new Error(`Pi provider ${PI_PROVIDER_ID} exposes no models.`);
-    // 尊重应用侧的 baseUrl 设置（默认与 deepseek 一致），其余字段沿用 pi 目录。
-    const model: Model<Api> = { ...baseModel, baseUrl: options.baseUrl.replace(/\/+$/, '') };
+    models.setProvider(createProvider({
+      id: providerId,
+      name: options.baseUrl,
+      baseUrl: model.baseUrl,
+      auth: { apiKey: envApiKeyAuth(options.baseUrl, []) },
+      models: [model],
+      api: openAICompletionsApi(),
+    }));
+    const credentialsReady = credentials.modify(providerId, async () => ({ type: 'api_key', key: options.apiKey }));
     const systemPrompt = options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     // P3：按 capability 启用集装配 pi 工具（R3），控制类工具所需的编排上下文从本会话注入（R1）。
     const tools = createPiAgentTools({
@@ -288,12 +326,22 @@ export class PiSession {
     const createSessionRepo = options.createSessionRepo ?? (() => new IndexedDbSessionRepo());
     // 会话 ID 与现有 UI 会话 ID 对齐：按 sessionId 打开或创建持久化 pi 会话。
     this.sessionPromise = createSessionRepo().openOrCreate(options.sessionId);
+    // P2-M1：桥接事件同步写入 v3 event store（store.append/saveRun 走 pendingPersist 队列串行），
+    // 使刷新后 UI 聊天列表能从 v3 恢复 pi 消息；写入尽力而为，失败不阻断事件桥接。
+    const onEvent = (event: AgentEvent): void => {
+      options.onEvent(event);
+      this.trackPersist(this.persistV3Event(event));
+    };
+    const onRunChange = (run: AgentRun): void => {
+      options.onRunChange(run);
+      this.trackPersist(this.persistV3Run(run));
+    };
     this.bridge = new PiEventBridge({
       runId: options.runId,
       sessionId: options.sessionId,
       run: options.run,
-      onEvent: options.onEvent,
-      onRunChange: options.onRunChange,
+      onEvent,
+      onRunChange,
     });
     this.unsubscribe = this.agent.subscribe((event, _signal) => {
       // P1 事件桥接逻辑不动；P2 仅在桥接之后追加会话持久化（尽力而为）。
@@ -322,6 +370,10 @@ export class PiSession {
   /**
    * P3：构建现有工具执行上下文（控制类工具依赖的编排上下文：runId/sessionId/runtime/task）。
    * 每次执行时重建，保证 getTask/updateTask 看到最新任务状态。
+   *
+   * P3-M2：pi 是单 Agent 自治循环，无子代理编排，`subagents` 注入如实拒绝的哨兵 host，
+   * 使 spawn_subagent/wait_subagents/message_subagent 在被调用时明确报「pi 通道不支持子 agent」
+   * 而非无头失败；R4 边界见 piToolAdapter.ts。
    */
   private buildToolContext(): ToolExecutionContext {
     const run = this.options.run;
@@ -335,6 +387,7 @@ export class PiSession {
       agentRole: run.agentRole ?? 'root',
       ...(this.options.containerAvailable !== undefined ? { containerAvailable: this.options.containerAvailable } : {}),
       ...(this.options.enabledTools ? { shellAvailable: this.options.enabledTools.has('run_command') } : {}),
+      subagents: PI_UNSUPPORTED_SUBAGENTS,
       mutationLease: this.mutationLease,
       getTask: () => this.options.run.task,
       updateTask: (updater) => this.applyTaskUpdate(updater),
@@ -399,6 +452,26 @@ export class PiSession {
     }
   }
 
+  /** P2-M1：把桥接出的 AgentEvent 写入 v3 event store（store.append 自会跳过 transient 事件）。 */
+  private async persistV3Event(event: AgentEvent): Promise<void> {
+    if (!this.options.store) return;
+    try {
+      await this.options.store.append(event);
+    } catch {
+      // v3 持久化失败不阻断事件桥接（对齐现有引擎的尽力而为语义）。
+    }
+  }
+
+  /** P2-M1：把 run 的最新状态写入 v3（run_started 之外阶段变更由 onRunChange 落库）。 */
+  private async persistV3Run(run: AgentRun): Promise<void> {
+    if (!this.options.store) return;
+    try {
+      await this.options.store.saveRun(run);
+    } catch {
+      // 同上。
+    }
+  }
+
   private trackPersist(write: Promise<void>): void {
     this.pendingPersist = this.pendingPersist.then(() => write).then(() => undefined, () => undefined);
   }
@@ -408,7 +481,7 @@ export class PiSession {
       role: 'assistant',
       content: [],
       api: 'anthropic-messages',
-      provider: PI_PROVIDER_ID,
+      provider: deriveProviderId(this.options.baseUrl),
       model: '',
       usage: EMPTY_USAGE,
       stopReason: 'aborted',

@@ -2,7 +2,7 @@ import { Type } from '@earendil-works/pi-ai';
 import type { TSchema } from '@earendil-works/pi-ai';
 import type { AgentTool as PiAgentTool, AgentToolResult as PiAgentToolResult } from '@earendil-works/pi-agent-core';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
-import type { RegisteredTool, ToolExecutionContext } from '../tools/base';
+import type { RegisteredTool, SubagentHost, ToolExecutionContext } from '../tools/base';
 import { controlTools } from '../tools/controlTools';
 import { processTools } from '../tools/processTools';
 import { resourceTools } from '../tools/resourceTools';
@@ -29,6 +29,11 @@ import type { AgentToolResult as AppAgentToolResult } from '../types';
  *   摘要作为最终回复，而非在工具批次后静默停住。
  * - `read_resource_image` 的 `modelContent`（image_resource 持久引用）在 pi 工具结果协议中无对应
  *   内容类型，只保留文本描述；图像回传依赖 pi 自身的内容通道，属后续工作。
+ * - **pi 通道暂不支持子 agent**（P3-M2）：pi 是单 Agent 自治循环，没有 AgentFamilyCoordinator
+ *   子代理编排。`spawn_subagent`/`wait_subagents`/`message_subagent` 虽随 18 工具目录注册
+ *   （schema/capability 对齐现有引擎），但 piSession 的 buildToolContext 注入的是如实拒绝的
+ *   `PI_UNSUPPORTED_SUBAGENTS` 哨兵 host——模型调用即明确报「pi 通道不支持子 agent」，
+ *   不会被当作可用能力。现有引擎（engine.ts/subagentCoordinator）仍完整支持这三个工具。
  */
 export const PI_TOOL_CATALOG: RegisteredTool[] = [
   ...workspaceTools,
@@ -155,6 +160,25 @@ export const UNWIRED_PI_RUNTIME: AgentWorkspaceRuntime = {
   subscribe: () => unavail('subscribe'),
   getUserTerminalBuffer: () => unavail('getUserTerminalBuffer'),
   appendUserTerminalBuffer: () => unavail('appendUserTerminalBuffer'),
+};
+
+/**
+ * pi 通道子 agent 哨兵（P3-M2）：pi 是单 Agent 自治循环，无子代理编排。
+ * 注入到 piSession.buildToolContext，使 spawn_subagent/wait_subagents/message_subagent
+ * 在被调用时如实拒绝（明确报「pi 通道不支持子 agent」），而非因缺少 host 无头失败。
+ * snapshot 返回空列表（pi 通道不存在活跃子代理）。
+ */
+const subagentUnavailable = (tool: string): never => {
+  throw new Error(`Tool ${tool} is unavailable: the pi channel is a single-agent loop and does not support subagent delegation.`);
+};
+
+export const PI_UNSUPPORTED_SUBAGENTS: SubagentHost = {
+  spawn: () => subagentUnavailable('spawn_subagent'),
+  wait: () => subagentUnavailable('wait_subagents'),
+  message: () => subagentUnavailable('message_subagent'),
+  stop: () => subagentUnavailable('stop'),
+  stopAll: () => subagentUnavailable('stopAll'),
+  snapshot: () => [],
 };
 
 /** 现有工具结果 → pi AgentToolResult。失败（ok:false）在 execute 中已以 throw 呈现。 */

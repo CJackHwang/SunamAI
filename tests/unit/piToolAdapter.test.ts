@@ -4,7 +4,7 @@ import { Agent } from '@earendil-works/pi-agent-core';
 import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage, AgentTool as PiAgentTool, StreamFn } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream, validateToolArguments } from '@earendil-works/pi-ai';
 import type { Api, AssistantMessage, Context as PiContext, Message as PiMessage, Model } from '@earendil-works/pi-ai';
-import { createPiAgentTools, PI_TOOL_CATALOG, resolveEnabledPiTools, UNWIRED_PI_RUNTIME } from '@/features/agent-core/pi/piToolAdapter';
+import { createPiAgentTools, PI_TOOL_CATALOG, PI_UNSUPPORTED_SUBAGENTS, resolveEnabledPiTools, UNWIRED_PI_RUNTIME } from '@/features/agent-core/pi/piToolAdapter';
 import { PiSession, type PiAgentLike } from '@/features/agent-core/pi/piSession';
 import type { AgentRun, TaskContract } from '@/features/agent-core/types';
 import { ContainerMutationLease } from '@/features/agent-core/agentFamily';
@@ -355,6 +355,39 @@ describe('PiSession tool wiring (R2)', () => {
     expect(result.content[0]).toMatchObject({ type: 'text', text: 'Plan updated with 1 steps.' });
     expect(run.task.plan).toEqual([{ id: 'a', title: 'A', status: 'completed' }]);
     expect(runChanges.at(-1)?.task.plan).toEqual([{ id: 'a', title: 'A', status: 'completed' }]);
+    session.destroy();
+  });
+});
+
+describe('pi subagent boundary (P3-M2)', () => {
+  it('rejects subagent host calls with an explicit pi-channel message', () => {
+    expect(() => PI_UNSUPPORTED_SUBAGENTS.spawn({ taskId: 't', role: 'explore', prompt: 'p' })).toThrow(/does not support subagent delegation/);
+    expect(() => PI_UNSUPPORTED_SUBAGENTS.wait(['r1'])).toThrow(/does not support subagent delegation/);
+    expect(() => PI_UNSUPPORTED_SUBAGENTS.message('r1', 'hi')).toThrow(/does not support subagent delegation/);
+    expect(PI_UNSUPPORTED_SUBAGENTS.snapshot()).toEqual([]);
+  });
+
+  it('wires the rejecting host into the pi session tool context so subagent calls fail loudly', async () => {
+    const agent = new FakePiAgent();
+    let capturedTools: PiAgentTool[] | undefined;
+    const session = new PiSession({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiModel: 'deepseek-v4-flash',
+      sessionId: 's1',
+      runId: 'r1',
+      run: createRun(),
+      onEvent: () => undefined,
+      onRunChange: () => undefined,
+      createAgent: (input) => {
+        capturedTools = input.tools;
+        return agent;
+      },
+    });
+    await session.prompt('ignored');
+    const spawn = capturedTools!.find((tool) => tool.name === 'spawn_subagent')!;
+    expect(spawn).toBeDefined();
+    await expect(spawn.execute('call-1', { task_id: 't', role: 'explore', prompt: 'p' }, undefined)).rejects.toThrow(/does not support subagent delegation/);
     session.destroy();
   });
 });

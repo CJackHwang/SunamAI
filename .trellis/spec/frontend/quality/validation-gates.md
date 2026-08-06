@@ -21,9 +21,19 @@ Dependency refreshes must also prove the generated graph can be installed by def
 Current thresholds:
 
 - statements/functions/lines at least 85%; branches at least 80%;
-- initial JS at most 90 KiB gzip; total JS at most 350 KiB gzip;
-- production `dist` at most 1.8 MiB;
+- initial JS at most 90 KiB gzip; total JS at most 470 KiB gzip;
+- critical-path production `dist` at most 1.8 MiB;
 - visual pixel difference at most 0.2%.
+
+Total JS budget derivation (P1 起，见 `scripts/check-bundle.mjs`): 350 KiB 为现有应用 JS 基线；pi 引擎
+（`@earendil-works/pi-agent-core` + `pi-ai`，`src/features/agent-core/pi/`）是默认关闭的可选通道，
+经动态 import 懒加载，新增约 95 KiB gzip（piSession ~60 KiB + openai-completions SDK ~38 KiB），
+不进初始 bundle（初始 bundle 仍受 90 KiB 门禁）。总预算 350 + 95 + 余量 ≈ 470 KiB；
+若未来移除 pi 通道，总 JS 预算应回落到 350 KiB。
+
+`dist` 预算只计「应用初始加载关键路径」上的资产：与 `/succinix` 一样，pi 懒加载 chunk
+（`piSession-*.js`、`openai-completions-*.js`）按需加载、默认关闭，不计入 dist 门禁，
+但其体积仍计入总 JS gzip 预算（pi 不免费，只是不在关键路径上）。
 
 Production JS uses the explicit `terser` dev dependency and four compression passes. Preserve the configured-page/Agent/Workspace lazy boundary; minification supplements it and never replaces it.
 

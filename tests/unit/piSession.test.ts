@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage } from '@earendil-works/pi-agent-core';
 import { PiEventBridge, PiSession, piAssistantReasoning, piAssistantText, piMessageToAppMessage, type PiAgentLike } from '@/features/agent-core/pi/piSession';
 import { isPiEngineEnabled, setPiEngineEnabled } from '@/features/agent-core/pi/featureFlag';
+import { AgentEventStore } from '@/features/agent-core/eventStore';
+import { V3PersistenceRepository } from '@/entities/persistence/v3Repository';
+import { clearV3Database } from '../helpers/persistenceDatabase';
 import type { AgentEvent, AgentRun } from '@/features/agent-core/types';
 import { initialTask } from '@/features/agent-core/task';
 import { createChaosContract } from '@/features/agent-core/prompt';
@@ -288,6 +291,41 @@ describe('PiSession lifecycle', () => {
     expect(agent.promptInputs).toEqual([]);
     expect(run.phase).toBe('cancelled');
     expect(events.some((event) => event.kind === 'run_finished')).toBe(true);
+  });
+
+  it('persists pi bridge events and run state to the v3 event store (P2-M1 refresh restore)', async () => {
+    const repository = new V3PersistenceRepository();
+    await clearV3Database();
+    const store = new AgentEventStore(repository);
+    const agent = new FakePiAgent();
+    const run = createRun();
+    const session = new PiSession({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiModel: 'deepseek-v4-flash',
+      sessionId: run.sessionId,
+      runId: run.id,
+      run,
+      onEvent: () => undefined,
+      onRunChange: () => undefined,
+      createAgent: () => agent,
+      store,
+    });
+    await session.prompt('hello');
+    await agent.emit({ type: 'agent_start' });
+    await agent.emit({ type: 'message_start', message: { role: 'user', content: 'hello', timestamp: Date.now() } });
+    await agent.emit({ type: 'message_end', message: assistantMessage({ content: [{ type: 'text', text: 'hi' }] }) });
+    await agent.emit({ type: 'agent_end', messages: [assistantMessage({ content: [{ type: 'text', text: 'hi' }] })] });
+
+    await vi.waitFor(async () => {
+      const persisted = await store.loadSessionEvents(run.sessionId);
+      const messages = persisted.filter((event): event is Extract<AgentEvent, { kind: 'message' }> => event.kind === 'message');
+      expect(messages.some((event) => event.message.role === 'user' && event.message.content === 'hello')).toBe(true);
+      expect(messages.some((event) => event.message.role === 'assistant' && event.message.content === 'hi')).toBe(true);
+    });
+    const runs = await store.loadSessionRuns(run.sessionId);
+    expect(runs.find((candidate) => candidate.id === run.id)?.phase).toBe('completed');
+    session.destroy();
   });
 });
 

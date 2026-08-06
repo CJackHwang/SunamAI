@@ -263,6 +263,8 @@ export function useAgentV2(
         ...(runtime ? { runtime } : {}),
         enabledTools,
         containerAvailable: capabilities.containerAvailable,
+        // P2-M1：pi 事件同步写入 v3 event store，刷新后 UI 聊天列表可恢复 pi 消息。
+        store: storeRef.current,
       });
     } catch (error) {
       piRunIdsRef.current.delete(runId);

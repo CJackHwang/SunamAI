@@ -19,8 +19,8 @@
 
 - statements/functions/lines ≥85%，branches ≥80%；
 - 初始 JS ≤90 KiB gzip；
-- 总 JavaScript ≤350 KiB gzip；
-- 生产 `dist` ≤1.8 MiB；
+- 总 JavaScript ≤470 KiB gzip（350 KiB 应用基线 + pi 懒加载可选通道 ~95 KiB + 余量；pi 移除时回落 350，见 `scripts/check-bundle.mjs`）；
+- 生产 `dist`（关键路径）≤1.8 MiB（pi 懒加载 chunk 按需加载、不计入 dist 门禁，仍计入总 JS gzip）；
 - 视觉最大像素差异比 0.2%。
 
 ## 2. Context
