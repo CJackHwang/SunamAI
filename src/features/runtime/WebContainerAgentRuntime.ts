@@ -347,6 +347,8 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
    * 合并两源：host ps() 全部真实进程 + ProcessRegistry 所有权标注（session/run 关联）。
    * 系统进程（host.js / python daemon / /usr/lib/succinix）标记 protected。
    * 轮询刷新由调用方（ComputerView）按 2-3s 间隔 + 运行时事件驱动调用本方法。
+   * M6 R3 边界：ps() 是宿主 OS 全局进程表（含其他容器进程），本方法只做所有权标注、不做
+   * 容器过滤——进程表全局可见是 Succinix 语义，虚拟容器隔离是文件系统级而非进程级。
    */
   async getSuccinixProcesses(containerId?: string): Promise<SuccinixProcessView[]> {
     const entries = await this.succinix.ps();

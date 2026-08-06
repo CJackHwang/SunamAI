@@ -2,6 +2,12 @@ import type { ProcessStatus } from '@/shared/contracts/agentRuntime';
 import type { SuccinixProcessEntry } from './succinixClient';
 
 /**
+ * 隔离边界（M6 R3，如实标注）：Succinix host 的进程表是**宿主 OS 视角的全局表**——ps() 返回
+ * 所有容器的真实子进程，kill(pid) 可跨容器终止。SunamAI 的"虚拟容器"隔离是**文件系统级**：
+ * 各容器是 /home/workspace/c-<id> 下互不可见的独立目录（agent 命令经 `cd <root> && <cmd>`
+ * 前缀 / setCwd 在各自根目录执行，文件 RPC 会话 cwd 由 M6 原子链保证不被并发容器插队）。
+ * 进程级隔离（每容器独立 PID 命名空间 / 独立进程树）在 Succinix 执行模型下不成立，也不硬造：
+ * 进程表全局可见即 Succinix 语义，UI 以 containerId 归属标注而非过滤。
  * Succinix 系统进程判定（M5）。host 进程表中 cmd 匹配系统资产/内置进程的标记 protected：
  *  - node host.js（TerminalExecutor 守护进程）
  *  - node python-daemon.js（Pyodide 常驻 daemon）

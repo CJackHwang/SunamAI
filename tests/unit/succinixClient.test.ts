@@ -7,6 +7,10 @@ function createHostFixture(overrides?: Partial<Record<string, Record<string, unk
   const writtenIds: unknown[] = [];
   const writtenCmds: string[] = [];
   const readPaths: string[] = [];
+  /** M6：每个 /cmd.json 写入时的「会话 cwd + env 文件」快照，用于并发隔离断言。 */
+  const writtenContext: Array<{ cmd: string; cwd: string; env: string | null }> = [];
+  // 宿主单一会话 cwd（初始 process.cwd() 的 /workspace 映射）。
+  let sessionCwd = '/workspace';
   const responses: Record<string, Record<string, unknown>> = {
     run: { ok: true, exitCode: 0, stdout: 'out', stderr: '', runtime: 'lifo' },
     spawn: { ok: true, pid: 99, runtime: 'node' },
@@ -22,9 +26,11 @@ function createHostFixture(overrides?: Partial<Record<string, Record<string, unk
     rm: vi.fn(async (path: string) => { files.delete(path); }),
     writeFile: vi.fn(async (path: string, content: string) => {
       if (path === '/cmd.json') {
-        const request = JSON.parse(content) as { id: unknown; cmd: string };
+        const request = JSON.parse(content) as { id: unknown; cmd: string; opts?: { cwd?: string } };
         writtenIds.push(request.id);
         writtenCmds.push(request.cmd);
+        if (request.cmd === 'setCwd') sessionCwd = request.opts?.cwd ?? sessionCwd;
+        writtenContext.push({ cmd: request.cmd, cwd: sessionCwd, env: files.get('/etc/succinix.env') ?? null });
         const payload = responses[request.cmd] ?? { ok: false, error: 'unknown command' };
         files.set(`/result-${request.id}.json`, JSON.stringify({ id: request.id, ...payload }));
       } else {
@@ -38,7 +44,7 @@ function createHostFixture(overrides?: Partial<Record<string, Record<string, unk
       return value;
     }),
   };
-  return { fs, files, writtenIds, writtenCmds, readPaths };
+  return { fs, files, writtenIds, writtenCmds, readPaths, writtenContext };
 }
 
 describe('SuccinixClient file RPC', () => {
@@ -142,5 +148,42 @@ describe('SuccinixClient file RPC', () => {
     const client = new SuccinixClient(fs as never);
     await expect(client.spawn('node server.js', { cwd: '/workspace/c-1' })).resolves.toEqual({ ok: true, pid: 99 });
     expect(writtenCmds).toEqual(['setCwd', 'spawn']);
+  });
+
+  it('keeps each container setCwd adjacent to its spawn under concurrent requests', async () => {
+    // M6 并发门禁：两个容器交替 spawn 时，会话 cwd 不得被另一容器的 setCwd 插队
+    //（A setCwd 后 B setCwd 先到 → A 的 spawn 会落在 B 目录）。setCwd 必须紧跟同容器的 spawn。
+    const { fs, writtenContext } = createHostFixture();
+    const client = new SuccinixClient(fs as never);
+    await Promise.all([
+      client.spawn('node server-a.js', { cwd: '/workspace/c-a' }),
+      client.spawn('node server-b.js', { cwd: '/workspace/c-b' }),
+    ]);
+    const spawnCwds = writtenContext.filter((entry) => entry.cmd === 'spawn').map((entry) => entry.cwd);
+    // 每个 spawn 执行时，会话 cwd 必须已是自己的容器根（setCwd 与 spawn 原子成对）。
+    expect(spawnCwds.sort()).toEqual(['/workspace/c-a', '/workspace/c-b']);
+    // 序列内每个 setCwd 之后紧跟同容器的 spawn（无跨容器插队）。
+    for (let index = 0; index < writtenContext.length; index += 1) {
+      const entry = writtenContext[index];
+      if (!entry || entry.cmd !== 'setCwd') continue;
+      const next = writtenContext[index + 1];
+      expect(next).toBeDefined();
+      expect(next!.cmd).toBe('spawn');
+      expect(next!.cwd).toBe(entry.cwd);
+    }
+  });
+
+  it('keeps each container env file adjacent to its run under concurrent requests', async () => {
+    // M6 并发门禁：两个容器交替 run 时，/etc/succinix.env 不得被另一容器的 env 写入插队
+    //（A 写 env 后 B 的 env 先到 → A 的命令读到 B 的环境变量）。env 写入必须紧跟同容器的 run。
+    const { fs, writtenContext } = createHostFixture();
+    const client = new SuccinixClient(fs as never);
+    await Promise.all([
+      client.run('echo a', { env: { SUNAM_WORKSPACE: '/home/workspace/c-a' } }),
+      client.run('echo b', { env: { SUNAM_WORKSPACE: '/home/workspace/c-b' } }),
+    ]);
+    const runEnvs = writtenContext.filter((entry) => entry.cmd === 'run').map((entry) => entry.env ?? '');
+    expect(runEnvs.filter((env) => env.includes('/home/workspace/c-a')).length).toBe(1);
+    expect(runEnvs.filter((env) => env.includes('/home/workspace/c-b')).length).toBe(1);
   });
 });

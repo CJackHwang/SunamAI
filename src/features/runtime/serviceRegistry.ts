@@ -311,6 +311,8 @@ export class RuntimeServiceRegistry {
       // N5：cd 前缀引入了 shell 融合（&&），命令因此统一走 Lifo 混合链（Succinix host 上报 runtime
       // 'lifo'），即使命令本身是 node 系；node 子进程由此落在 Lifo 默认超时（~25s）而非 host 的
       // node 专用超时。后续如需 node 直路由，可在 M2/M3 用 setCwd（host 侧会话 cwd）替代 cd 前缀。
+      // M6：`cd <root> && <cmd>` 在同一 run 请求内原子执行（host 侧 shlex 解析整条），
+      // 并发容器无法在两段之间插队；env 由 client 的 execWithContext 原子节点写入（见 succinixClient）。
       const cwdPrefixed = request.cwd ? `cd ${request.cwd} && ${command}` : command;
       process = createRunShim(this.succinix, cwdPrefixed, request.timeoutMs, request.env);
     } else {
@@ -414,7 +416,9 @@ export class RuntimeServiceRegistry {
   private async spawnBackground(request: ManagedSpawnRequest): Promise<number> {
     const command = assembleCommand(request.command, request.args);
     // M-1：spawn 无法用 cd 前缀（host 只接受 node 前缀命令），改在命令前 setCwd 到容器根；
-    // env 由 client 写入 /etc/succinix.env。
+    // env 由 client 写入 /etc/succinix.env。M6：setCwd + spawn 在 succinixClient 的
+    // execWithContext 原子节点内连续执行（同一 FIFO 链节点），并发容器无法在两段之间插队
+    // 串写宿主单一会话 cwd。
     const result = await this.succinix.spawn(command, {
       ...(request.timeoutMs !== undefined ? { timeoutMs: request.timeoutMs } : {}),
       ...(request.cwd ? { cwd: request.cwd } : {}),

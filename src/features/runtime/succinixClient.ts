@@ -88,8 +88,8 @@ export class SuccinixClient {
   async run(command: string, opts?: SuccinixRunOptions): Promise<SuccinixRunResult> {
     let result: SuccinixResponse;
     try {
-      await this.applyContext(opts);
-      result = await this.exec('run', { command, ...(opts?.timeoutMs !== undefined ? { timeout: opts.timeoutMs } : {}) }, opts?.timeoutMs);
+      // M6：env 上下文与 run 命令同一原子节点（多容器并发时 env 文件不被其他容器插队串写）。
+      result = await this.execWithContext('run', { command, ...(opts?.timeoutMs !== undefined ? { timeout: opts.timeoutMs } : {}) }, opts, opts?.timeoutMs);
     } catch {
       // 轮询超时：host 无响应（未拉起或已崩溃）。
       return { ok: false, exitCode: -1, stdout: '', stderr: 'Succinix RPC timed out.', timedOut: true };
@@ -113,8 +113,8 @@ export class SuccinixClient {
   async spawn(command: string, opts?: SuccinixRunOptions): Promise<{ ok: boolean; pid: number }> {
     let result: SuccinixResponse;
     try {
-      await this.applyContext(opts);
-      result = await this.exec('spawn', { command, ...(opts?.timeoutMs !== undefined ? { timeout: opts.timeoutMs } : {}) }, PROTOCOL_COMMAND_TIMEOUT_MS);
+      // M6：setCwd 与 spawn 命令同一原子节点（多容器并发时会话 cwd 不被其他容器插队串写）。
+      result = await this.execWithContext('spawn', { command, ...(opts?.timeoutMs !== undefined ? { timeout: opts.timeoutMs } : {}) }, opts, PROTOCOL_COMMAND_TIMEOUT_MS);
     } catch {
       return { ok: false, pid: -1 };
     }
@@ -180,36 +180,45 @@ export class SuccinixClient {
   }
 
   /**
-   * run/spawn 前置上下文：与命令同一 FIFO 链内先 setCwd（spawn 语义）、写 /etc/succinix.env
-   * （env 透传，host spawn 子进程时合并）。best-effort：任一步失败不阻断命令（命令会在原
-   * cwd / 缺 env 下继续，避免把一次可用的执行误报为 RPC 超时）。
+   * M6（cwd/env 竞态防护）：上下文写入与命令塞进同一个 FIFO 链节点原子执行。
+   * Succinix host 是单一会话 cwd（协议无 per-request cwd）与单一 /etc/succinix.env 合并文件
+   * ——若 setCwd / env 写入与命令分处两个链节点，多容器并发时另一容器的上下文会在两节点之间
+   * 插队，本容器命令就会在错误目录 / 错误环境下执行（实测：A setCwd 后 B setCwd 插队，
+   * A 的 spawn 落在 B 目录）。这里把上下文与命令放在同一个链节点内：this.chain 在节点入队时
+   * 已指向整条序列，节点内 await 不释放链（后续请求只能排到命令完成之后），宿主侧表现为
+   * `setCwd + spawn` / `env 写入 + run` 原子完成。
+   * best-effort：上下文任一步失败不阻断命令（命令会在原 cwd / 缺 env 下继续，避免把一次
+   * 可用的执行误报为 RPC 超时）。
    */
-  private async applyContext(opts?: SuccinixRunOptions): Promise<void> {
-    if (opts?.cwd) {
-      try {
-        await this.exec('setCwd', { cwd: opts.cwd }, PROTOCOL_COMMAND_TIMEOUT_MS);
-      } catch {
-        // 会话 cwd 设置失败不阻断命令
+  private execWithContext(cmd: string, opts: Record<string, unknown> | undefined, context: SuccinixRunOptions | undefined, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<SuccinixResponse> {
+    const run = this.chain.then(async () => {
+      if (context?.cwd) {
+        try {
+          await this.doExec('setCwd', { cwd: context.cwd }, PROTOCOL_COMMAND_TIMEOUT_MS);
+        } catch {
+          // 会话 cwd 设置失败不阻断命令
+        }
       }
-    }
-    if (opts?.env && Object.keys(opts.env).length > 0) {
-      try {
-        await this.writeEnvFile(opts.env);
-      } catch {
-        // env 文件写入失败不阻断命令
+      if (context?.env && Object.keys(context.env).length > 0) {
+        try {
+          await this.writeEnvFile(context.env);
+        } catch {
+          // env 文件写入失败不阻断命令
+        }
       }
-    }
+      return this.doExec(cmd, opts, timeoutMs);
+    });
+    this.chain = run.then(() => undefined, () => undefined);
+    return run;
   }
 
-  /** 把环境写入 host 合并文件 /etc/succinix.env（与命令同一 FIFO 链，保证 host 读到最新值）。 */
+  /** 把环境写入 host 合并文件 /etc/succinix.env（仅供 execWithContext 原子节点内部调用，不占用 FIFO 链）。 */
   private writeEnvFile(entries: Record<string, string>): Promise<void> {
-    const write = this.chain.then(async () => {
+    return (async () => {
       await this.fs.mkdir('/etc', { recursive: true }).catch(() => {});
       const content = `${Object.entries(entries).map(([key, value]) => `${key}=${value}`).join('\n')}\n`;
       await this.fs.writeFile(ENV_FILE, content);
-    });
-    this.chain = write.then(() => undefined, () => undefined);
-    return write;
+    })();
   }
 
   /** 排队执行：前一个请求 settle（成功或超时）后才写下一个 /cmd.json。 */
