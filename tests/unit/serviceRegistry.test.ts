@@ -143,6 +143,83 @@ describe('RuntimeServiceRegistry', () => {
     }
   });
 
+  it('does not attribute a declared port to a terminal process (L2)', async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = new FakeWebContainer();
+      const registry = new RuntimeServiceRegistry(fixture as unknown as WebContainer, vi.fn());
+      await registry.initialize();
+      // 终端进程即使声明了端口（.listen(3000)），声明命中分支也不得归为 managed(source=terminal)。
+      await registry.spawn({ source: 'terminal', containerId: 'c-1', command: 'node -e "require(\'http\').createServer(()=>{}).listen(3000)"' });
+      fixture.emit('server-ready', 3000, 'https://3000.example.test');
+      expect(registry.getPorts()[0]?.state).toBe('identifying');
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(registry.getPorts()[0]?.state).toBe('orphaned');
+      registry.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reconciles a port that arrived before its launch registered (server-ready → spawn, M1)', async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = new FakeWebContainer();
+      const registry = new RuntimeServiceRegistry(fixture as unknown as WebContainer, vi.fn());
+      await registry.initialize();
+      // 生产主序：服务进程先绑端口（server-ready 即到），spawn RPC 确认后才注册 launch。
+      fixture.emit('server-ready', 3000, 'https://3000.example.test');
+      expect(registry.getPorts()[0]?.state).toBe('identifying');
+      const { launchId } = await registry.spawn({ source: 'agent', containerId: 'c-1', command: 'node -e "...listen(3000)"' });
+      // reconcileLaunch 重推：identifying → managed。
+      expect(registry.getPorts()).toEqual([expect.objectContaining({ port: 3000, state: 'managed', pid: 4321, launchId })]);
+      // 孤儿计时器已取消：越过孤儿窗口端口仍保持 managed（未被翻为 orphaned）。
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(registry.getPorts()[0]?.state).toBe('managed');
+      registry.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('backtracks a just-orphaned port to managed when the claiming launch registers (M2)', async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = new FakeWebContainer();
+      const registry = new RuntimeServiceRegistry(fixture as unknown as WebContainer, vi.fn());
+      await registry.initialize();
+      fixture.emit('server-ready', 3000, 'https://3000.example.test');
+      await vi.advanceTimersByTimeAsync(3_000);
+      // 孤儿定时器先于 spawn RPC 确认触发：端口已翻为 orphaned。
+      expect(registry.getPorts()[0]?.state).toBe('orphaned');
+      const { launchId } = await registry.spawn({ source: 'agent', containerId: 'c-1', command: 'node -e "...listen(3000)"' });
+      // 宽限窗内 launch 注册：孤儿端口回溯为 managed。
+      expect(registry.getPorts()).toEqual([expect.objectContaining({ port: 3000, state: 'managed', pid: 4321, launchId })]);
+      registry.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps an orphaned port orphaned when the claiming launch registers past the retrospect window (M2)', async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = new FakeWebContainer();
+      const registry = new RuntimeServiceRegistry(fixture as unknown as WebContainer, vi.fn());
+      await registry.initialize();
+      fixture.emit('server-ready', 3000, 'https://3000.example.test');
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(registry.getPorts()[0]?.state).toBe('orphaned');
+      // 越过回溯宽限窗（ORPHAN_RETROSPECT_MS 10s）后 launch 才注册：如实保持 orphaned。
+      await vi.advanceTimersByTimeAsync(11_000);
+      await registry.spawn({ source: 'agent', containerId: 'c-1', command: 'node -e "...listen(3000)"' });
+      expect(registry.getPorts()[0]?.state).toBe('orphaned');
+      registry.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('classifies an unregistered open port as orphaned after the reconciliation window', async () => {
     vi.useFakeTimers();
     try {
@@ -206,6 +283,24 @@ describe('RuntimeServiceRegistry', () => {
     await expect(stopPromise).resolves.toBe(true);
     // R3：managed 端口 stop → succinixClient.kill(host pid)，不再走 webcontainer spawn helper。
     expect(mockKill).toHaveBeenCalledWith(4321);
+    expect(registry.getPorts()).toEqual([]);
+    registry.dispose();
+  });
+
+  it('stopPort waits for close instead of orphaning a port whose launch is already stopping (L1)', async () => {
+    const fixture = new FakeWebContainer();
+    const registry = new RuntimeServiceRegistry(fixture as unknown as WebContainer, vi.fn());
+    await registry.initialize();
+    const { launchId } = await registry.spawn({ source: 'agent', containerId: 'c-1', command: 'node -e "...listen(8080)"' });
+    fixture.emit('server-ready', 8080, 'https://8080.example.test');
+    expect(registry.getPorts()[0]?.state).toBe('managed');
+    // 构造 L1 守卫的瞬态：launch 已 stopping（首杀在途）而端口仍 managed（close 事件将至）。
+    (registry as unknown as { launches: Map<string, { status: string }> }).launches.get(launchId)!.status = 'stopping';
+    const stopPromise = registry.stopPort(8080);
+    // 不瞬态误标 orphaned：端口转 stopping 等待 close。
+    expect(registry.getPorts()[0]?.state).toBe('stopping');
+    fixture.emit('port', 8080, 'close', '');
+    await expect(stopPromise).resolves.toBe(true);
     expect(registry.getPorts()).toEqual([]);
     registry.dispose();
   });

@@ -13,6 +13,11 @@ const SERVICE_EVENT_PATH = `${RUNTIME_DIRECTORY}/service-events.jsonl`;
 // （server-ready 即到），浏览器侧要到确认结果（~2s）才注册 launch。窗口必须覆盖该延迟，否则
 // launch 注册前端口已被误判 orphaned（R1 进程→端口推断的注册竞态）。
 const ORPHAN_RECONCILIATION_MS = 3_000;
+// 孤儿回溯宽限窗：孤儿分类计时器（ORPHAN_RECONCILIATION_MS 3s）可能先于 spawn RPC 确认触发——
+// host 确认最坏可到 spawn RPC 浏览器侧等待上限（succinixClient PROTOCOL_COMMAND_TIMEOUT_MS 5s +
+// 缓冲 5s）。launch 注册时允许把窗内刚落 orphaned 的声明端口回溯为 managed；超出窗口视为如实
+// orphaned（无声明 / 多服务竞态不硬造 managed）。
+const ORPHAN_RETROSPECT_MS = 10_000;
 const STOP_WAIT_MS = 3_000;
 const MAX_EVENT_FILE_BYTES = 256 * 1024;
 // 后台/终端 spawn 进程输出尾部同步轮询间隔（host ps() 的 outputTail 字段，M2/M3）。
@@ -241,6 +246,8 @@ export class RuntimeServiceRegistry {
   private readonly listenersByPort = new Map<number, ListenerRecord>();
   private readonly listeners = new Set<() => void>();
   private readonly orphanTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  /** M2：端口被孤儿定时器翻为 orphaned 的落定时刻，供 launch 注册时对窗内孤儿端口回溯。 */
+  private readonly orphanedAt = new Map<number, number>();
   private readonly launchStopTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly processedRecords = new Set<string>();
   private initializePromise: Promise<void> | null = null;
@@ -344,9 +351,16 @@ export class RuntimeServiceRegistry {
     const port = this.ports.get(portNumber);
     if (!port || port.state !== 'managed' || !port.launchId) return false;
     const launch = this.launches.get(port.launchId);
-    if (!launch || launch.status === 'stopping') {
+    if (!launch) {
+      // 端口仍 managed 但 launch 已不存在（悬空引用）：无法 stop，如实落 orphaned。
       this.updatePort(portNumber, { ...port, state: 'orphaned' });
       return false;
+    }
+    // L1：launch 已在 stopping（首杀在途）时，二次 stopPort 不得把端口瞬态误标 orphaned——
+    // 端口标记 stopping 后等待 close（与首杀路径同一 deadline），close 未按时到达才落 orphaned 兜底。
+    if (launch.status === 'stopping') {
+      this.updatePort(portNumber, { ...port, state: 'stopping' });
+      return this.waitForPortClose(portNumber, { ...port, state: 'stopping' });
     }
     this.updatePort(portNumber, { ...port, state: 'stopping' });
     try {
@@ -367,6 +381,11 @@ export class RuntimeServiceRegistry {
       this.updatePort(portNumber, { ...port, state: 'orphaned' });
       return false;
     }
+    return this.waitForPortClose(portNumber, port);
+  }
+
+  /** stopPort 共用等待：端口在 STOP_WAIT_MS 内被 close 事件移除返回 true，超时落 orphaned 兜底。 */
+  private async waitForPortClose(portNumber: number, port: RuntimePortStatus): Promise<boolean> {
     const deadline = Date.now() + STOP_WAIT_MS;
     while (this.ports.has(portNumber) && Date.now() < deadline) await sleep(50);
     if (!this.ports.has(portNumber)) return true;
@@ -380,6 +399,7 @@ export class RuntimeServiceRegistry {
     this.eventWatcher?.close();
     this.orphanTimers.forEach((timer) => clearTimeout(timer));
     this.orphanTimers.clear();
+    this.orphanedAt.clear();
     this.launchStopTimers.forEach((timer) => clearTimeout(timer));
     this.launchStopTimers.clear();
     for (const launch of this.launches.values()) if (launch.status === 'running' || launch.status === 'stopping') launch.process.kill();
@@ -471,6 +491,7 @@ export class RuntimeServiceRegistry {
     const timer = this.orphanTimers.get(portNumber);
     if (timer) clearTimeout(timer);
     this.orphanTimers.delete(portNumber);
+    this.orphanedAt.delete(portNumber);
     this.listenersByPort.delete(portNumber);
     const launchId = this.ports.get(portNumber)?.launchId;
     if (this.ports.delete(portNumber)) this.publish();
@@ -503,7 +524,7 @@ export class RuntimeServiceRegistry {
    *（`.listen(N)` / `--port N` / `PORT=N`）；命令未声明端口时，仅当容器内只有一个 Agent 服务进程
    *（如 `node server.js`，端口不在命令里）才兜底关联。多服务且端口无声明归属 → 返回 null，落
    * identifying → orphaned（无法可靠关联时如实呈现，不硬造 managed）。终端底座进程（source=terminal）
-   * 非服务，不参与兜底，避免把端口误配给只读终端。
+   * 非服务，声明命中与兜底均不参与，避免把端口误配给只读终端。
    */
   private inferManagedPort(portNumber: number, url = this.ports.get(portNumber)?.url ?? ''): RuntimePortStatus | null {
     const candidates = [...this.launches.values()].filter((launch) =>
@@ -511,7 +532,9 @@ export class RuntimeServiceRegistry {
       && launch.process.succinixPid !== null
       && launch.process.succinixPid > 0);
     if (candidates.length === 0) return null;
-    const declared = candidates.filter((launch) => launch.expectedPorts.includes(portNumber));
+    // L2：声明命中同样排除终端底座进程——终端 `node -e "...listen(N)"` 声明了端口也不得归为
+    // managed(source=terminal)，只有 Agent 服务进程才参与端口关联。
+    const declared = candidates.filter((launch) => launch.source !== 'terminal' && launch.expectedPorts.includes(portNumber));
     const services = candidates.filter((launch) => launch.source !== 'terminal');
     const matched = declared.length === 1
       ? declared[0]
@@ -538,7 +561,11 @@ export class RuntimeServiceRegistry {
     this.orphanTimers.set(portNumber, setTimeout(() => {
       this.orphanTimers.delete(portNumber);
       const port = this.ports.get(portNumber);
-      if (port?.state === 'identifying') this.updatePort(portNumber, { ...port, state: 'orphaned' });
+      if (port?.state === 'identifying') {
+        // M2：记录孤儿落定时刻，供 launch 注册时对窗内孤儿端口回溯（见 reconcileLaunch）。
+        this.orphanedAt.set(portNumber, Date.now());
+        this.updatePort(portNumber, { ...port, state: 'orphaned' });
+      }
     }, ORPHAN_RECONCILIATION_MS));
   }
 
@@ -562,13 +589,18 @@ export class RuntimeServiceRegistry {
     }
     // R1 进程→端口推断：spawn RPC 返回前端口可能已 server-ready（identifying），launch 注册后
     // 重跑推断，命中声明端口即归属 managed（并取消孤儿计时器）。
+    // M2：孤儿定时器可能已在 launch 注册前把端口翻为 orphaned（孤儿窗口 3s < spawn RPC 确认上限），
+    // 对宽限窗（ORPHAN_RETROSPECT_MS）内刚落 orphaned 的端口同样回溯；超出窗口保持如实 orphaned。
     for (const [portNumber, port] of this.ports) {
-      if (port.state !== 'identifying') continue;
+      if (port.state !== 'identifying' && port.state !== 'orphaned') continue;
       const managed = this.inferManagedPort(portNumber);
-      if (managed?.launchId === launchId) {
-        this.cancelOrphanTimer(portNumber);
-        this.updatePort(portNumber, managed);
+      if (!managed || managed.launchId !== launchId) continue;
+      if (port.state === 'orphaned') {
+        const orphanedAt = this.orphanedAt.get(portNumber);
+        if (orphanedAt === undefined || Date.now() - orphanedAt > ORPHAN_RETROSPECT_MS) continue;
       }
+      this.cancelOrphanTimer(portNumber);
+      this.updatePort(portNumber, managed);
     }
   }
 
@@ -614,6 +646,7 @@ export class RuntimeServiceRegistry {
   }
 
   private updatePort(portNumber: number, port: RuntimePortStatus): void {
+    if (port.state !== 'orphaned') this.orphanedAt.delete(portNumber);
     this.ports.set(portNumber, port);
     this.publish();
   }
