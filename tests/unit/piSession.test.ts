@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { File as NodeFile } from 'node:buffer';
 import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage } from '@earendil-works/pi-agent-core';
-import { PiEventBridge, PiSession, piAssistantReasoning, piAssistantText, piMessageToAppMessage, type PiAgentLike } from '@/features/agent-core/pi/piSession';
+import { PiEventBridge, PiSession, piAssistantReasoning, piAssistantText, piAssistantToolCalls, piMessageToAppMessage, type PiAgentLike } from '@/features/agent-core/pi/piSession';
 import { isPiEngineEnabled, setPiEngineEnabled } from '@/features/agent-core/pi/featureFlag';
 import { STORAGE_KEYS } from '@/shared/lib/storage';
 import { AgentEventStore } from '@/features/agent-core/eventStore';
@@ -99,6 +99,41 @@ describe('pi message conversion', () => {
     expect(piAssistantText(message)).toBe('ab');
     expect(piAssistantReasoning(message)).toBe('t');
   });
+
+  it('converts a pi assistant message with a toolCall block into Message.tool_calls (R1)', () => {
+    const piMessage = assistantMessage({
+      content: [
+        { type: 'thinking', thinking: 'I should inspect the workspace.' },
+        { type: 'text', text: 'Let me check.' },
+        { type: 'toolCall', id: 'call-1', name: 'workspace_tree', arguments: { max_depth: 2 } },
+      ],
+    });
+    const message = piMessageToAppMessage(piMessage);
+    expect(message.role).toBe('assistant');
+    expect(message.content).toBe('Let me check.');
+    expect(message.reasoning_content).toBe('I should inspect the workspace.');
+    expect(message.tool_calls).toEqual([
+      { id: 'call-1', type: 'function', function: { name: 'workspace_tree', arguments: '{"max_depth":2}' } },
+    ]);
+  });
+
+  it('extracts multiple toolCall blocks into ToolCall[] preserving order', () => {
+    const message = assistantMessage({
+      content: [
+        { type: 'toolCall', id: 'call-1', name: 'read_file', arguments: { path: 'a.ts' } },
+        { type: 'toolCall', id: 'call-2', name: 'search_workspace', arguments: { query: 'foo' } },
+      ],
+    });
+    expect(piAssistantToolCalls(message)).toEqual([
+      { id: 'call-1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.ts"}' } },
+      { id: 'call-2', type: 'function', function: { name: 'search_workspace', arguments: '{"query":"foo"}' } },
+    ]);
+  });
+
+  it('does not attach tool_calls when the assistant message has no toolCall blocks', () => {
+    const message = piMessageToAppMessage(assistantMessage({ content: [{ type: 'text', text: 'hi' }] }));
+    expect(message.tool_calls).toBeUndefined();
+  });
 });
 
 describe('PiEventBridge', () => {
@@ -177,6 +212,98 @@ describe('PiEventBridge', () => {
 
     expect(run.phase).toBe('failed');
     expect(events.at(-1)).toMatchObject({ kind: 'run_failed', error: 'boom', recoverable: false });
+  });
+
+  it('bridges tool_execution_start/end into tool_started/tool_finished events (R1)', () => {
+    const { bridge, events, run } = makeBridge();
+    bridge.handlePiEvent({ type: 'agent_start' });
+    bridge.handlePiEvent({
+      type: 'tool_execution_start',
+      toolCallId: 'call-1',
+      toolName: 'report_progress',
+      args: { message: 'step 1' },
+    });
+    bridge.handlePiEvent({
+      type: 'tool_execution_end',
+      toolCallId: 'call-1',
+      toolName: 'report_progress',
+      result: { content: [{ type: 'text', text: 'step 1' }], details: { progress: 'step 1' } },
+      isError: false,
+    });
+    bridge.handlePiEvent({ type: 'message_end', message: assistantMessage({ content: [{ type: 'text', text: 'done' }] }) });
+    bridge.handlePiEvent({ type: 'turn_end', message: assistantMessage({ content: [{ type: 'text', text: 'done' }] }), toolResults: [] });
+    bridge.handlePiEvent({ type: 'agent_end', messages: [assistantMessage({ content: [{ type: 'text', text: 'done' }] })] });
+
+    const expectedToolCall = { id: 'call-1', type: 'function' as const, function: { name: 'report_progress', arguments: '{"message":"step 1"}' } };
+    const started = events.find((event): event is Extract<AgentEvent, { kind: 'tool_started' }> => event.kind === 'tool_started');
+    expect(started?.toolCall).toEqual(expectedToolCall);
+    const finished = events.find((event): event is Extract<AgentEvent, { kind: 'tool_finished' }> => event.kind === 'tool_finished');
+    expect(finished?.toolCall).toEqual(expectedToolCall);
+    expect(finished?.result).toEqual({ ok: true, content: 'step 1', data: { progress: 'step 1' } });
+
+    // usage 统计真实化：tool_execution_end 累计后随 agent_end 同步到 run.toolCalls。
+    expect(run.toolCalls).toBe(1);
+  });
+
+  it('marks tool_finished result as failed when the tool errors', () => {
+    const { bridge, events } = makeBridge();
+    bridge.handlePiEvent({ type: 'agent_start' });
+    bridge.handlePiEvent({ type: 'tool_execution_start', toolCallId: 'call-2', toolName: 'run_command', args: { command: 'ls' } });
+    bridge.handlePiEvent({
+      type: 'tool_execution_end',
+      toolCallId: 'call-2',
+      toolName: 'run_command',
+      result: { content: [{ type: 'text', text: 'boom' }] },
+      isError: true,
+    });
+    const finished = events.find((event): event is Extract<AgentEvent, { kind: 'tool_finished' }> => event.kind === 'tool_finished');
+    expect(finished?.result.ok).toBe(false);
+    expect(finished?.result.content).toBe('boom');
+  });
+
+  it('bridges a pi toolResult message into a role:tool message event (R3)', () => {
+    const { bridge, events } = makeBridge();
+    bridge.handlePiEvent({ type: 'agent_start' });
+    bridge.handlePiEvent({
+      type: 'message_end',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'call-1',
+        toolName: 'report_progress',
+        content: [{ type: 'text', text: 'step 1' }],
+        isError: false,
+        timestamp: 1,
+      },
+    });
+    const toolMessage = events.find((event): event is Extract<AgentEvent, { kind: 'message' }> => event.kind === 'message' && event.message.role === 'tool');
+    expect(toolMessage?.message).toEqual({ role: 'tool', tool_call_id: 'call-1', name: 'report_progress', content: 'step 1' });
+    expect(toolMessage?.streamId).toBe('r1:tool-call-1');
+  });
+
+  it('includes toolCalls in the streaming assistant_delta when the partial message has toolCall blocks (R1)', () => {
+    const { bridge, events } = makeBridge();
+    bridge.handlePiEvent({ type: 'agent_start' });
+    bridge.handlePiEvent({
+      type: 'message_update',
+      assistantMessageEvent: {
+        type: 'toolcall_end',
+        contentIndex: 0,
+        toolCall: { type: 'toolCall', id: 'call-1', name: 'report_progress', arguments: { message: 'step 1' } },
+        partial: assistantMessage(),
+      },
+      message: assistantMessage({
+        content: [
+          { type: 'text', text: 'working' },
+          { type: 'toolCall', id: 'call-1', name: 'report_progress', arguments: { message: 'step 1' } },
+        ],
+      }),
+    });
+    const deltas = events.filter((event): event is Extract<AgentEvent, { kind: 'assistant_delta' }> => event.kind === 'assistant_delta');
+    expect(deltas.at(0)?.content).toBe('working');
+    expect(deltas.at(0)?.toolCalls).toEqual([
+      { id: 'call-1', type: 'function', function: { name: 'report_progress', arguments: '{"message":"step 1"}' } },
+    ]);
+    expect(deltas.every((delta) => delta.transient)).toBe(true);
   });
 });
 

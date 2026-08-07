@@ -127,3 +127,54 @@ test('pi channel resumes an interrupted run from the persisted session history',
   expect(texts).toContain('build the feature');
   expect(texts).toContain('Continue from checkpoint:');
 });
+
+test('pi channel renders tool calls and results in the chat bubble (R1/R3)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const baseUrl = 'https://pi-tool-e2e.invalid/v1';
+  let streamingTurn = 0;
+  const usage = { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 };
+  const chunk = (id: string, delta: object, finishReason: string | null) =>
+    JSON.stringify({ id, object: 'chat.completion.chunk', created: 1, model: 'e2e-model', choices: [{ index: 0, delta, finish_reason: finishReason }], usage });
+  await page.route(`${baseUrl}/chat/completions`, async (route) => {
+    const body = route.request().postDataJSON() as { stream?: boolean };
+    if (!body.stream) {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }) });
+      return;
+    }
+    streamingTurn += 1;
+    if (streamingTurn === 1) {
+      // 第一轮：模型请求调用 report_progress（chat-only 模式可用，无需容器）。
+      await route.fulfill({
+        contentType: 'text/event-stream',
+        body: [
+          `data: ${chunk('c1', { tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { name: 'report_progress', arguments: '{"message":"step 1"}' } }] }, null)}\n\n`,
+          `data: ${chunk('c1', {}, 'tool_calls')}\n\n`,
+          'data: [DONE]\n\n',
+        ].join(''),
+      });
+      return;
+    }
+    // 第二轮：工具执行后模型给出最终回复。
+    await route.fulfill({
+      contentType: 'text/event-stream',
+      body: [
+        `data: ${chunk('c2', { role: 'assistant', content: '已调用工具' }, null)}\n\n`,
+        `data: ${chunk('c2', {}, 'stop')}\n\n`,
+        'data: [DONE]\n\n',
+      ].join(''),
+    });
+  });
+  const composer = await openPiConfigured(page, baseUrl, { chatOnly: true });
+  await composer.fill('用工具处理');
+  await composer.press('Enter');
+
+  // 气泡内渲染工具调用（工具名），而非仅 RunBoard。
+  const toolHeading = page.locator('.chat-message[data-role="assistant"] .chat-tool-heading').first();
+  await expect(toolHeading).toContainText('report_progress', { timeout: 60_000 });
+  // 展开工具细节，断言参数与结果摘要都渲染在气泡内。
+  await toolHeading.click();
+  await expect(page.locator('.chat-message[data-role="assistant"] .chat-tool-arguments').first()).toContainText('step 1');
+  await expect(page.locator('.chat-message[data-role="assistant"] .chat-tool-result-content').first()).toContainText('step 1', { timeout: 60_000 });
+  // 工具后的最终回复正常。
+  await expect(page.locator('.chat-message[data-role="assistant"] .chat-answer').filter({ hasText: /^已调用工具$/ })).toBeVisible({ timeout: 60_000 });
+});

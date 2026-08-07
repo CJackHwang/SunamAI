@@ -4,14 +4,14 @@ import { createModels, createProvider, envApiKeyAuth, InMemoryCredentialStore, u
 import type { Api, ImageContent, Model, Models, TextContent } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
-import type { ChatAttachment, Message } from '@/entities/message/types';
+import type { ChatAttachment, Message, ToolCall } from '@/entities/message/types';
 import type { AgentResource } from '@/entities/resource/types';
 import { v3Persistence } from '@/entities/persistence/v3Repository';
 import { ContainerMutationLease } from '../mutationLease';
 import { ResourceProcessorRegistry } from '../resourceProcessor';
 import type { AgentEventStore } from '../eventStore';
 import type { RegisteredTool, SubagentHost, ToolExecutionContext } from '../tools/base';
-import type { AgentEvent, AgentPhase, AgentRun, TaskContract } from '../types';
+import type { AgentEvent, AgentPhase, AgentRun, AgentToolResult, TaskContract } from '../types';
 import { IndexedDbSessionRepo } from './indexedDbSessionStorage';
 import {
   PI_COMPACTION_CUSTOM_INSTRUCTIONS,
@@ -165,6 +165,25 @@ export function piAssistantReasoning(message: PiAgentMessage): string {
   return message.content.filter(isThinkingPart).map((part) => part.thinking).join('');
 }
 
+const isToolCallPart = (part: unknown): part is { type: 'toolCall'; id: string; name: string; arguments: Record<string, unknown> } =>
+  typeof part === 'object' && part !== null && (part as { type?: string }).type === 'toolCall';
+
+/** pi toolCall 块的 arguments 是解析后的对象；转成现有 ToolCall 模型要求的 JSON 字符串。 */
+function toolCallArgumentsString(args: unknown): string {
+  if (typeof args === 'string') return args;
+  return JSON.stringify(args ?? {});
+}
+
+/** 从 pi assistant 消息的 content 块中提取工具调用（pi ToolCall → 现有 ToolCall 结构）。 */
+export function piAssistantToolCalls(message: PiAgentMessage): ToolCall[] {
+  if (message.role !== 'assistant' || !Array.isArray(message.content)) return [];
+  return message.content.filter(isToolCallPart).map((part) => ({
+    id: part.id,
+    type: 'function',
+    function: { name: part.name, arguments: toolCallArgumentsString(part.arguments) },
+  }));
+}
+
 function piUserText(message: PiAgentMessage): string {
   if (message.role !== 'user') return '';
   if (typeof message.content === 'string') return message.content;
@@ -180,7 +199,9 @@ function piToolResultText(message: PiAgentMessage): string {
 
 /**
  * pi 消息事件 → 现有 UI 消息模型（ChatMessage 结构）。
- * pi 的 user/toolResult 消息映射为字符串 content；assistant 消息保留正文与推理。
+ * pi 的 user/toolResult 消息映射为字符串 content；assistant 消息保留正文、推理
+ * 与工具调用（content 中的 toolCall 块 → Message.tool_calls），使气泡叠加渲染
+ * 思考 + 工具调用 + 工具结果。
  */
 export function piMessageToAppMessage(message: PiAgentMessage): Message {
   if (message.role === 'user') return { role: 'user', content: piUserText(message) };
@@ -189,10 +210,12 @@ export function piMessageToAppMessage(message: PiAgentMessage): Message {
   }
   const content = piAssistantText(message);
   const reasoning = piAssistantReasoning(message);
+  const toolCalls = piAssistantToolCalls(message);
   return {
     role: 'assistant',
     content,
     ...(reasoning ? { reasoning_content: reasoning } : {}),
+    ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
   };
 }
 
@@ -202,6 +225,10 @@ export function piMessageToAppMessage(message: PiAgentMessage): Message {
  * 事件订阅（R3 核心）：流式回复通过 `assistant_delta`（transient）累积，
  * 最终正文通过 `message`（assistant, 携带相同 streamId）落定；ChatMessageList
  * 的流式 key 会让打字机效果无缝替换为持久消息。
+ *
+ * 工具调用（R1）：assistant 消息的 toolCall 块转成 Message.tool_calls（气泡叠加显示）；
+ * `tool_execution_start/end` 透传为 `tool_started`/`tool_finished`（RunBoard/事件订阅消费）；
+ * toolResult 消息落定为 role:'tool' 消息事件，供 ChatMessageList 按 tool_call_id 关联结果。
  */
 export class PiEventBridge {
   private readonly runId: string;
@@ -214,6 +241,8 @@ export class PiEventBridge {
   private currentStreamId: string | null = null;
   /** P4 L-2 修复：子 agent usage 统计真实化（modelTurns/toolCalls 累计，随 run_finished 上报）。 */
   private readonly usage = { modelTurns: 0, toolCalls: 0 };
+  /** R1：工具执行进行中的 toolCallId → 名称/参数，供 tool_execution_end 构造完整 ToolCall。 */
+  private readonly pendingToolCalls = new Map<string, { name: string; args: unknown }>();
   /** R1：当前 prompt 的附件元数据（用于 UI 附件 chips；缺省不渲染）。 */
   private readonly getUserAttachments: (() => ChatAttachment[] | undefined) | undefined;
 
@@ -250,12 +279,20 @@ export class PiEventBridge {
           streamId: this.currentStreamId,
           content: piAssistantText(event.message),
           reasoningContent: piAssistantReasoning(event.message),
+          // R1：流式 partial 含 toolCall 块时透传给流式气泡（ChatMessageList 渲染 streamingToolCalls）。
+          toolCalls: piAssistantToolCalls(event.message),
           transient: true,
         });
         break;
       }
       case 'message_end': {
         const message = event.message;
+        if (message.role === 'toolResult') {
+          // R1/R3：工具结果消息 → 现有 role:'tool' 消息事件。ChatMessageList 以 tool_call_id
+          // 索引到 assistant 气泡的 ToolDisclosure（toolOutputs），渲染「已完成 + 结果摘要」。
+          this.emit('message', { message: piMessageToAppMessage(message), streamId: `${this.runId}:tool-${message.toolCallId}` });
+          break;
+        }
         if (message.role !== 'assistant') break;
         // P4 L-2 修复：累计模型轮次（子 agent usage 统计真实化）
         this.usage.modelTurns += 1;
@@ -273,14 +310,30 @@ export class PiEventBridge {
         }
         break;
       }
-      case 'tool_execution_start':
-      case 'tool_execution_update':
-      case 'tool_execution_end':
-        // P3：工具已注册，工具调用结果进入模型转录驱动对话继续；按「UI 视觉零改动」约束，
-        // 不在聊天流中渲染工具消息（现有引擎的 tool 消息渲染不变）。
-        // P4 L-2 修复：累计工具调用数（子 agent usage 统计真实化）
-        if (event.type === 'tool_execution_end') this.usage.toolCalls += 1;
+      case 'tool_execution_start': {
+        // R1：工具执行开始 → 现有 tool_started 事件（toolCall 名称/参数），RunBoard/事件列表消费。
+        this.pendingToolCalls.set(event.toolCallId, { name: event.toolName, args: event.args });
+        this.emit('tool_started', { toolCall: this.toAppToolCall(event.toolCallId, event.toolName, event.args) });
         break;
+      }
+      case 'tool_execution_update':
+        // R1 评估：pi 的 partialResult 是 AgentToolResult（content/details）。现有事件模型没有
+        // 工具执行中间态事件（AgentEventKind 无 tool_update），且工具适配层不传 onUpdate
+        // （见 piToolAdapter.createPiToolAdapter 的 execute 签名）——实际不会产生本事件；
+        // 中间态不落入聊天流，最终结果由 tool_execution_end + tool 消息呈现，忽略并标注。
+        break;
+      case 'tool_execution_end': {
+        // R1：工具执行结束 → 现有 tool_finished 事件（toolCall + result），RunBoard 工具列表、
+        // 子 agent changedPaths 与 v3 持久化消费。usage.toolCalls 累计真实化（P4 L-2）。
+        this.usage.toolCalls += 1;
+        const pending = this.pendingToolCalls.get(event.toolCallId);
+        this.pendingToolCalls.delete(event.toolCallId);
+        this.emit('tool_finished', {
+          toolCall: this.toAppToolCall(event.toolCallId, event.toolName, pending?.args ?? {}),
+          result: this.toAppToolResult(event.isError, event.result),
+        });
+        break;
+      }
       case 'turn_end':
         break;
       case 'agent_end': {
@@ -302,6 +355,21 @@ export class PiEventBridge {
     this.run.modelTurns = this.usage.modelTurns;
     this.run.toolCalls = this.usage.toolCalls;
     this.onRunChange({ ...this.run, task: { ...this.run.task, plan: [...this.run.task.plan], evidence: [...this.run.task.evidence] } });
+  }
+
+  /** R1：pi 工具执行事件 → 现有 ToolCall 结构（arguments 转 JSON 字符串）。 */
+  private toAppToolCall(toolCallId: string, name: string, args: unknown): ToolCall {
+    return { id: toolCallId, type: 'function', function: { name, arguments: toolCallArgumentsString(args) } };
+  }
+
+  /** R1：pi 工具执行结果 → 现有 AgentToolResult（文本摘要 + 结构化 data）。 */
+  private toAppToolResult(isError: boolean, result: { content: (TextContent | ImageContent)[]; details?: unknown } | undefined): AgentToolResult {
+    const content = Array.isArray(result?.content) ? result.content.filter(isTextPart).map((part) => part.text).join('') : '';
+    return {
+      ok: !isError,
+      content,
+      ...(result?.details !== undefined ? { data: result.details } : {}),
+    };
   }
 
   private emit<K extends AgentEvent['kind']>(kind: K, payload: Omit<Extract<AgentEvent, { kind: K }>, 'id' | 'kind' | 'sessionId' | 'runId' | 'sequence' | 'createdAt'>): void {
