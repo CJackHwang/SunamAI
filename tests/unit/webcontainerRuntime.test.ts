@@ -137,14 +137,16 @@ function createFilesystemRuntime() {
 }
 
 describe('WebContainerAgentRuntime process ownership', () => {
-  it('launches the user shell through the shared Succinix spawn path', async () => {
+  it('exposes a Succinix line-command user terminal session without spawning a placeholder process (V2TERM)', async () => {
     const { runtime } = createRuntime();
-    const spawned = await runtime.spawnUserShell('c-1');
-    expect(spawned.launchId).toBeTruthy();
-    expect(spawned.process.output).toBeInstanceOf(ReadableStream);
-    expect(spawned.process.input).toBeInstanceOf(WritableStream);
-    expect(typeof spawned.process.kill).toBe('function');
-    expect(mockSpawn).toHaveBeenCalledWith(expect.stringContaining('node -e'), expect.anything());
+    const session = await runtime.spawnUserShell('c-1');
+    expect(session.containerId).toBe('c-1');
+    // 初始 cwd = 容器根（Succinix VFS 视角），提示符对齐 Succinix guest 风格。
+    expect(session.getCwd()).toBe('/workspace/c-1');
+    expect(session.getPrompt()).toBe('guest@succinix:~$ ');
+    // 不再 spawn 假占位进程 —— 整行命令模式（succinixClient.run）取代文件 RPC 占位底座。
+    expect(mockSpawn).not.toHaveBeenCalled();
+    session.dispose();
     runtime.dispose();
   });
 

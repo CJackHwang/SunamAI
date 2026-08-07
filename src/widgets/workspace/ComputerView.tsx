@@ -6,6 +6,7 @@ import { useI18n } from '@/shared/i18n';
 import { toErrorMessage } from '@/shared/lib/errors';
 import { appendAgentTerminalBuffer, flushAgentTerminalBuffers, subscribeAgentTerminalPersistence } from '@/features/terminal-session/agentTerminalBuffer';
 import { WebContainerAgentRuntime } from '@/features/runtime/WebContainerAgentRuntime';
+import type { UserTerminalSession } from '@/features/runtime/userTerminalSession';
 import type { SuccinixProcessView } from '@/features/runtime/succinixProcesses';
 import { CollapsedTerminalNav, TerminalTabs } from '@/features/terminal-session/TerminalTabs';
 import { ContainerCapsule } from '@/widgets/workspace/ContainerCapsule';
@@ -59,7 +60,6 @@ const ComputerView = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
   // Sub-view inside the merged "Sunam的电脑" tab: 电脑 / 终端 / 服务.
   const [containerSegment, setContainerSegment] = useState<ContainerSegment>('ai');
   const contentRef = useRef<HTMLDivElement>(null);
-  const userShellWriterRef = useRef<WritableStreamDefaultWriter<string> | null>(null);
   const sessionIdRef = useRef(activeSessionId);
   sessionIdRef.current = activeSessionId;
   const containerLabel = activeContainerName?.trim() || t('sidebar.newContainer');
@@ -100,38 +100,34 @@ const ComputerView = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
 
   useEffect(() => {
     if (!runtime || !activeContainerId || !isUserTermReady || !userTermRef.current) return;
-    let process: Awaited<ReturnType<WebContainer['spawn']>> | undefined;
-    let launchId: string | undefined;
+    let session: UserTerminalSession | null = null;
     let onDataDisposable: { dispose(): void } | undefined;
     let active = true;
     void (async () => {
       await runtime.ensureContainer(activeContainerId);
       if (!active) return;
+      const term = userTermRef.current;
+      if (!term) return;
       const spawned = await runtime.spawnUserShell(activeContainerId);
-      process = spawned.process;
-      launchId = spawned.launchId;
-      if (!active) { process.kill(); return; }
-      let receivedOutput = false;
-      void process.output.pipeTo(new WritableStream<string>({
-        write(data) {
-          userTermRef.current?.write(data);
-          runtime?.appendUserTerminalBuffer(data);
-          if (!receivedOutput) { receivedOutput = true; setIsBooted(true); }
+      if (!active) { spawned.dispose(); return; }
+      session = spawned;
+      // V2TERM：会话输出桥 → xterm 回显 + 用户终端缓冲（Agent read_user_terminal 可读）。
+      session.attach({
+        write: (data) => {
+          term.write(data);
+          runtime.appendUserTerminalBuffer(data);
         },
-      })).catch((error) => {
-        userTermRef.current?.write(`\r\n[Terminal output error: ${toErrorMessage(error)}]\r\n`);
-        setIsBooted(true);
+        clear: () => { term.clear(); },
       });
-      const writer = process.input.getWriter();
-      userShellWriterRef.current = writer;
-      onDataDisposable = userTermRef.current?.onData((data) => { void writer.write(data).catch((error) => userTermRef.current?.write(`\r\n[Terminal input error: ${toErrorMessage(error)}]\r\n`)); });
+      setIsBooted(true);
+      onDataDisposable = term.onData((data) => session?.handleData(data));
+      // boot：Succinix 横幅 → 自检摘要 → guest@succinix 提示符（busy 期间输入排队）。
+      void session.boot();
     })().catch((error) => { userTermRef.current?.write(`\r\n[Terminal startup error: ${toErrorMessage(error)}]\r\n`); setIsBooted(true); });
     return () => {
       active = false;
-      if (launchId) runtime.stopUserShell(launchId);
-      else process?.kill();
-      userShellWriterRef.current = null;
       onDataDisposable?.dispose();
+      session?.dispose();
     };
   }, [activeContainerId, isUserTermReady, runtime]);
 

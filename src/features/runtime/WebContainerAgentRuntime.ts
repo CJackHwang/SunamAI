@@ -23,6 +23,7 @@ import { SuccinixClient, type SuccinixProcessEntry } from './succinixClient';
 import { SuccinixFileSnapshotCoordinator } from './succinixFileSnapshot';
 import { bootSuccinixHost, type SuccinixHostHandle } from './succinixHost';
 import { isSystemProcess, systemKillRefusal, type SuccinixProcessView } from './succinixProcesses';
+import { UserTerminalSession } from './userTerminalSession';
 
 const MAX_PROCESS_OUTPUT = 20_000;
 // 后台进程表对账间隔：host ps() 数据源映射注册表，检测进程自然退出。
@@ -31,9 +32,6 @@ const PS_MONITOR_MS = 1_000;
 // ps() 请求排队到 run 完成才发得出（最坏 ~300s）。进程表刷新不应被此阻塞：超过该截止即
 // 返回空快照，改用 ProcessRegistry（tracked + run shims）渲染，保证前台 run 进程运行中可见。
 const PS_SNAPSHOT_TIMEOUT_MS = 1_000;
-// 用户终端无交互 stdin（文件 RPC 物理边界），spawn 一个常驻 node 进程作为"只读"终端底座。
-// 输出文案与 createSpawnShim 的初始 banner 保持一致，避免 ps() outputTail 首拍重复放流。
-const USER_SHELL_COMMAND = `node -e "console.log('Succinix terminal ready');setInterval(()=>{},1e9)"`;
 
 /** Succinix host 视角的容器根绝对路径（Lifo /workspace 挂载下，host 映射到 process.cwd()/<id>）。 */
 function containerSuccinixCwd(containerId: string): string {
@@ -214,19 +212,19 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
   subscribePorts(listener: () => void): () => void { return this.services.subscribe(listener); }
   stopPort(port: number): Promise<boolean> { return this.services.stopPort(port); }
 
-  async spawnUserShell(containerId: string): Promise<{ launchId: string; process: Awaited<ReturnType<WebContainer['spawn']>> }> {
+  /**
+   * V2TERM R1：用户终端数据源。不再 spawn 假占位进程——暴露 Succinix 整行命令交互通道。
+   * 容器 boot 后终端即就绪（非 spawn 进程）；每次调用创建独立会话（切换容器/刷新后重置）。
+   * 命令走 succinixClient.run（cd 前缀同步 Lifo 沙箱 cwd，复用 M1 文件 RPC 链路），
+   * 提示符 guest@succinix:<cwd>$ 由会话内部管理。
+   */
+  async spawnUserShell(containerId: string): Promise<UserTerminalSession> {
     await this.ensureContainer(containerId);
-    return this.services.spawn({
-      source: 'terminal',
-      containerId,
-      command: USER_SHELL_COMMAND,
-      args: [],
+    return new UserTerminalSession(this.succinix, containerId, {
       cwd: containerSuccinixCwd(containerId),
       env: { HOME: WEB_CONTAINER_HOME, SUNAM_WORKSPACE: getContainerPublicPath(containerId) },
     });
   }
-
-  stopUserShell(launchId: string): boolean { return this.services.stopLaunch(launchId); }
 
   async listWorkspace(containerId: string, maxDepth: number): Promise<WorkspaceTreeEntry[]> {
     return this.files.list(containerId, maxDepth);

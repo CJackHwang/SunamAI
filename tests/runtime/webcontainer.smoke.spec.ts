@@ -170,9 +170,11 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(terminalRows).not.toContainText(/\.sunam\/workspaces\/c-/);
   await expect(page.locator('.terminal-environment-path')).toHaveCount(0);
 
-  // 用户终端无交互 stdin（Succinix 文件 RPC 物理边界）：终端是"读输出"横幅，不能再键入命令。
-  // 断言横幅出现；共享文件与 cwd/env 语义改由 agent 路径（run_command → runShell）验证。
-  await expect(terminalRows).toContainText('Succinix terminal ready');
+  // 用户终端已接入 Succinix 整行命令界面（V2TERM）：boot 横幅 + guest@succinix 提示符，
+  // 可输入命令（整行 → succinixClient.run → 回显）。断言横幅/提示符出现；共享文件与
+  // cwd/env 语义仍由 agent 路径（run_command → runShell）验证。
+  await expect(terminalRows).toContainText(/Succinix 0\.2\.0/, { timeout: 30_000 });
+  await expect(terminalRows).toContainText(/guest@succinix:~\$ /);
 
   await composer.fill('请执行完整的 WebContainer runtime smoke verification command and services test');
   await composer.press('Enter');
@@ -180,7 +182,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
     .filter({ hasText: /^Runtime smoke complete$/ }))
     .toHaveCount(1, { timeout: 100_000 });
 
-  // 用户终端不可交互（物理边界），from-agent.txt 的存在改由下方文件管理器与 zip 校验断言。
+  // 用户终端为 Succinix 整行命令模式（V2TERM），可输入；共享文件断言仍由文件管理器与 zip 校验承担。
 
   await page.locator('.terminal-capsule').getByRole('tab', { name: '文件' }).click();
   await expect(page.locator('.fm-breadcrumb')).toHaveText('/');

@@ -15,6 +15,10 @@ export interface SuccinixRunResult {
   stderr: string;
   runtime?: 'node' | 'lifo' | 'python';
   timedOut: boolean;
+  /** host 会话 cwd（Lifo cd 成功后 host 同步并随结果返回；浏览器侧 cd 跟随提示符用）。 */
+  cwd?: string;
+  /** host 非零失败但无 stdout/stderr 时的错误文案（如 unknown command）。 */
+  error?: string;
 }
 
 export interface SuccinixProcessEntry {
@@ -97,12 +101,17 @@ export class SuccinixClient {
     const stderr = asString(result.stderr);
     const exitCode = typeof result.exitCode === 'number' ? result.exitCode : -1;
     const runtime = result.runtime;
+    const cwd = asString(result.cwd);
+    const error = asString(result.error);
     return {
       ok: result.ok === true,
       exitCode,
       stdout: asString(result.stdout),
       stderr,
       ...(runtime === 'node' || runtime === 'lifo' || runtime === 'python' ? { runtime } : {}),
+      // TASK23：host 在 Lifo cd 成功后随结果返回会话 cwd（浏览器侧整行终端跟随提示符目录）。
+      ...(cwd ? { cwd } : {}),
+      ...(error ? { error } : {}),
       // H1-2：Lifo 超时以 exitCode 130（AbortError）结算且 stderr 可能为空，需与 stderr 超时消息、
       // 轮询超时（外层 catch）一起判定 timedOut，对齐协议 R1 语义。
       timedOut: exitCode === 130 || TIMEOUT_MESSAGE_PATTERN.test(stderr),
