@@ -8,7 +8,7 @@ import { EmptyState, ErrorState } from '@/shared/ui/AsyncState';
 import './ServicesPanel.css';
 
 /** 进程行展示视图：ProcessStatus 之上附加 protected（系统进程禁 stop）与 pid/processId（kill 路由用）。 */
-export type ServiceProcessView = ProcessStatus & { protected?: boolean; pid?: number; processId?: string };
+export type ServiceProcessView = ProcessStatus & { protected?: boolean; pid?: number; processId?: string; killable?: boolean };
 
 interface ServicePanelProps {
   ports: RuntimePortStatus[];
@@ -102,13 +102,23 @@ export function ServicesPanel({ ports, processes, isRestarting, onPreview, onSto
       </div>
       <div className="services-process-list scroll-region">{processes.length === 0
         ? <EmptyState className="panel-empty-state services-process-empty">{t('services.noProcesses')}</EmptyState>
-        : processes.map((process) => <div className="service-row list-row service-process-row" key={process.id}>
-          <div className="service-process-details">
-            <span className="service-process-id">{process.protected ? `[${t('services.systemProcess')}] ${process.id}` : process.id}</span>
-            <span className="service-process-command" title={`$ ${process.command}`}>$ {process.command}</span>
-          </div>
-          <button className="icon-button icon-button-danger" onClick={() => onKillProcess(process)} title={process.protected ? t('services.killBlocked') : t('services.kill')} aria-label={`${process.protected ? t('services.killBlocked') : t('services.kill')} ${process.id}`} disabled={process.protected}><StopCircle size={18} /></button>
-        </div>)}</div>
+        : processes.map((process) => {
+          // V1 H1-2：kill 语义如实 —— protected（系统进程）与 killable:false（前台 run 语义、
+          // 无 host pid，Lifo 混合链运行中不可中途终止）都禁 stop，并给出对应说明文案。
+          const killDisabled = process.protected === true || process.killable === false;
+          const killLabel = process.protected === true
+            ? t('services.killBlocked')
+            : process.killable === false
+              ? t('services.killUnavailable')
+              : t('services.kill');
+          return <div className="service-row list-row service-process-row" key={process.id}>
+            <div className="service-process-details">
+              <span className="service-process-id">{process.protected ? `[${t('services.systemProcess')}] ${process.id}` : process.id}</span>
+              <span className="service-process-command" title={`$ ${process.command}`}>$ {process.command}</span>
+            </div>
+            <button className="icon-button icon-button-danger" onClick={() => onKillProcess(process)} title={killLabel} aria-label={`${killLabel} ${process.id}`} disabled={killDisabled}><StopCircle size={18} /></button>
+          </div>;
+        })}</div>
     </section>
   </div>;
 }

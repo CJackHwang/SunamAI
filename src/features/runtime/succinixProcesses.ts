@@ -45,12 +45,18 @@ export function systemKillRefusal(entries: SuccinixProcessEntry[], pid: number):
  * 展示层进程视图：Succinix 进程表条目 + SunamAI 所有权标注。
  * 与 ProcessStatus 结构兼容（ServicesPanel 渲染不变），额外携带真实 pid、
  * 系统进程标记与所有权 processId（agent 启动的进程可关联回 session/run）。
+ * V1 H1-2：pid 改为可选 —— 前台 run 语义（Lifo 混合链）无 host pid，进程行仍要可见；
+ * killable:false 如实标注（无 host pid，运行中不可中途终止，仅展示不管理）。
+ * 注意：ps() 是 host 进程表（宿主 OS 全局），run 执行期间被 FIFO 链阻塞，前台 run 的
+ * 可见性由 ProcessRegistry 的 run shim 补足（WebContainerAgentRuntime.getSuccinixProcesses）。
  */
 export interface SuccinixProcessView extends ProcessStatus {
-  /** host 进程表真实 pid。 */
-  pid: number;
+  /** host 进程表真实 pid；run 语义（Lifo 链）进程缺省（无 host pid，不可 kill）。 */
+  pid?: number;
   /** 系统进程标记（UI 禁 stop + 后端拒绝 kill）。 */
   protected: boolean;
+  /** V1 H1-2：是否可终止（缺省 true）。run 语义无 host pid → false（仅展示不管理）。 */
+  killable?: boolean;
   /** ProcessRegistry 注册 id（agent 启动的进程）；系统/未拥有进程缺省。 */
   processId?: string;
   /** host 进程表状态（'running' | 'exited'）。 */

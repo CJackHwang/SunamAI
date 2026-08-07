@@ -27,6 +27,10 @@ import { isSystemProcess, systemKillRefusal, type SuccinixProcessView } from './
 const MAX_PROCESS_OUTPUT = 20_000;
 // 后台进程表对账间隔：host ps() 数据源映射注册表，检测进程自然退出。
 const PS_MONITOR_MS = 1_000;
+// V1 H1-2：ps() 快照最佳努力截止 —— Succinix 是单槽 FIFO 链，长前台 run 执行期间占住链，
+// ps() 请求排队到 run 完成才发得出（最坏 ~300s）。进程表刷新不应被此阻塞：超过该截止即
+// 返回空快照，改用 ProcessRegistry（tracked + run shims）渲染，保证前台 run 进程运行中可见。
+const PS_SNAPSHOT_TIMEOUT_MS = 1_000;
 // 用户终端无交互 stdin（文件 RPC 物理边界），spawn 一个常驻 node 进程作为"只读"终端底座。
 // 输出文案与 createSpawnShim 的初始 banner 保持一致，避免 ps() outputTail 首拍重复放流。
 const USER_SHELL_COMMAND = `node -e "console.log('Succinix terminal ready');setInterval(()=>{},1e9)"`;
@@ -351,7 +355,12 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
    * 容器过滤——进程表全局可见是 Succinix 语义，虚拟容器隔离是文件系统级而非进程级。
    */
   async getSuccinixProcesses(containerId?: string): Promise<SuccinixProcessView[]> {
-    const entries = await this.succinix.ps();
+    // V1 H1-2：ps() 最佳努力 —— 长前台 run 占住 FIFO 链时 ps() 排队到 run 完成（最坏 ~300s），
+    // 进程表刷新不能因此阻塞；超时即用注册表快照（tracked + run shims）渲染。
+    const entries = await Promise.race([
+      this.succinix.ps(),
+      sleep(PS_SNAPSHOT_TIMEOUT_MS).then(() => [] as SuccinixProcessEntry[]),
+    ]);
     const tracked = this.processes.listTracked();
     const trackedByPid = new Map<number, ProcessStatus & { pid: number }>();
     for (const process of tracked) {
@@ -376,7 +385,13 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
         startTime: 0,
       }));
     }
-    return views.sort((left, right) => left.pid - right.pid);
+    // V1 H1-2：前台 run 语义进程（无 host pid，Lifo 混合链）也纳入进程表 —— 运行中可见，
+    // 无真实 pid 不可 kill（killable:false，UI 禁 stop + 如实标注）。run 执行期间 Succinix
+    // FIFO 链被 run 占住、ps() 不可用，run shim（浏览器侧注册表）是运行中前台进程的唯一可见来源。
+    for (const process of this.processes.listRunShims(containerId)) {
+      views.push(this.toRunProcessView(process));
+    }
+    return views.sort((left, right) => (left.pid ?? 0) - (right.pid ?? 0));
   }
 
   /**
@@ -428,6 +443,31 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
       protected: isSystemProcess(entry.cmd),
       hostStatus: entry.status,
       startTime: entry.startTime,
+    };
+  }
+
+  /**
+   * V1 H1-2：前台 run 语义进程视图（无 host pid）。run 走 Succinix 统一路由（Lifo 混合链 /
+   * node 直启），执行期间 FIFO 链被占、ps() 不可用；这里把注册表中的运行中 run shim 补进
+   * 进程表：命令/所有权（session/run）可见，killable:false 如实标注（无 host pid，运行中
+   * 不可中途终止，host 侧超时兜底；进程自然退出即从注册表移除 → 视图消失）。
+   */
+  private toRunProcessView(process: ProcessStatus): SuccinixProcessView {
+    return {
+      id: process.id,
+      processId: process.id,
+      command: process.command,
+      sessionId: process.sessionId,
+      runId: process.runId,
+      containerId: process.containerId,
+      isRunning: true,
+      output: process.output,
+      cursor: process.cursor,
+      ...(process.exitCode !== undefined ? { exitCode: process.exitCode } : {}),
+      protected: false,
+      killable: false,
+      hostStatus: 'running',
+      startTime: 0,
     };
   }
 

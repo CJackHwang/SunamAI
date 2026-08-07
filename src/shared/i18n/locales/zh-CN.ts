@@ -121,6 +121,7 @@ export const zhCN = {
   'services.noProcesses': '当前容器暂无运行中的进程。',
   'services.systemProcess': '系统',
   'services.killBlocked': '受保护的系统进程 — 禁止停止',
+  'services.killUnavailable': '前台命令进程（Lifo 混合链）— 运行中不可中途终止',
   'services.kill': '强制终止',
   'services.stop': '停止服务',
   'services.stopPort': '停止端口 {{port}} 的服务',

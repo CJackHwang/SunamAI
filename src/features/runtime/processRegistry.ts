@@ -117,6 +117,19 @@ export class ProcessRegistry {
   }
 
   /**
+   * V1 H1-2：当前运行中且**无** host pid 的注册进程（前台 run 语义 shim，succinixPid 为 null）。
+   * run 执行期间 Succinix FIFO 链被 run 占住，ps() 不可用 —— 前台 run 进程的 UI 可见性由
+   * 这里的 run shim 补足（WebContainerAgentRuntime.getSuccinixProcesses）。无真实 pid，
+   * 不可 kill（killable:false，仅展示不管理）；run 完成/停止即从注册表移除，视图随之消失。
+   */
+  listRunShims(containerId?: string): ProcessStatus[] {
+    return [...this.processes.values()]
+      .filter((process) => process.isRunning && process.process.succinixPid === null
+        && (containerId === undefined || process.containerId === containerId))
+      .map((process) => this.snapshot(process));
+  }
+
+  /**
    * ps() 数据源对账：把注册表中带 host pid 的进程与 Succinix 进程表对照，
    * host 表里已消失的进程按退出处理（用表中记录的 exitCode，缺省 -1）。
    * 输出尾部同步由 spawn shim 的 ps() 轮询承担（serviceRegistry createSpawnShim），

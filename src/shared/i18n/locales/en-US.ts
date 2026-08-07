@@ -123,6 +123,7 @@ export const enUS = {
   'services.noProcesses': 'No processes are running in this container.',
   'services.systemProcess': 'system',
   'services.killBlocked': 'Protected system process - stop disabled',
+  'services.killUnavailable': 'Foreground run process (Lifo chain) - cannot be terminated mid-flight',
   'services.kill': 'Force stop',
   'services.stop': 'Stop service',
   'services.stopPort': 'Stop the service on port {{port}}',

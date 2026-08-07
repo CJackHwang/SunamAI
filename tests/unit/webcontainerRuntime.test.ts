@@ -224,6 +224,42 @@ describe('WebContainerAgentRuntime process ownership', () => {
     runtime.dispose();
   });
 
+  it('surfaces a running foreground run process (killable:false, no host pid) in the process table (V1 H1-2)', async () => {
+    const { runtime } = createRuntime();
+    // run 永不完成：前台 run shim 停留在注册表（succinixPid 为 null），应作为进程行可见。
+    mockRun.mockReturnValue(new Promise(() => {}));
+    void runtime.runShell({ command: 'npm test', mode: 'foreground', sessionId: 's-1', runId: 'r-1', containerId: 'c-1', timeoutMs: 2_000 });
+    try {
+      await vi.waitFor(async () => {
+        const views = await runtime.getSuccinixProcesses('c-1');
+        const runShim = views.find((view) => view.command === 'npm test');
+        expect(runShim).toBeDefined();
+        expect(runShim?.pid).toBeUndefined();      // 无 host pid
+        expect(runShim?.killable).toBe(false);      // 仅展示不管理
+        expect(runShim?.isRunning).toBe(true);
+        expect(runShim?.processId).toBeDefined();   // 所有权可关联回 session/run
+      }, { timeout: 2_000 });
+    } finally {
+      runtime.dispose();
+    }
+  });
+
+  it('does not block the process table refresh when ps() is occupied by a long run (V1 H1-2)', async () => {
+    const { runtime } = createRuntime();
+    // 后台进程注册进 registry（tracked）——ps() 被长 run 占住时靠 registry 兜底渲染。
+    const result = await runtime.runShell({ command: 'node server.js', mode: 'background', sessionId: 's-1', runId: 'r-1', containerId: 'c-1' });
+    mockPs.mockReturnValue(new Promise(() => {})); // FIFO 被占：ps() 永不 resolve
+    const started = Date.now();
+    const views = await runtime.getSuccinixProcesses('c-1');
+    const elapsed = Date.now() - started;
+    expect(elapsed).toBeGreaterThanOrEqual(1_000 - 250); // 等到了最佳努力截止（PS_SNAPSHOT_TIMEOUT_MS）
+    expect(elapsed).toBeLessThan(3_000); // 不被 ps() 无限阻塞
+    const agent = views.find((view) => view.id === result.process.id);
+    expect(agent).toBeDefined();
+    expect(agent?.isRunning).toBe(true);
+    runtime.dispose();
+  });
+
   it('refuses to kill a protected system process by pid (M5)', async () => {
     const { runtime } = createRuntime();
     mockPs.mockResolvedValueOnce([{ pid: 7, cmd: 'node python-daemon.js', status: 'running', startTime: 1 }]);

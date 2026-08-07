@@ -123,6 +123,7 @@ export const jaJP = {
   'services.noProcesses': 'このコンテナで実行中のプロセスはありません。',
   'services.systemProcess': 'システム',
   'services.killBlocked': '保護されたシステムプロセス — 停止不可',
+  'services.killUnavailable': 'フォアグラウンド実行プロセス（Lifo チェーン）— 実行中の途中終了不可',
   'services.kill': '強制終了',
   'services.stop': 'サービスを停止',
   'services.stopPort': 'ポート {{port}} のサービスを停止',

@@ -189,7 +189,8 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(page.locator('.fm-toolbar .fm-toolbar-btn')).toHaveCount(2);
   await page.locator('.fm-item').filter({ has: page.locator('.fm-item-name', { hasText: /^user-created$/ }) }).dblclick();
   const agentFile = page.locator('.fm-item').filter({ has: page.locator('.fm-item-name', { hasText: /^from-agent\.txt$/ }) });
-  await expect(agentFile.locator('.fm-item-size')).toHaveText('17 B');
+  // V1 H1-1：`echo shared-agent-file >` 落盘 = "shared-agent-file"（17 字符）+ LF = 18 B（POSIX，无 CR）。
+  await expect(agentFile.locator('.fm-item-size')).toHaveText('18 B');
   await page.getByRole('button', { name: '更多文件操作' }).click();
   const toolsMenu = page.getByRole('menu', { name: '更多文件操作' });
   await expect(toolsMenu.getByRole('menuitem')).toHaveCount(4);
@@ -331,7 +332,7 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   const mobileAgentFile = page.locator('.fm-item').filter({ has: page.locator('.fm-item-name', { hasText: /^from-agent\.txt$/ }) });
   const mobileSize = mobileAgentFile.locator('.fm-item-size');
   const mobileMenu = mobileAgentFile.locator('.fm-item-menu');
-  await expect(mobileSize).toHaveText('17 B');
+  await expect(mobileSize).toHaveText('18 B');
   await expect(mobileSize).toBeVisible();
   const [mobileSizeBox, mobileMenuBox] = await Promise.all([mobileSize.boundingBox(), mobileMenu.boundingBox()]);
   expect(mobileSizeBox).not.toBeNull();
