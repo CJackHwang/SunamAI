@@ -100,16 +100,17 @@ test('merged Sunam computer view exposes 电脑/终端/服务/文件 through the
   });
   await openApp(page, { baseUrl });
 
-  // Desktop loads collapsed; expand the merged computer tab from the rail.
-  const railComputer = page.locator('.collapsed-terminal-nav button[title="Sunam的电脑"]');
-  await expect(railComputer).toBeVisible({ timeout: 60_000 });
-  await railComputer.click();
-
+  // TASK-UX1: desktop loads half-expanded with the 终端 sub-view active, so the capsule
+  // island is already visible without expanding from the rail.
   const capsule = page.locator('.terminal-capsule');
   await expect(capsule).toBeVisible({ timeout: 60_000 });
   const tabs = capsule.locator('[role="tab"]');
   await expect(tabs).toHaveCount(4);
-  await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true');
+  await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+
+  await tabs.nth(0).click();
+  await expect(page.locator('[id="terminal-segment-panel-ai"]')).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[id="terminal-segment-panel-user"]')).toHaveAttribute('data-active', 'false');
 
   await tabs.nth(1).click();
   await expect(page.locator('[id="terminal-segment-panel-user"]')).toHaveAttribute('data-active', 'true');

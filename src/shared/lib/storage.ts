@@ -7,6 +7,7 @@ export const STORAGE_KEYS = {
   capabilityConfig: 'sunam_v2_capability_config',
   piEngine: 'sunam_v2_feature_pi_engine',
   agentDriver: 'sunam_v2_agent_driver',
+  terminalLayout: 'sunam_v2_terminal_layout',
 } as const;
 
 export interface StorageLike {

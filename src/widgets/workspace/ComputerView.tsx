@@ -57,8 +57,9 @@ const ComputerView = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
   const [activePorts, setActivePorts] = useState<RuntimePortStatus[]>([]);
   const [processes, setProcesses] = useState<SuccinixProcessView[]>([]);
   const [activePreview, setActivePreview] = useState<{ port: number; lastUrl: string } | null>(null);
-  // Sub-view inside the merged "Sunam的电脑" tab: 电脑 / 终端 / 服务.
-  const [containerSegment, setContainerSegment] = useState<ContainerSegment>('ai');
+  // Sub-view inside the merged "Sunam的电脑" tab: 电脑 / 终端 / 服务. TASK-UX1 defaults
+  // to the 终端 (user) shell so the container opens straight into a typeable terminal.
+  const [containerSegment, setContainerSegment] = useState<ContainerSegment>('user');
   const contentRef = useRef<HTMLDivElement>(null);
   const sessionIdRef = useRef(activeSessionId);
   sessionIdRef.current = activeSessionId;
@@ -165,10 +166,10 @@ const ComputerView = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
     return () => clearTimeout(timer);
   }, [activeTab, containerSegment]);
 
-  // Reset to the computer sub-view when a container boot begins so the booting state
+  // Reset to the 终端 sub-view when a container boot begins so the booting state
   // (which lives on the 电脑/终端 segments) is visible again.
   useEffect(() => {
-    if (containerStarting) setContainerSegment('ai');
+    if (containerStarting) setContainerSegment('user');
   }, [containerStarting]);
 
   // Horizontal-dominant touch drags switch the 电脑 / 终端 / 服务 sub-view inside the

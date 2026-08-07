@@ -99,9 +99,13 @@ describe('Workspace in chat-only (restricted container)', () => {
   });
 
   it('shows the container entry tabs when the container is enabled', async () => {
-    renderWorkspace(runtimeValue({ containerAvailability: 'enabled', effectiveContainerState: 'enabled' }));
-    // Collapsed rail renders container tabs as icon buttons carrying their label as a title.
-    expect(await screen.findByTitle('Sunam的电脑')).toBeInTheDocument();
-    expect(screen.getByTitle('能力库')).toBeInTheDocument();
+    const { container } = renderWorkspace(runtimeValue({ containerAvailability: 'enabled', effectiveContainerState: 'enabled' }));
+    // TASK-UX1: desktop loads half-expanded, so the container entry tabs are the labeled
+    // buttons in the expanded tab bar (not the collapsed rail).
+    await screen.findByText('Sunam的电脑');
+    const tabBar = container.querySelector('.dual-terminal-tabs');
+    expect(tabBar).not.toBeNull();
+    expect(within(tabBar as HTMLElement).getByRole('button', { name: 'Sunam的电脑' })).toBeInTheDocument();
+    expect(within(tabBar as HTMLElement).getByRole('button', { name: '能力库' })).toBeInTheDocument();
   });
 });

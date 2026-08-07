@@ -19,9 +19,18 @@ import { useI18n } from '@/shared/i18n';
 import { toErrorMessage } from '@/shared/lib/errors';
 import { isDefaultSessionTitle } from '@/entities/workspace/defaults';
 import { useCapabilityContext } from '@/widgets/capability/CapabilityContext';
+import { STORAGE_KEYS, readText, writeText } from '@/shared/lib/storage';
 import './Workspace.css';
 
 const ComputerView = lazy(() => import('@/widgets/workspace/ComputerView'));
+
+const TERMINAL_LAYOUTS: readonly TerminalLayout[] = ['collapsed', 'half', 'full'];
+
+/** Restore the user's last sidebar layout; TASK-UX1 defaults the right column to half. */
+function readStoredTerminalLayout(): TerminalLayout {
+  const stored = readText(STORAGE_KEYS.terminalLayout);
+  return (TERMINAL_LAYOUTS as readonly string[]).includes(stored) ? stored as TerminalLayout : 'half';
+}
 
 interface WorkspaceProps {
   apiKey: string;
@@ -57,7 +66,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [terminalTab, setTerminalTab] = useState<TerminalTab>('ai');
   const [mobileActive, setMobileActive] = useState<'chat' | TerminalTab>('chat');
-  const [layoutState, setLayoutState] = useState<TerminalLayout>('collapsed');
+  const [layoutState, setLayoutState] = useState<TerminalLayout>(readStoredTerminalLayout);
   const [layoutTransition, setLayoutTransition] = useState<'from-full' | null>(null);
   const [userMessageEntrance, setUserMessageEntrance] = useState<UserMessageEntranceRequest | null>(null);
   const userMessageEntranceIdRef = useRef(0);
@@ -97,14 +106,17 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
 
   useEffect(() => {
     let wasMobile = window.innerWidth <= 900;
-    const onResize = () => { 
+    const onResize = () => {
       const isMobile = window.innerWidth <= 900;
       if (isMobile && !wasMobile) {
+        // Mobile shows the terminal as a full column; force half regardless of the
+        // persisted desktop layout.
         setLayoutTransition(null);
         setLayoutState('half');
       } else if (!isMobile && wasMobile) {
+        // Back to desktop: restore the user's last chosen layout (TASK-UX1 defaults half).
         setLayoutTransition(null);
-        setLayoutState('collapsed');
+        setLayoutState(readStoredTerminalLayout());
       }
       wasMobile = isMobile;
     };
@@ -117,6 +129,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
     const restoreFromFull = layoutState === 'full' && nextLayout !== 'full' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     setLayoutTransition(restoreFromFull ? 'from-full' : null);
     setLayoutState(nextLayout);
+    writeText(STORAGE_KEYS.terminalLayout, nextLayout);
   };
 
   const finishLayoutTransition = (event: AnimationEvent<HTMLDivElement>) => {
