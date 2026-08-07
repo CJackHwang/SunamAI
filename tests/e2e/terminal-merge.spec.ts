@@ -10,6 +10,8 @@ async function openApp(page: import('@playwright/test').Page, opts: { baseUrl: s
     localStorage.setItem('sunam_v2_api_key', 'e2e-no-network');
     localStorage.setItem('sunam_v2_base_url', url);
     localStorage.setItem('sunam_v2_api_model', 'e2e-model');
+    // TASK-PISWITCH R3：pi 引擎默认开启；这批 e2e 走旧引擎逃生门。
+    localStorage.setItem('sunam_v2_feature_pi_engine', '0');
     // Chat-only keeps the composer usable without booting a real WebContainer.
     // (`tools` must be present — sanitizeConfig reads both overrides maps.)
     if (chatOnly) {

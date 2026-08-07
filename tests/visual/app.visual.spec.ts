@@ -11,6 +11,8 @@ async function openResourceSubagentWorkspace(page: import('@playwright/test').Pa
     localStorage.setItem('sunam_v2_api_key', 'visual-no-network');
     localStorage.setItem('sunam_v2_base_url', 'https://visual.invalid/v1');
     localStorage.setItem('sunam_v2_api_model', 'visual-model');
+    // TASK-PISWITCH R3：pi 默认开启；视觉基线基于旧引擎渲染（含工具消息），显式钉旧引擎。
+    localStorage.setItem('sunam_v2_feature_pi_engine', '0');
   });
   let rootTurn = 0;
   await page.route('https://visual.invalid/v1/chat/completions', async (route) => {
@@ -215,6 +217,8 @@ async function openTerminalCapsuleView(page: import('@playwright/test').Page, vi
     localStorage.setItem('sunam_v2_api_key', 'visual-no-network');
     localStorage.setItem('sunam_v2_base_url', 'https://visual.invalid/v1');
     localStorage.setItem('sunam_v2_api_model', 'visual-model');
+    // TASK-PISWITCH R3：pi 默认开启；视觉基线基于旧引擎渲染（含工具消息），显式钉旧引擎。
+    localStorage.setItem('sunam_v2_feature_pi_engine', '0');
   });
   await page.route('https://visual.invalid/v1/chat/completions', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }) });

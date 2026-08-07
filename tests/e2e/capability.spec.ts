@@ -8,7 +8,11 @@ async function configure(page: import('@playwright/test').Page) {
   await page.route('https://e2e.invalid/v1/models', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [{ id: 'e2e-model' }] }) }));
   await page.route('https://e2e.invalid/v1/chat/completions', (route) => route.fulfill({ contentType: 'text/event-stream', body: sse({ content: '纯聊天应答' }) }));
   await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => {
+    localStorage.clear();
+    // TASK-PISWITCH R3：pi 引擎默认开启；这批 e2e 走旧引擎逃生门。
+    localStorage.setItem('sunam_v2_feature_pi_engine', '0');
+  });
   await page.reload();
   await page.getByLabel('接口地址 (OpenAI Compatible)').fill('https://e2e.invalid/v1');
   await page.getByLabel('API 密钥').fill('e2e-key');

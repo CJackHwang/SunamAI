@@ -16,7 +16,7 @@ import { AgentFamilyCoordinator } from './subagentCoordinator';
 import { registerWorkspaceDeletionPreparation } from '@/entities/workspace/deletionCoordinator';
 import { createId } from '@/shared/lib/ids';
 import { createChaosContract } from './prompt';
-import { initialTask } from './task';
+import { initialTask, rebuildTaskForResume } from './task';
 import { isPiEngineEnabled } from './pi/featureFlag';
 import { createAgentDriver } from './driver/create';
 import type { AgentDriver } from './driver/types';
@@ -222,12 +222,15 @@ export function useAgentV2(
 
   /** P6（R4）：经驱动层启动一次运行。默认 PiDriver（包 piSession，现有行为不变）；
    *  配置 AGENT_DRIVER=claude-code/codex 时走外部 CLI 桥——浏览器壳内不可行，
-   *  prompt() 以本地环境错误优雅拒绝（R5 边界如实），由调用方 catch 标记 run 失败。 */
-  const launchDriverTask = useCallback(async (userPrompt: string, sessionId: string, containerId: string) => {
+   *  prompt() 以本地环境错误优雅拒绝（R5 边界如实），由调用方 catch 标记 run 失败。
+   *  R1/R2：附件（attachments）与断点恢复（resume）在 pi 通道接管——附件由 PiSession
+   *  构造多模态消息，resume 由 PiSession 从会话历史继续（parentRunId 对齐旧引擎语义）。 */
+  const launchDriverTask = useCallback(async (userPrompt: string, sessionId: string, containerId: string, attachments?: ChatAttachment[], resume?: AgentResumeState) => {
     setPersistenceError(null);
     const runId = createId('r');
     const now = Date.now();
-    const task = initialTask(userPrompt.trim());
+    // R2：resume 时恢复原任务的 TaskContract（plan/evidence），否则从新目标构造。
+    const task = resume?.task ? rebuildTaskForResume(resume.task) : initialTask(userPrompt.trim());
     const run: AgentRun = {
       id: runId,
       sessionId,
@@ -239,11 +242,14 @@ export function useAgentV2(
       updatedAt: now,
       task,
       chaos: createChaosContract(sunamModel),
-      budget: { maxModelTurns: 1, maxToolCalls: 0, maxDurationMs: 5 * 60_000 },
+      // v3 isRun 要求 maxToolCalls > 0（旧引擎默认 150）；pi 通道自治循环不强制预算，
+      // 但该 run 会持久化到 v3（刷新恢复/断点续跑依赖），必须通过 schema 校验。
+      budget: { maxModelTurns: 1, maxToolCalls: 1, maxDurationMs: 5 * 60_000 },
       modelTurns: 0,
       toolCalls: 0,
       summary: '',
       rootRunId: runId,
+      ...(resume ? { parentRunId: resume.sourceRunId } : {}),
       agentRole: 'root',
       depth: 0,
       toolPolicy: { role: 'root', allowedTools: [] },
@@ -270,6 +276,8 @@ export function useAgentV2(
         containerAvailable: capabilities.containerAvailable,
         // P2-M1：pi 事件同步写入 v3 event store，刷新后 UI 聊天列表可恢复 pi 消息。
         store: storeRef.current,
+        // R1：附件透传给 pi 驱动（PiSession 构造多模态 user 消息）。
+        ...(attachments ? { attachments } : {}),
       });
     } catch (error) {
       driverRunIdsRef.current.delete(runId);
@@ -290,15 +298,14 @@ export function useAgentV2(
     const containerAvailable = capabilities.containerAvailable;
     const containerId = overrideContainerId ?? activeContainerId ?? (containerAvailable ? undefined : CHAT_ONLY_CONTAINER_ID);
     if (!sessionId || !containerId || !runtime || !userPrompt.trim()) return;
-    // P6（R4）：驱动层与现有引擎并行存在。pi 引擎开关默认关；开且无 resume/附件时走驱动层
-    // （默认 PiDriver 包 pi 通道，行为不变；AGENT_DRIVER 可切换外部 CLI 桥）。
-    // 注意：AGENT_DRIVER 仅在驱动层内选择实现（pi/claude-code/codex），要生效必须先开 pi 引擎
-    // 开关（sunam_v2_feature_pi_engine）——未开时走旧引擎，AGENT_DRIVER 配置不生效。
-    // 驱动层尚不支持断点恢复与附件，这些情况回退现有引擎。
-    if (isPiEngineEnabled() && !resume && (!attachments || attachments.length === 0)) {
-      void launchDriverTask(userPrompt, sessionId, containerId);
+    // R1-R3（全面切换）：pi 引擎默认开启，附件与断点恢复同样走驱动层（pi 通道全场景接管）。
+    // AGENT_DRIVER 仅在驱动层内选择实现（pi/claude-code/codex），要生效必须先开 pi 引擎
+    // 开关（sunam_v2_feature_pi_engine）——关闭时走旧引擎，AGENT_DRIVER 配置不生效。
+    if (isPiEngineEnabled()) {
+      void launchDriverTask(userPrompt, sessionId, containerId, attachments, resume);
       return;
     }
+    // 逃生门（localStorage 关闭 pi）：回退现有引擎。
     setPersistenceError(null);
     [...executionsRef.current.values()].filter((execution) => execution.sessionId === sessionId).forEach((execution) => execution.controller.abort(new DOMException('Superseded by a newer run.', 'AbortError')));
     const controller = new AbortController();
@@ -356,11 +363,31 @@ export function useAgentV2(
     launchTask(userPrompt, overrideSessionId, overrideContainerId, undefined, attachments);
   }, [launchTask]);
 
-  const resumeTask = useCallback((run?: AgentRun | null) => {
-    const target = run ?? runs.find((candidate) => candidate.phase === 'interrupted') ?? runs[0] ?? null;
-    if (!target || !runtime) return;
-    // 驱动层运行无 checkpoint，恢复仍走现有引擎；driver run 直接跳过避免混用引擎。
-    if (driverRunIdsRef.current.has(target.id)) return;
+  /** R2：pi 通道断点恢复。PiSession 以会话历史为权威上下文（P2 刷新后自动 seed），
+   *  无需 checkpoint tail；workspaceRevision 漂移以 run 自身持久化的 task.workspaceRevision
+   *  为基线（对齐旧引擎 checkpoint 语义），子 agent 状态从 v3 任务表恢复。 */
+  const resumeDriverRun = useCallback((target: AgentRun) => {
+    if (!runtime) return;
+    void (async () => {
+      await runtime.ensureContainer(target.containerId);
+      const currentRevision = await runtime.getWorkspaceRevision(target.containerId);
+      const workspaceDrift = detectWorkspaceDrift(target.task.workspaceRevision || undefined, currentRevision);
+      const delegatedTasks = await storeRef.current.listAgentTasks(target.rootRunId ?? target.id);
+      const subagentStatus = delegatedTasks.map((task) => `- ${task.runId ?? task.id} [${normalizeSubagentRole(task.role)}/${task.status}] ${task.taskId}: ${task.prompt}${task.summary ? ` — ${task.summary}` : ''}`);
+      const baseSummary = target.summary ?? 'reassess the interrupted task';
+      const recoveryNotes = [
+        workspaceDrift ? `Workspace drift detected: checkpoint revision ${workspaceDrift.checkpointRevision}, current revision ${workspaceDrift.currentRevision}. Prior file reads and verification must be refreshed.` : '',
+        subagentStatus.length ? `Recovered delegated tasks:\n${subagentStatus.join('\n')}` : '',
+      ].filter(Boolean).join('\n\n');
+      const checkpointSummary = [baseSummary, recoveryNotes].filter(Boolean).join('\n\n');
+      const prompt = `Continue from checkpoint: ${checkpointSummary}. Inspect the current workspace, preserve truthful evidence, and finish only after verification.`;
+      launchTask(prompt, target.sessionId, target.containerId, undefined, undefined, { sourceRunId: target.id, task: target.task, summary: checkpointSummary, ...(workspaceDrift ? { workspaceDrift } : {}), ...(subagentStatus.length ? { subagentStatus } : {}) });
+    })().catch((error) => setPersistenceError(toErrorMessage(error)));
+  }, [launchTask, runtime]);
+
+  /** 逃生门（pi 关闭）：现有引擎的 checkpoint 恢复路径。 */
+  const resumeLegacyRun = useCallback((target: AgentRun) => {
+    if (!runtime) return;
     void storeRef.current.latestCheckpoint(target.id).then(async (checkpoint) => {
       await runtime.ensureContainer(target.containerId);
       const currentRevision = await runtime.getWorkspaceRevision(target.containerId);
@@ -381,6 +408,17 @@ export function useAgentV2(
       launchTask(prompt, target.sessionId, target.containerId, inherited, undefined, { sourceRunId: target.id, task: target.task, summary: checkpointSummary, ...(workspaceDrift ? { workspaceDrift } : {}), ...(eventTailDrift ? { eventTailDrift } : {}), ...(subagentStatus.length ? { subagentStatus } : {}) });
     }).catch((error) => setPersistenceError(toErrorMessage(error)));
   }, [events, launchTask, runs, runtime]);
+
+  const resumeTask = useCallback((run?: AgentRun | null) => {
+    const target = run ?? runs.find((candidate) => candidate.phase === 'interrupted') ?? runs[0] ?? null;
+    if (!target || !runtime) return;
+    // R2：pi 引擎开启时经驱动层断点恢复（PiSession 自动从会话历史继续）；关闭时回退现有引擎。
+    if (isPiEngineEnabled()) {
+      resumeDriverRun(target);
+      return;
+    }
+    resumeLegacyRun(target);
+  }, [resumeDriverRun, resumeLegacyRun, runs, runtime]);
 
   const stopTask = useCallback(() => {
     if (activeSessionId) {

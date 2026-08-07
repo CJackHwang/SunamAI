@@ -74,7 +74,7 @@ class FakeSession {
 
 class FakePiAgent implements PiAgentLike {
   listener: ((event: PiAgentEvent, signal: AbortSignal) => void | Promise<void>) | null = null;
-  readonly promptInputs: string[] = [];
+  readonly promptInputs: Array<string | PiAgentMessage> = [];
 
   subscribe(listener: (event: PiAgentEvent, signal: AbortSignal) => void | Promise<void>): () => void {
     this.listener = listener;
@@ -82,7 +82,7 @@ class FakePiAgent implements PiAgentLike {
   }
 
   async prompt(input: string | PiAgentMessage | PiAgentMessage[]): Promise<void> {
-    this.promptInputs.push(typeof input === 'string' ? input : JSON.stringify(input));
+    this.promptInputs.push(typeof input === 'string' ? input : input as PiAgentMessage);
   }
 
   abort(): void {}
@@ -116,7 +116,8 @@ describe('PiDriver adapter', () => {
     const driver = await createPiDriver({ ...createInit(), createAgent: () => agent, persistSession: false });
     expect(driver.id).toBe('pi');
     await driver.prompt('hello');
-    expect(agent.promptInputs).toEqual(['hello']);
+    expect(agent.promptInputs).toHaveLength(1);
+    expect(agent.promptInputs[0]).toMatchObject({ role: 'user', content: 'hello' });
     driver.destroy();
   });
 });

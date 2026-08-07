@@ -1,5 +1,6 @@
 import type { CompactionSettings } from '@earendil-works/pi-agent-core';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
+import type { ChatAttachment } from '@/entities/message/types';
 import type { AgentEventStore } from '../eventStore';
 import type { SubagentHost } from '../tools/base';
 import type { PiCompactionRunner } from '../pi/piCompaction';
@@ -41,6 +42,8 @@ export interface PiDriverOptions extends AgentDriverInit {
   compactionContextWindow?: number;
   /** P5：覆盖压缩摘要生成器。 */
   compactionRunner?: PiCompactionRunner;
+  /** R1：本次启动的附件（PiSession 构造多模态 user 消息）。 */
+  attachments?: ChatAttachment[];
 }
 
 /** 只暴露 PiSession 与 AgentDriver 对齐的能力面，避免 PiDriver 依赖具体类类型。 */

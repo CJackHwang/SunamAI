@@ -1,11 +1,14 @@
 import { Agent, buildSessionContext, convertToLlm, estimateContextTokens, prepareCompaction } from '@earendil-works/pi-agent-core';
 import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage, AgentTool as PiAgentTool, CompactionSettings, Session } from '@earendil-works/pi-agent-core';
 import { createModels, createProvider, envApiKeyAuth, InMemoryCredentialStore, uuidv7 } from '@earendil-works/pi-ai';
-import type { Api, Model, Models } from '@earendil-works/pi-ai';
+import type { Api, ImageContent, Model, Models, TextContent } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
-import type { Message } from '@/entities/message/types';
+import type { ChatAttachment, Message } from '@/entities/message/types';
+import type { AgentResource } from '@/entities/resource/types';
+import { v3Persistence } from '@/entities/persistence/v3Repository';
 import { ContainerMutationLease } from '../agentFamily';
+import { ResourceProcessorRegistry } from '../resourceProcessor';
 import type { AgentEventStore } from '../eventStore';
 import type { RegisteredTool, SubagentHost, ToolExecutionContext } from '../tools/base';
 import type { AgentEvent, AgentPhase, AgentRun, TaskContract } from '../types';
@@ -65,7 +68,11 @@ function buildConfigModel(apiModel: string, baseUrl: string, providerId: string)
     provider: providerId,
     baseUrl: baseUrl.replace(/\/+$/, ''),
     reasoning: false,
-    input: ['text'],
+    // R1：声明 image 输入，使附件图片（用户消息内嵌 + read_resource_image 工具结果）
+    // 能经 openai-completions 通道发送（该通道按 model.input 门控工具结果的图片回传）。
+    // R5 如实边界：旧引擎有「模型拒绝 vision 时降级为文本描述」的探测回退；pi 通道无此回退，
+    // 若配置的模型不支持图片，带图消息会以供应商错误如实失败（不静默吞图）。
+    input: ['text', 'image'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: 8_192,
@@ -124,6 +131,10 @@ export interface PiSessionOptions {
   compactionContextWindow?: number;
   /** P5：覆盖压缩摘要生成器（测试注入点，避免单测走网络）；缺省走 pi compact() 真实 LLM 摘要。 */
   compactionRunner?: PiCompactionRunner;
+  /** R1：本次启动的附件（用户发送时附带）。构造为 pi 多模态 user 消息（图片内嵌 + 资源清单）。 */
+  attachments?: ChatAttachment[];
+  /** R1 测试注入点：覆盖「resourceId → 图片 data/mimeType」加载器；缺省从 v3 资源仓库读取。 */
+  loadImageData?: (resourceId: string) => Promise<{ data: string; mimeType: string } | null>;
 }
 
 /** 用于合成中止结算消息的空 usage（pi assistant 消息必填字段）。 */
@@ -203,13 +214,16 @@ export class PiEventBridge {
   private currentStreamId: string | null = null;
   /** P4 L-2 修复：子 agent usage 统计真实化（modelTurns/toolCalls 累计，随 run_finished 上报）。 */
   private readonly usage = { modelTurns: 0, toolCalls: 0 };
+  /** R1：当前 prompt 的附件元数据（用于 UI 附件 chips；缺省不渲染）。 */
+  private readonly getUserAttachments: (() => ChatAttachment[] | undefined) | undefined;
 
-  constructor(options: { runId: string; sessionId: string; run: AgentRun; onEvent: (event: AgentEvent) => void; onRunChange: (run: AgentRun) => void }) {
+  constructor(options: { runId: string; sessionId: string; run: AgentRun; onEvent: (event: AgentEvent) => void; onRunChange: (run: AgentRun) => void; getUserAttachments?: () => ChatAttachment[] | undefined }) {
     this.runId = options.runId;
     this.sessionId = options.sessionId;
     this.run = options.run;
     this.onEvent = options.onEvent;
     this.onRunChange = options.onRunChange;
+    this.getUserAttachments = options.getUserAttachments;
   }
 
   handlePiEvent(event: PiAgentEvent): void {
@@ -222,7 +236,11 @@ export class PiEventBridge {
       case 'message_start':
         if (event.message.role === 'user') {
           this.streamIndex += 1;
-          this.emit('message', { message: piMessageToAppMessage(event.message), streamId: `${this.runId}:user-${this.streamIndex}` });
+          const appMessage = piMessageToAppMessage(event.message);
+          const attachments = this.getUserAttachments?.();
+          // R1：保留附件元数据到 UI 消息模型（chips 渲染与旧引擎一致）。
+          const message = attachments ? { ...appMessage, _ui_displayContent: piUserText(event.message), _ui_attachments: attachments } : appMessage;
+          this.emit('message', { message, streamId: `${this.runId}:user-${this.streamIndex}` });
         }
         break;
       case 'message_update': {
@@ -343,6 +361,10 @@ export class PiSession {
   private readonly sessionPromise: Promise<Session | null>;
   private readonly coordinator: SubagentHost | undefined;
   private readonly mutationLease = new ContainerMutationLease();
+  /** R1：附件 → v3 资源仓库持久化（复用现有资源系统，只包不改）。 */
+  private readonly resourceProcessor = new ResourceProcessorRegistry();
+  /** R1：当前 prompt 的附件元数据（bridge 渲染 UI chips 用；每次 prompt 前更新）。 */
+  private pendingUserAttachments: ChatAttachment[] | undefined;
   /** P5：pi compaction 依赖的 models/model（默认摘要生成器需要，浏览器端纯 JS）。 */
   private readonly models: Models;
   private readonly model: Model<Api>;
@@ -385,6 +407,8 @@ export class PiSession {
     const tools = createPiAgentTools({
       tools: options.tools ?? resolveEnabledPiTools(options.enabledTools),
       getContext: options.getToolContext ?? (() => this.buildToolContext()),
+      // R1：read_resource_image 的 modelContent（image_resource 持久引用）转成 pi image 内容块。
+      loadImageData: options.loadImageData ?? ((resourceId) => this.loadResourceImageData(resourceId)),
     });
     const createAgent = options.createAgent ?? defaultCreateAgent;
     this.agent = createAgent({ models, model, systemPrompt, tools });
@@ -417,6 +441,7 @@ export class PiSession {
       run: options.run,
       onEvent,
       onRunChange,
+      getUserAttachments: () => this.pendingUserAttachments,
     });
     this.unsubscribe = this.agent.subscribe((event, _signal) => {
       // P1 事件桥接逻辑不动；P2 仅在桥接之后追加会话持久化（尽力而为）。
@@ -510,8 +535,12 @@ export class PiSession {
     this.options.onRunChange(updated);
   }
 
-  /** 发送一条用户消息并等待该次运行结束（含 agent_end 事件监听器 settle）。 */
-  async prompt(text: string): Promise<void> {
+  /**
+   * 发送一条用户消息并等待该次运行结束（含 agent_end 事件监听器 settle）。
+   * R1：带附件时把附件构造为 pi 多模态 user 消息（图片内嵌 + 资源清单），
+   * 使模型直接看到图片（pi 消息类型支持 image block），同时资源工具仍可按需读取。
+   */
+  async prompt(text: string, attachments?: ChatAttachment[]): Promise<void> {
     await this.ready;
     if (this.disposed) return;
     if (this.abortSignal?.aborted) {
@@ -531,10 +560,53 @@ export class PiSession {
       this.bridge.handlePiEvent({ type: 'agent_end', messages: [] });
       return;
     }
-    await this.appendUserMessage(text);
-    await this.agent.prompt(text);
+    // R1：附件先经现有资源系统持久化（v3 资源仓库，与旧引擎共用），再构造多模态 user 消息。
+    const effectiveAttachments = attachments ?? this.options.attachments;
+    const resources = effectiveAttachments?.length
+      ? await this.resourceProcessor.process(effectiveAttachments, this.options.sessionId, this.options.runId)
+      : [];
+    this.pendingUserAttachments = resources.length
+      ? resources.map((resource) => ({ name: resource.name, size: resource.size, type: resource.mimeType, resourceId: resource.id }))
+      : undefined;
+    const userMessage = await this.buildUserMessage(text, resources);
+    await this.appendUserMessage(userMessage);
+    await this.agent.prompt(userMessage);
     // 冲刷本次运行的会话写入，保证 prompt 返回时历史已完整持久化。
     await this.pendingPersist;
+  }
+
+  /**
+   * R1：把用户正文 + 资源清单 + 图片内容块构造成 pi user 消息。
+   * 图片以 data URL（base64）内嵌为 pi ImageContent；文本/二进制资源只列清单，
+   * 模型可经资源工具（read_resource_text/read_resource_image/materialize_resource）按需读取。
+   */
+  private async buildUserMessage(text: string, resources: AgentResource[]): Promise<Extract<PiAgentMessage, { role: 'user' }>> {
+    if (resources.length === 0) {
+      return { role: 'user', content: text, timestamp: Date.now() };
+    }
+    const manifest = `\n\nAttached resources (use resource tools to inspect on demand):\n${resources.map((resource) => `- [${resource.kind}: ${resource.id}] ${resource.name} (${resource.mimeType}, ${resource.size} bytes)`).join('\n')}`;
+    const parts: (TextContent | ImageContent)[] = [{ type: 'text', text: `${text}${manifest}` }];
+    for (const resource of resources.filter((item) => item.kind === 'image')) {
+      const image = await this.loadResourceImageData(resource.id);
+      if (image) parts.push({ type: 'image', data: image.data, mimeType: image.mimeType });
+    }
+    return { role: 'user', content: parts, timestamp: Date.now() };
+  }
+
+  /** R1：从 v3 资源仓库加载图片资源的 modelBlob（无则原始 blob），编码为 base64 data。 */
+  private async loadResourceImageData(resourceId: string): Promise<{ data: string; mimeType: string } | null> {
+    try {
+      const stored = await v3Persistence.loadResource(resourceId);
+      if (!stored.value) return null;
+      const blob = stored.value.modelBlob ?? stored.value.blob;
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 32_768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32_768));
+      return { data: btoa(binary), mimeType: stored.value.mimeType };
+    } catch {
+      // 资源加载失败只降级为文本描述（资源清单已在正文中），不阻断对话。
+      return null;
+    }
   }
 
   /**
@@ -594,8 +666,8 @@ export class PiSession {
     return buildSessionContext(entries).messages;
   }
 
-  private async appendUserMessage(text: string): Promise<void> {
-    await this.session?.appendMessage({ role: 'user', content: text, timestamp: Date.now() });
+  private async appendUserMessage(message: PiAgentMessage): Promise<void> {
+    await this.session?.appendMessage(message);
   }
 
   private async persistEvent(event: PiAgentEvent): Promise<void> {

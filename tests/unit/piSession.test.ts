@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { File as NodeFile } from 'node:buffer';
 import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage } from '@earendil-works/pi-agent-core';
 import { PiEventBridge, PiSession, piAssistantReasoning, piAssistantText, piMessageToAppMessage, type PiAgentLike } from '@/features/agent-core/pi/piSession';
 import { isPiEngineEnabled, setPiEngineEnabled } from '@/features/agent-core/pi/featureFlag';
+import { STORAGE_KEYS } from '@/shared/lib/storage';
 import { AgentEventStore } from '@/features/agent-core/eventStore';
 import { V3PersistenceRepository } from '@/entities/persistence/v3Repository';
 import { clearV3Database } from '../helpers/persistenceDatabase';
@@ -180,7 +182,7 @@ describe('PiEventBridge', () => {
 
 class FakePiAgent implements PiAgentLike {
   listener: ((event: PiAgentEvent, signal: AbortSignal) => void | Promise<void>) | null = null;
-  readonly promptInputs: string[] = [];
+  readonly promptInputs: Array<string | PiAgentMessage> = [];
   abortCalls = 0;
   private readonly controller = new AbortController();
 
@@ -190,7 +192,7 @@ class FakePiAgent implements PiAgentLike {
   }
 
   async prompt(input: string | PiAgentMessage | PiAgentMessage[]): Promise<void> {
-    this.promptInputs.push(typeof input === 'string' ? input : JSON.stringify(input));
+    this.promptInputs.push(typeof input === 'string' ? input : input as PiAgentMessage);
   }
 
   abort(): void { this.abortCalls += 1; this.controller.abort(); }
@@ -218,7 +220,8 @@ describe('PiSession lifecycle', () => {
       createAgent: () => agent,
     });
     await session.prompt('hello');
-    expect(agent.promptInputs).toEqual(['hello']);
+    expect(agent.promptInputs).toHaveLength(1);
+    expect(agent.promptInputs[0]).toMatchObject({ role: 'user', content: 'hello' });
     expect(agent.listener).not.toBeNull();
 
     await agent.emit({ type: 'agent_start' });
@@ -329,12 +332,80 @@ describe('PiSession lifecycle', () => {
   });
 });
 
+describe('PiSession attachments (R1)', () => {
+  it('embeds an image attachment as pi image content alongside the text prompt and resource manifest', async () => {
+    await clearV3Database();
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 1, height: 1, close: vi.fn() })));
+    try {
+      const agent = new FakePiAgent();
+      const session = new PiSession({
+        apiKey: 'test-key',
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiModel: 'deepseek-v4-flash',
+        sessionId: 's1',
+        runId: 'r1',
+        run: createRun(),
+        onEvent: () => undefined,
+        onRunChange: () => undefined,
+        createAgent: () => agent,
+      });
+      const png = new NodeFile([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0])], 'diagram.png', { type: 'image/png' }) as unknown as File;
+      await session.prompt('看图', [{ name: png.name, size: png.size, type: png.type, file: png }]);
+
+      const input = agent.promptInputs[0] as Extract<PiAgentMessage, { role: 'user' }>;
+      expect(input.role).toBe('user');
+      expect(Array.isArray(input.content)).toBe(true);
+      const content = input.content as Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+      const text = content.filter((part) => part.type === 'text').map((part) => part.text ?? '').join('');
+      expect(text).toContain('看图');
+      expect(text).toContain('Attached resources');
+      expect(text).toContain('diagram.png');
+      const images = content.filter((part) => part.type === 'image');
+      expect(images).toHaveLength(1);
+      const image = images[0];
+      expect(image).toMatchObject({ type: 'image', mimeType: 'image/png' });
+      expect(typeof image?.data).toBe('string');
+      expect(image?.data?.length ?? 0).toBeGreaterThan(0);
+      session.destroy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps a plain prompt as string user content when no attachments are supplied', async () => {
+    await clearV3Database();
+    const agent = new FakePiAgent();
+    const session = new PiSession({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiModel: 'deepseek-v4-flash',
+      sessionId: 's1',
+      runId: 'r1',
+      run: createRun(),
+      onEvent: () => undefined,
+      onRunChange: () => undefined,
+      createAgent: () => agent,
+    });
+    await session.prompt('hello');
+    expect(agent.promptInputs[0]).toMatchObject({ role: 'user', content: 'hello' });
+    session.destroy();
+  });
+});
+
 describe('pi engine feature flag', () => {
-  it('defaults to off and toggles through the stored flag', () => {
+  it('defaults to on (pi is the default engine) with localStorage as an escape hatch', () => {
+    localStorage.removeItem(STORAGE_KEYS.piEngine);
+    expect(isPiEngineEnabled()).toBe(true);
     setPiEngineEnabled(false);
     expect(isPiEngineEnabled()).toBe(false);
     setPiEngineEnabled(true);
     expect(isPiEngineEnabled()).toBe(true);
-    setPiEngineEnabled(false);
+    // 逃生门：显式 '0' 关闭；非 '0'/未设置回到默认开。
+    localStorage.setItem(STORAGE_KEYS.piEngine, '0');
+    expect(isPiEngineEnabled()).toBe(false);
+    localStorage.setItem(STORAGE_KEYS.piEngine, '1');
+    expect(isPiEngineEnabled()).toBe(true);
+    localStorage.removeItem(STORAGE_KEYS.piEngine);
+    expect(isPiEngineEnabled()).toBe(true);
   });
 });

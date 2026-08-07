@@ -69,7 +69,7 @@ function createRun(sessionId = 's1', runId = 'r1'): AgentRun {
 class RecordingFakeAgent implements PiAgentLike {
   listener: ((event: PiAgentEvent, signal: AbortSignal) => void | Promise<void>) | null = null;
   seededHistory: PiAgentMessage[] | null = null;
-  promptInputs: string[] = [];
+  promptInputs: Array<string | PiAgentMessage> = [];
   onPrompt: ((text: string) => Promise<void>) | null = null;
   private readonly controller = new AbortController();
 
@@ -79,8 +79,9 @@ class RecordingFakeAgent implements PiAgentLike {
   }
 
   async prompt(input: string | PiAgentMessage | PiAgentMessage[]): Promise<void> {
-    this.promptInputs.push(typeof input === 'string' ? input : JSON.stringify(input));
-    await this.onPrompt?.(typeof input === 'string' ? input : '');
+    this.promptInputs.push(typeof input === 'string' ? input : input as PiAgentMessage);
+    const text = promptUserText(input);
+    await this.onPrompt?.(text);
   }
 
   abort(): void { this.controller.abort(); }
@@ -90,6 +91,23 @@ class RecordingFakeAgent implements PiAgentLike {
   async emit(event: PiAgentEvent): Promise<void> {
     await this.listener?.(event, this.controller.signal);
   }
+}
+
+/** 从 pi prompt 入参提取 user 正文（pi 通道以多模态 user 消息投递）。 */
+function promptUserText(input: string | PiAgentMessage | PiAgentMessage[]): string {
+  if (typeof input === 'string') return input;
+  if (Array.isArray(input)) return '';
+  if (typeof input !== 'object' || input === null) return '';
+  const candidate = input as { role?: unknown; content?: unknown };
+  if (candidate.role !== 'user') return '';
+  if (typeof candidate.content === 'string') return candidate.content;
+  if (Array.isArray(candidate.content)) {
+    return candidate.content
+      .filter((part): part is { type: 'text'; text: string } => typeof part === 'object' && part !== null && (part as { type?: unknown }).type === 'text' && typeof (part as { text?: unknown }).text === 'string')
+      .map((part) => part.text)
+      .join('');
+  }
+  return '';
 }
 
 function createAgentWithReply(reply: string): RecordingFakeAgent {
@@ -209,7 +227,7 @@ describe('P5 压缩流程（R2 压缩真实性 + 压缩后继续）', () => {
 
     // 压缩后继续：agent 转录重建为「摘要 + 保留尾」，且新 prompt 正常送达。
     expect(agent.seededHistory?.[0]?.role).toBe('compactionSummary');
-    expect(agent.promptInputs).toEqual(['continue the work']);
+    expect(agent.promptInputs[0]).toMatchObject({ role: 'user', content: 'continue the work' });
     expect(agent.seededHistory!.length).toBeLessThan(20);
 
     // 压缩过程以 transient 状态事件括起（对齐现有引擎；v3 store 会跳过 transient）。
@@ -254,7 +272,7 @@ describe('P5 压缩流程（R2 压缩真实性 + 压缩后继续）', () => {
 
     // 摘要失败 → 跳过压缩：不记录 token 统计，也不重建为压缩上下文。
     expect(piSession.lastCompactionStats).toBeUndefined();
-    expect(agent.promptInputs).toEqual(['keep going']);
+    expect(agent.promptInputs[0]).toMatchObject({ role: 'user', content: 'keep going' });
     // seededHistory 仍是 initialize 阶段注入的预置历史（未发生压缩重建）。
     expect(agent.seededHistory?.length).toBe(2);
     expect(agent.seededHistory?.[0]?.role).toBe('user');
@@ -326,7 +344,7 @@ describe('P5 刷新恢复（R4）', () => {
     expect(seeded!.length).toBeLessThan(22);
     // 压缩后产生的新消息（continue the work）也在恢复上下文里，Agent 可从压缩上下文继续。
     expect(seeded!.some((message) => message.role === 'user' && message.content === 'continue the work')).toBe(true);
-    expect(secondAgent.promptInputs).toEqual(['second message']);
+    expect(secondAgent.promptInputs[0]).toMatchObject({ role: 'user', content: 'second message' });
     first.destroy();
     second.destroy();
   });

@@ -221,11 +221,57 @@ describe('PiSession 刷新恢复端到端', () => {
     expect(secondAgent.seededHistory?.map((message) => message.role)).toEqual(['user', 'assistant']);
     expect((secondAgent.seededHistory?.[0] as Extract<PiAgentMessage, { role: 'user' }>).content).toBe('hello');
     expect((secondAgent.seededHistory?.[1] as Extract<PiAgentMessage, { role: 'assistant' }>).content).toEqual([{ type: 'text', text: 'first reply' }]);
-    // Agent 可从历史继续：第二轮 prompt 正常送达。
-    expect(secondAgent.promptInputs).toEqual(['second message']);
+    // Agent 可从历史继续：第二轮 prompt 正常送达（pi 通道以多模态 user 消息投递，正文含该提示）。
+    expect(secondAgent.promptInputs[0]).toContain('second message');
 
     // 两轮消息全部持久化在 IndexedDB 中。
     const reopened = await new IndexedDbSessionRepo(dbName).open({ id: 's1', createdAt: 0 });
+    const messages = (await reopened.findEntries({ type: 'message', order: 'oldestFirst' })).filter(
+      (entry): entry is Extract<typeof entry, { type: 'message' }> => entry.type === 'message',
+    );
+    expect(messages.map((entry) => entry.message.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
+  });
+
+  it('resume continues from the persisted session history with a checkpoint-style prompt (R2)', async () => {
+    const dbName = trackDb('pi-sessions-resume');
+
+    // 第一轮：断点前的一轮对话（mock Agent），消息写入 IndexedDB。
+    const firstAgent = createAgentWithReply('first reply');
+    const first = new PiSession({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiModel: 'deepseek-v4-flash',
+      sessionId: 's-resume',
+      runId: 'r1',
+      run: createRun('s-resume', 'r1'),
+      onEvent: () => undefined,
+      onRunChange: () => undefined,
+      createAgent: () => firstAgent,
+      createSessionRepo: () => new IndexedDbSessionRepo(dbName),
+    });
+    await first.prompt('build the feature');
+
+    // 恢复：同一会话 ID 重建 PiSession，Agent 转录 seed 全部历史，随后从 resume 提示继续。
+    const resumeAgent = createAgentWithReply('resumed');
+    const resume = new PiSession({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiModel: 'deepseek-v4-flash',
+      sessionId: 's-resume',
+      runId: 'r2',
+      run: createRun('s-resume', 'r2'),
+      onEvent: () => undefined,
+      onRunChange: () => undefined,
+      createAgent: () => resumeAgent,
+      createSessionRepo: () => new IndexedDbSessionRepo(dbName),
+    });
+    const resumePrompt = 'Continue from checkpoint: inspect the current workspace and finish after verification.';
+    await resume.prompt(resumePrompt);
+
+    expect(resumeAgent.seededHistory?.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(resumeAgent.promptInputs[0]).toContain(resumePrompt);
+    // 恢复后的消息也追加到同一会话（用户、assistant、resume、assistant）。
+    const reopened = await new IndexedDbSessionRepo(dbName).open({ id: 's-resume', createdAt: 0 });
     const messages = (await reopened.findEntries({ type: 'message', order: 'oldestFirst' })).filter(
       (entry): entry is Extract<typeof entry, { type: 'message' }> => entry.type === 'message',
     );

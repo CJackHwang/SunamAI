@@ -4,7 +4,7 @@ import { Agent } from '@earendil-works/pi-agent-core';
 import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage, AgentTool as PiAgentTool, StreamFn } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream, validateToolArguments } from '@earendil-works/pi-ai';
 import type { Api, AssistantMessage, Context as PiContext, Message as PiMessage, Model } from '@earendil-works/pi-ai';
-import { createPiAgentTools, PI_TOOL_CATALOG, PI_CHILD_NO_DELEGATION, resolveEnabledPiTools, UNWIRED_PI_RUNTIME } from '@/features/agent-core/pi/piToolAdapter';
+import { createPiAgentTools, PI_TOOL_CATALOG, PI_CHILD_NO_DELEGATION, createPiToolAdapter, resolveEnabledPiTools, UNWIRED_PI_RUNTIME } from '@/features/agent-core/pi/piToolAdapter';
 import { PiSession, type PiAgentLike } from '@/features/agent-core/pi/piSession';
 import type { AgentRun, TaskContract } from '@/features/agent-core/types';
 import { ContainerMutationLease } from '@/features/agent-core/agentFamily';
@@ -114,7 +114,7 @@ function piToolByName(tools: PiAgentTool[], name: string): PiAgentTool {
 
 class FakePiAgent implements PiAgentLike {
   listener: ((event: PiAgentEvent, signal: AbortSignal) => void | Promise<void>) | null = null;
-  readonly promptInputs: string[] = [];
+  readonly promptInputs: Array<string | PiAgentMessage> = [];
   abortCalls = 0;
 
   subscribe(listener: (event: PiAgentEvent, signal: AbortSignal) => void | Promise<void>): () => void {
@@ -123,7 +123,7 @@ class FakePiAgent implements PiAgentLike {
   }
 
   async prompt(input: string | PiAgentMessage | PiAgentMessage[]): Promise<void> {
-    this.promptInputs.push(typeof input === 'string' ? input : JSON.stringify(input));
+    this.promptInputs.push(typeof input === 'string' ? input : input as PiAgentMessage);
   }
 
   abort(): void { this.abortCalls += 1; }
@@ -326,7 +326,8 @@ describe('PiSession tool wiring (R2)', () => {
     await session.prompt('hello');
     expect(capturedTools).toBeDefined();
     expect(capturedTools!.map((tool) => tool.name).sort()).toEqual(['read_file', 'run_command']);
-    expect(agent.promptInputs).toEqual(['hello']);
+    expect(agent.promptInputs).toHaveLength(1);
+    expect(agent.promptInputs[0]).toMatchObject({ role: 'user', content: 'hello' });
     session.destroy();
   });
 
@@ -356,6 +357,36 @@ describe('PiSession tool wiring (R2)', () => {
     expect(run.task.plan).toEqual([{ id: 'a', title: 'A', status: 'completed' }]);
     expect(runChanges.at(-1)?.task.plan).toEqual([{ id: 'a', title: 'A', status: 'completed' }]);
     session.destroy();
+  });
+});
+
+describe('pi read_resource_image media injection (R1)', () => {
+  it('converts the image_resource modelContent into a pi image block via loadImageData', async () => {
+    const harness = createHarness();
+    const tool = PI_TOOL_CATALOG.find((candidate) => candidate.name === 'read_resource_image');
+    if (!tool) throw new Error('read_resource_image missing from catalog');
+    const loadImageData = vi.fn(async () => ({ data: 'aGVsbG8=', mimeType: 'image/png' }));
+    const adapter = createPiToolAdapter(tool, () => harness.context, loadImageData);
+
+    const result = await adapter.execute('call-img', { resource_id: 'res-1' }, new AbortController().signal);
+
+    expect(loadImageData).toHaveBeenCalledWith('res-1');
+    const text = result.content.filter((part) => part.type === 'text').map((part) => part.text).join('');
+    expect(text).toContain('[image: res-1]');
+    const images = result.content.filter((part) => part.type === 'image');
+    expect(images).toHaveLength(1);
+    expect(images[0]).toMatchObject({ type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' });
+  });
+
+  it('keeps text-only results intact when no image modelContent is present', async () => {
+    const harness = createHarness();
+    const tool = PI_TOOL_CATALOG.find((candidate) => candidate.name === 'list_resources');
+    if (!tool) throw new Error('list_resources missing from catalog');
+    const loadImageData = vi.fn(async () => null);
+    const adapter = createPiToolAdapter(tool, () => harness.context, loadImageData);
+    const result = await adapter.execute('call-list', {}, new AbortController().signal);
+    expect(result.content.every((part) => part.type === 'text')).toBe(true);
+    expect(loadImageData).not.toHaveBeenCalled();
   });
 });
 

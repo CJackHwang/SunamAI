@@ -1,4 +1,5 @@
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
+import type { ChatAttachment } from '@/entities/message/types';
 import type { AgentEventStore } from '../eventStore';
 import type { AgentEvent, AgentRun } from '../types';
 
@@ -72,4 +73,6 @@ export interface AgentDriverFactoryInput extends AgentDriverInit {
   enabledTools?: ReadonlySet<string>;
   /** P3：容器可用性（对齐 capability availability）。 */
   containerAvailable?: boolean;
+  /** R1：本次启动的附件（pi 驱动嵌入多模态 user 消息；CLI 桥忽略）。 */
+  attachments?: ChatAttachment[];
 }

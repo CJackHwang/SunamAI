@@ -1,5 +1,6 @@
 import { Type } from '@earendil-works/pi-ai';
 import type { TSchema } from '@earendil-works/pi-ai';
+import type { ImageContent, TextContent } from '@earendil-works/pi-ai';
 import type { AgentTool as PiAgentTool, AgentToolResult as PiAgentToolResult } from '@earendil-works/pi-agent-core';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 import type { RegisteredTool, SubagentHost, ToolExecutionContext } from '../tools/base';
@@ -27,8 +28,8 @@ import type { AgentToolResult as AppAgentToolResult } from '../types';
  *   直接以失败 throw。
  * - `complete_task` 的 `stopRun: 'completed'` 同样不映射为 pi `terminate`：自治循环中模型应把完成
  *   摘要作为最终回复，而非在工具批次后静默停住。
- * - `read_resource_image` 的 `modelContent`（image_resource 持久引用）在 pi 工具结果协议中无对应
- *   内容类型，只保留文本描述；图像回传依赖 pi 自身的内容通道，属后续工作。
+ * - `read_resource_image` 的 `modelContent`（image_resource 持久引用）经 `loadImageData`
+ *   转成 pi image 内容块回传（R1），与用户消息内嵌的附件图片同构；加载失败只保留文本描述。
  * - P4（R2）：根 agent 的子 agent 工具走真编排器（PiSubagentCoordinator），见
  *   piSubagentCoordinator.ts；本文件不再注入「pi 通道暂不支持子 agent」的降级标注。
  *   子 agent 会话注入的哨兵 host（PI_CHILD_NO_DELEGATION）只用于「子 agent 不能继续委派」，
@@ -181,12 +182,23 @@ export const PI_CHILD_NO_DELEGATION: SubagentHost = {
   snapshot: () => [],
 };
 
-/** 现有工具结果 → pi AgentToolResult。失败（ok:false）在 execute 中已以 throw 呈现。 */
-function toPiToolResult(result: AppAgentToolResult): PiAgentToolResult<unknown> {
-  return {
-    content: [{ type: 'text', text: result.content }],
-    details: result.data,
-  };
+/** 现有工具结果 → pi AgentToolResult。失败（ok:false）在 execute 中已以 throw 呈现。
+ *  R1：`modelContent` 中的 image_resource 持久引用转成 pi image 内容块（read_resource_image
+ *  回传真实图片），使 pi 工具结果协议与现有引擎的媒体注入语义对齐。 */
+async function toPiToolResult(result: AppAgentToolResult, loadImageData?: (resourceId: string) => Promise<{ data: string; mimeType: string } | null>): Promise<PiAgentToolResult<unknown>> {
+  const content: (TextContent | ImageContent)[] = [{ type: 'text', text: result.content }];
+  const imageRefs = (result.modelContent ?? []).filter((part): part is { type: 'image_resource'; resourceId: string } => part.type === 'image_resource');
+  if (loadImageData) {
+    for (const ref of imageRefs) {
+      try {
+        const image = await loadImageData(ref.resourceId);
+        if (image) content.push({ type: 'image', data: image.data, mimeType: image.mimeType });
+      } catch {
+        // 资源加载失败只保留文本描述，不阻断工具执行。
+      }
+    }
+  }
+  return { content, details: result.data };
 }
 
 export interface PiToolAdapterOptions {
@@ -194,15 +206,17 @@ export interface PiToolAdapterOptions {
   tools: RegisteredTool[];
   /** 每次执行时提供现有编排上下文（runId/sessionId/runtime/task 等）。 */
   getContext: () => ToolExecutionContext;
+  /** R1：把 `read_resource_image` 的 image_resource 持久引用加载为 pi image 内容块（可空）。 */
+  loadImageData?: (resourceId: string) => Promise<{ data: string; mimeType: string } | null>;
 }
 
 /** 把现有工具数组封装为 pi AgentTool 数组。 */
 export function createPiAgentTools(options: PiToolAdapterOptions): PiAgentTool[] {
-  return options.tools.map((tool) => createPiToolAdapter(tool, options.getContext));
+  return options.tools.map((tool) => createPiToolAdapter(tool, options.getContext, options.loadImageData));
 }
 
 /** 封装单个现有工具为 pi AgentTool（薄封装：复用现有 execute 实现，不重复实现）。 */
-export function createPiToolAdapter(tool: RegisteredTool, getContext: () => ToolExecutionContext): PiAgentTool {
+export function createPiToolAdapter(tool: RegisteredTool, getContext: () => ToolExecutionContext, loadImageData?: (resourceId: string) => Promise<{ data: string; mimeType: string } | null>): PiAgentTool {
   const parameters = PI_TOOL_SCHEMAS[tool.name] ?? Type.Any();
   return {
     name: tool.name,
@@ -221,7 +235,7 @@ export function createPiToolAdapter(tool: RegisteredTool, getContext: () => Tool
       const result = await tool.execute(parsed.data, { ...context, signal: signal ?? context.signal });
       // pi 执行模型：失败 throw，不编码错误到 content。
       if (!result.ok) throw new Error(result.content);
-      return toPiToolResult(result);
+      return toPiToolResult(result, loadImageData);
     },
   };
 }
