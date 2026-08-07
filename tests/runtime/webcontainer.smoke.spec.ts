@@ -170,10 +170,15 @@ test('real WebContainer keeps Agent processes, ports, and scrolling inside the s
   await expect(terminalRows).not.toContainText(/\.sunam\/workspaces\/c-/);
   await expect(page.locator('.terminal-environment-path')).toHaveCount(0);
 
-  // 用户终端已接入 Succinix 整行命令界面（V2TERM）：boot 横幅 + guest@succinix 提示符，
-  // 可输入命令（整行 → succinixClient.run → 回显）。断言横幅/提示符出现；共享文件与
-  // cwd/env 语义仍由 agent 路径（run_command → runShell）验证。
+  // 用户终端已接入 Succinix 整行命令界面（V2TERM）：boot 横幅 + 自检摘要 + guest@succinix 提示符，
+  // 可输入命令（整行 → succinixClient.run → 回显）。共享文件与 cwd/env 语义仍由 agent 路径
+  // （run_command → runShell）验证。
   await expect(terminalRows).toContainText(/Succinix 0\.2\.0/, { timeout: 30_000 });
+  await expect(terminalRows).toContainText(/\[  OK  \] \d+ checks passed/);
+  // 布局折叠/展开触发 xterm 重排后，最后一行（含光标）可能只渲染部分；按一次 Enter（空命令）
+  // 强制重绘当前提示符，再断言完整 guest 提示符。
+  await page.locator('.xterm-screen').nth(1).click({ position: { x: 120, y: 120 } });
+  await page.keyboard.press('Enter');
   await expect(terminalRows).toContainText(/guest@succinix:~\$ /);
 
   await composer.fill('请执行完整的 WebContainer runtime smoke verification command and services test');
