@@ -3,7 +3,7 @@ import { readText, removeText, STORAGE_KEYS, writeText } from '@/shared/lib/stor
 /**
  * R2 受限环境持久化标记。
  *
- * 环境不支持启动 Succinix（非 Chromium / 无 COOP/COEP，导致 WebContainer boot 失败 → 受限）
+ * 环境不支持启动 Succinix（非 Chromium / 无 COOP/COEP，导致 Succinix boot 失败 → 受限）
  * 时记录一次标记（localStorage `sunam_container_unavailable=1`），像主动关闭一样持久化——
  * 下次进入不自动开启容器，避免无效加载（每次受限触发重试都会重新等待 boot 失败）。
  *

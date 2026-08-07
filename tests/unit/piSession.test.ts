@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { File as NodeFile } from 'node:buffer';
 import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage } from '@earendil-works/pi-agent-core';
-import { PiEventBridge, PiSession, piAssistantReasoning, piAssistantText, piAssistantToolCalls, piMessageToAppMessage, type PiAgentLike } from '@/features/agent-core/pi/piSession';
+import { PiEventBridge, PiSession, buildConfigModel, piAssistantReasoning, piAssistantText, piAssistantToolCalls, piMessageToAppMessage, type PiAgentLike } from '@/features/agent-core/pi/piSession';
 import { isPiEngineEnabled, setPiEngineEnabled } from '@/features/agent-core/pi/featureFlag';
 import { STORAGE_KEYS } from '@/shared/lib/storage';
 import { AgentEventStore } from '@/features/agent-core/eventStore';
@@ -516,6 +516,39 @@ describe('PiSession attachments (R1)', () => {
     await session.prompt('hello');
     expect(agent.promptInputs[0]).toMatchObject({ role: 'user', content: 'hello' });
     session.destroy();
+  });
+});
+
+describe('pi config model (R2 localhost/port address fix)', () => {
+  it('normalizes trailing slashes and preserves image input on the configured model', () => {
+    const model = buildConfigModel('mock-model-a', 'http://127.0.0.1:11434/v1/', 'localhost');
+    expect(model.id).toBe('mock-model-a');
+    expect(model.baseUrl).toBe('http://127.0.0.1:11434/v1');
+    expect(model.api).toBe('openai-completions');
+    expect(model.input).toContain('image');
+  });
+
+  it('suppresses the OpenAI SDK X-Stainless-* telemetry headers so local/port endpoints pass CORS preflight', () => {
+    const model = buildConfigModel('mock-model-a', 'http://localhost:11434/v1', 'localhost');
+    const stainless = Object.keys(model.headers ?? {}).filter((key) => key.toLowerCase().startsWith('x-stainless'));
+    // Every stainless header the OpenAI client injects by default must be cleared (null).
+    expect(stainless).toContain('X-Stainless-OS');
+    expect(stainless).toContain('X-Stainless-Lang');
+    expect(stainless).toContain('X-Stainless-Runtime');
+    for (const key of stainless) expect(model.headers?.[key]).toBeNull();
+    // 常规请求头不受影响（真实网关不依赖遥测头，移除无害）。
+    expect(model.headers?.['X-Stainless-OS']).toBeNull();
+  });
+
+  it('routes anthropic channels to the anthropic-messages api without stainless suppression', () => {
+    const model = buildConfigModel('claude-sonnet-4-5', 'https://api.anthropic.com', 'anthropic', 'anthropic-messages');
+    expect(model.api).toBe('anthropic-messages');
+    expect(model.headers).toBeUndefined();
+  });
+
+  it('carries persona sampling params onto the configured model', () => {
+    const model = buildConfigModel('mock-model-a', 'http://127.0.0.1:11434/v1', 'localhost', 'openai-completions', { temperature: 0.2, top_p: 0.9, max_tokens: 2048 });
+    expect(model.samplingParams).toEqual({ temperature: 0.2, top_p: 0.9, max_tokens: 2048 });
   });
 });
 

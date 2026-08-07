@@ -3,6 +3,8 @@ import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage, AgentT
 import { createModels, createProvider, envApiKeyAuth, InMemoryCredentialStore, uuidv7 } from '@earendil-works/pi-ai';
 import type { Api, ImageContent, Model, Models, TextContent } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
+import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy';
+import type { ProviderApi } from '@/shared/config/providers';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 import type { ChatAttachment, Message, ToolCall } from '@/entities/message/types';
 import type { AgentResource } from '@/entities/resource/types';
@@ -59,12 +61,36 @@ function deriveProviderId(baseUrl: string): string {
   }
 }
 
-/** 从配置构造 pi 模型（api = openai-completions，与 app 的 /chat/completions 端点同构）。 */
-function buildConfigModel(apiModel: string, baseUrl: string, providerId: string): Model<Api> {
+/**
+ * R2：抑制 OpenAI SDK 的 `X-Stainless-*` 遥测头。
+ *
+ * pi-ai 的 openai-completions 通道用 OpenAI SDK 构造请求，SDK 默认注入
+ * `X-Stainless-Lang/OS/Arch/Runtime/…` 自定义头。这些头对普通 HTTPS 网关无碍，
+ * 但配置本机（localhost/127.0.0.1）或带端口的自定义渠道（Ollama/LM Studio/自建代理）
+ * 时，浏览器会因这些头触发 CORS preflight，而这类服务器通常不会把这些头列入
+ * `Access-Control-Allow-Headers`，导致「获取模型/请求」失败。
+ *
+ * 置为 `null` 会让 OpenAI client 的 buildHeaders 在合并 model.headers 时删除对应默认头
+ * （client 在平台头之后合并 defaultHeaders，null 即清除）。全渠道通用：真实网关也不依赖
+ * 这些遥测头，移除无害。
+ */
+const STAINLESS_SUPPRESS_HEADERS: Record<string, string | null> = {
+  'X-Stainless-Lang': null,
+  'X-Stainless-Package-Version': null,
+  'X-Stainless-OS': null,
+  'X-Stainless-Arch': null,
+  'X-Stainless-Runtime': null,
+  'X-Stainless-Runtime-Version': null,
+  'X-Stainless-Retry-Count': null,
+  'X-Stainless-Timeout': null,
+};
+
+/** 从配置构造 pi 模型（默认 api = openai-completions；anthropic 渠道走 anthropic-messages）。 */
+export function buildConfigModel(apiModel: string, baseUrl: string, providerId: string, api: ProviderApi = 'openai-completions', samplingParams?: Record<string, unknown>): Model<Api> {
   return {
     id: apiModel,
     name: apiModel,
-    api: 'openai-completions',
+    api,
     provider: providerId,
     baseUrl: baseUrl.replace(/\/+$/, ''),
     reasoning: false,
@@ -76,6 +102,10 @@ function buildConfigModel(apiModel: string, baseUrl: string, providerId: string)
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: 8_192,
+    // R5：皮套模型参数（温度/top_p/max_tokens 等，供应商支持时生效）。
+    ...(samplingParams ? { samplingParams } : {}),
+    // R2：清掉 OpenAI SDK 的 X-Stainless-* 默认头（见上），使本机/带端口渠道免于 CORS preflight 失败。
+    ...(api === 'openai-completions' ? { headers: STAINLESS_SUPPRESS_HEADERS as Record<string, string> } : {}),
   };
 }
 
@@ -97,6 +127,10 @@ export interface PiSessionOptions {
   baseUrl: string;
   apiModel: string;
   systemPrompt?: string;
+  /** R4：供应商渠道的请求 API（缺省 openai-completions，OpenAI 兼容）。 */
+  providerApi?: ProviderApi;
+  /** R5：皮套模型参数（温度/top_p/max_tokens，供应商支持时生效）。 */
+  samplingParams?: Record<string, unknown>;
   sessionId: string;
   runId: string;
   run: AgentRun;
@@ -449,8 +483,9 @@ export class PiSession {
   constructor(options: PiSessionOptions) {
     this.options = options;
     // P1-L4：provider 由现有 modelClient 配置派生（baseUrl host → provider id），不硬编码供应商。
+    // R4：渠道供应商类型决定请求 API（openai-completions / anthropic-messages）。
     const providerId = deriveProviderId(options.baseUrl);
-    const model = buildConfigModel(options.apiModel, options.baseUrl, providerId);
+    const model = buildConfigModel(options.apiModel, options.baseUrl, providerId, options.providerApi, options.samplingParams);
     this.model = model;
     const credentials = new InMemoryCredentialStore();
     const models = createModels({ credentials });
@@ -461,7 +496,11 @@ export class PiSession {
       baseUrl: model.baseUrl,
       auth: { apiKey: envApiKeyAuth(options.baseUrl, []) },
       models: [model],
-      api: openAICompletionsApi(),
+      // 多 API 分发：model.api 选择对应实现（anthropic 渠道不暴露 /chat/completions）。
+      api: {
+        'openai-completions': openAICompletionsApi(),
+        'anthropic-messages': anthropicMessagesApi(),
+      },
     }));
     // P5：派生压缩配置（阈值/保留量对齐现有引擎），测试可覆盖。
     const compactionConfig = buildPiCompactionConfig(options.apiModel);

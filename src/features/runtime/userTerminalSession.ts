@@ -26,7 +26,7 @@ function sleep(milliseconds: number): Promise<void> {
 
 // 对齐 Succinix main.ts 的 WELCOME_BANNER（版本 + kernel/userland/exec 行）。
 export const SUCCINIX_BANNER =
-  'Succinix 0.2.0 — kernel: JS runtime + WebContainer | userland: Lifo | exec: TerminalExecutor\n' +
+  'Succinix 0.2.0 — kernel: Succinix JS runtime | userland: Lifo | exec: TerminalExecutor\n' +
   "Type 'help' to see available commands.";
 
 // 用户终端命令默认超时（对齐 Succinix main.ts execute 的 60s；host 侧 Lifo/node 路由按该值生效）。
