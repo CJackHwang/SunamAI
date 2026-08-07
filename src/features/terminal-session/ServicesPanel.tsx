@@ -7,8 +7,12 @@ import { toErrorMessage } from '@/shared/lib/errors';
 import { EmptyState, ErrorState } from '@/shared/ui/AsyncState';
 import './ServicesPanel.css';
 
-/** 进程行展示视图：ProcessStatus 之上附加 protected（系统进程禁 stop）与 pid/processId（kill 路由用）。 */
-export type ServiceProcessView = ProcessStatus & { protected?: boolean; pid?: number; processId?: string; killable?: boolean };
+/** 进程归属（TASK-CISOL R4）：与 runtime succinixProcesses 的 ProcessScope 结构一致（string 联合）。 */
+type ProcessScope = 'system' | 'container' | 'unknown';
+
+/** 进程行展示视图：ProcessStatus 之上附加 protected（系统进程禁 stop）、pid/processId（kill 路由用）
+ *  与 scope（TASK-CISOL R4：按归属分组显示：system / container / unknown）。 */
+export type ServiceProcessView = ProcessStatus & { protected?: boolean; pid?: number; processId?: string; killable?: boolean; scope?: ProcessScope };
 
 interface ServicePanelProps {
   ports: RuntimePortStatus[];
@@ -18,6 +22,12 @@ interface ServicePanelProps {
   onStopPort: (port: number) => Promise<boolean>;
   onForceRestart: () => Promise<void>;
   onKillProcess: (process: ServiceProcessView) => void;
+}
+
+/** 分组归属：host 已标 scope 直接用；旧视图（无 scope）按 protected 回落（系统 → system，其余 → 当前容器）。 */
+function groupOf(process: ServiceProcessView): ProcessScope {
+  if (process.scope) return process.scope;
+  return process.protected === true ? 'system' : 'container';
 }
 
 export function ServicesPanel({ ports, processes, isRestarting, onPreview, onStopPort, onForceRestart, onKillProcess }: ServicePanelProps) {
@@ -67,6 +77,33 @@ export function ServicesPanel({ ports, processes, isRestarting, onPreview, onSto
     }
   };
 
+  // TASK-CISOL R4：按归属分三组 —— 系统进程（protected 徽标 + 禁 stop + 运行时说明）、
+  // 当前容器进程（可 stop）、未知归属（灰显禁操作）。分组是数据驱动渲染，不改样式。
+  const systemProcesses = processes.filter((process) => groupOf(process) === 'system');
+  const containerProcesses = processes.filter((process) => groupOf(process) === 'container');
+  const unknownProcesses = processes.filter((process) => groupOf(process) === 'unknown');
+  const renderProcessRow = (process: ServiceProcessView) => {
+    // V1 H1-2：kill 语义如实 —— protected（系统进程）、killable:false（前台 run 语义、
+    // 无 host pid，Lifo 混合链运行中不可中途终止）与 scope=unknown（归属未知，宁严勿松）
+    // 都禁 stop，并给出对应说明文案。
+    const killDisabled = process.protected === true || process.killable === false || process.scope === 'unknown';
+    const killLabel = process.protected === true
+      ? t('services.killBlocked')
+      : process.scope === 'unknown'
+        ? t('services.killUnknown')
+        : process.killable === false
+          ? t('services.killUnavailable')
+          : t('services.kill');
+    return <div className="service-row list-row service-process-row" key={process.id}>
+      <div className="service-process-details">
+        <span className="service-process-id">{process.protected ? `[${t('services.systemProcess')}] ${process.id}` : process.id}</span>
+        <span className="service-process-command" title={`$ ${process.command}`}>$ {process.command}</span>
+        {process.protected === true && <span className="service-process-id">{t('services.systemProcessNote')}</span>}
+      </div>
+      <button className="icon-button icon-button-danger" onClick={() => onKillProcess(process)} title={killLabel} aria-label={`${killLabel} ${process.id}`} disabled={killDisabled}><StopCircle size={18} /></button>
+    </div>;
+  };
+
   return <div className="services-panel motion-panel-in">
     <section className="services-ports" aria-labelledby="runtime-ports-heading">
       <div className="services-heading-row">
@@ -102,23 +139,11 @@ export function ServicesPanel({ ports, processes, isRestarting, onPreview, onSto
       </div>
       <div className="services-process-list scroll-region">{processes.length === 0
         ? <EmptyState className="panel-empty-state services-process-empty">{t('services.noProcesses')}</EmptyState>
-        : processes.map((process) => {
-          // V1 H1-2：kill 语义如实 —— protected（系统进程）与 killable:false（前台 run 语义、
-          // 无 host pid，Lifo 混合链运行中不可中途终止）都禁 stop，并给出对应说明文案。
-          const killDisabled = process.protected === true || process.killable === false;
-          const killLabel = process.protected === true
-            ? t('services.killBlocked')
-            : process.killable === false
-              ? t('services.killUnavailable')
-              : t('services.kill');
-          return <div className="service-row list-row service-process-row" key={process.id}>
-            <div className="service-process-details">
-              <span className="service-process-id">{process.protected ? `[${t('services.systemProcess')}] ${process.id}` : process.id}</span>
-              <span className="service-process-command" title={`$ ${process.command}`}>$ {process.command}</span>
-            </div>
-            <button className="icon-button icon-button-danger" onClick={() => onKillProcess(process)} title={killLabel} aria-label={`${killLabel} ${process.id}`} disabled={killDisabled}><StopCircle size={18} /></button>
-          </div>;
-        })}</div>
+        : <>
+          {systemProcesses.length > 0 && <div className="services-process-group" role="group" aria-label={t('services.groupSystem')}><span className="service-process-id">{t('services.groupSystem')}</span>{systemProcesses.map(renderProcessRow)}</div>}
+          {containerProcesses.length > 0 && <div className="services-process-group" role="group" aria-label={t('services.groupContainer')}><span className="service-process-id">{t('services.groupContainer')}</span>{containerProcesses.map(renderProcessRow)}</div>}
+          {unknownProcesses.length > 0 && <div className="services-process-group" role="group" aria-label={t('services.groupUnknown')}><span className="service-process-id">{t('services.groupUnknown')}</span>{unknownProcesses.map(renderProcessRow)}</div>}
+        </>}</div>
     </section>
   </div>;
 }

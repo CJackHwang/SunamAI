@@ -22,7 +22,7 @@ import { RuntimeServiceRegistry, type ManagedSpawnRequest } from './serviceRegis
 import { SuccinixClient, type SuccinixProcessEntry } from './succinixClient';
 import { SuccinixFileSnapshotCoordinator } from './succinixFileSnapshot';
 import { bootSuccinixHost, type SuccinixHostHandle } from './succinixHost';
-import { isSystemProcess, systemKillRefusal, type SuccinixProcessView } from './succinixProcesses';
+import { isSystemProcess, killRefusal, resolveProcessScope, type SuccinixProcessView } from './succinixProcesses';
 import { UserTerminalSession } from './userTerminalSession';
 
 const MAX_PROCESS_OUTPUT = 20_000;
@@ -347,10 +347,12 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
   /**
    * M5 R1：展示层进程数据源绑定 Succinix 进程表（host 真实 pid/cmd/status/startTime）。
    * 合并两源：host ps() 全部真实进程 + ProcessRegistry 所有权标注（session/run 关联）。
+   * TASK-CISOL R2：按容器过滤 —— 只返回 scope=system + scope=container 且 containerId=当前
+   * 的进程（**容器 A 看不到容器 B 的进程**）；scope=unknown 返回但标记不可操作（R3）。
    * 系统进程（host.js / python daemon / /usr/lib/succinix）标记 protected。
    * 轮询刷新由调用方（ComputerView）按 2-3s 间隔 + 运行时事件驱动调用本方法。
-   * M6 R3 边界：ps() 是宿主 OS 全局进程表（含其他容器进程），本方法只做所有权标注、不做
-   * 容器过滤——进程表全局可见是 Succinix 语义，虚拟容器隔离是文件系统级而非进程级。
+   * 所有权归属权威：注册表 tracked/run shim 已按当前容器过滤（进程属于哪个容器由
+   * ProcessRegistry 启动时记录），host 归属标注用于未拥有进程（用户终端命令等）。
    */
   async getSuccinixProcesses(containerId?: string): Promise<SuccinixProcessView[]> {
     // V1 H1-2：ps() 最佳努力 —— 长前台 run 占住 FIFO 链时 ps() 排队到 run 完成（最坏 ~300s），
@@ -369,9 +371,19 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
     const seen = new Set<number>();
     for (const entry of entries) {
       if (entry.status !== 'running') continue;
-      seen.add(entry.pid);
       const owned = trackedByPid.get(entry.pid);
-      views.push(owned ? this.toOwnedProcessView(owned, entry) : this.toUnownedProcessView(entry));
+      if (owned) {
+        // 注册表所有权权威：trackedByPid 已按当前容器过滤，本容器进程保留（即使 host 侧
+        // 归属标注因 cwd 盲区落到 unknown，所有权仍是本容器，不因标注丢失可管理入口）。
+        seen.add(entry.pid);
+        views.push(this.toOwnedProcessView(owned, entry));
+        continue;
+      }
+      // TASK-CISOL R2：容器 A 看不到容器 B 的进程 —— 归属 container 且非当前容器则丢弃。
+      const scope = resolveProcessScope(entry);
+      if (scope === 'container' && entry.containerId !== containerId) continue;
+      seen.add(entry.pid);
+      views.push(this.toUnownedProcessView(entry));
     }
     // ps() 快照缺失（查询失败/退出未反映）时仍保留注册表运行中的 agent 进程，避免 UI 空白。
     for (const process of trackedByPid.values()) {
@@ -393,20 +405,24 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
   }
 
   /**
-   * M5 R2：按 host pid 停止进程（未拥有/系统进程路径），后端 kill 守卫——
-   * pid 命中系统进程时拒绝并返回说明（UI 禁 stop + 此处后端拦截双保险）。
+   * M5 R2 + TASK-CISOL R3：按 host pid 停止进程（未拥有/系统进程路径），后端 kill 守卫——
+   * pid 命中系统进程 / 其他容器进程 / 归属未知进程时拒绝并返回说明（UI 禁 stop + 此处
+   * 后端拦截双保险）。仅 scope=container 且 containerId === 当前容器的进程可 kill。
    */
-  async stopProcessByPid(pid: number): Promise<{ ok: boolean; message: string }> {
+  async stopProcessByPid(pid: number, containerId?: string): Promise<{ ok: boolean; message: string }> {
     const entries = await this.succinix.ps();
-    const refusal = systemKillRefusal(entries, pid);
+    const refusal = killRefusal(entries, pid, containerId);
     if (refusal) return { ok: false, message: refusal };
     const result = await this.succinix.kill(pid);
     return { ok: result.killed, message: result.message };
   }
 
-  /** agent 拥有进程：保留注册表 id/command 与 session/run 所有权，protected 仍按 host cmd 判定。 */
+  /** agent 拥有进程：保留注册表 id/command 与 session/run 所有权，protected 仍按 host cmd 判定。
+   *  scope 以所有权为主：host 判定 system 则 system，否则本容器进程（container）。 */
   private toOwnedProcessView(process: ProcessStatus & { pid: number }, entry: SuccinixProcessEntry): SuccinixProcessView {
     const exitCode = entry.exitCode ?? process.exitCode;
+    const hostScope = resolveProcessScope(entry);
+    const scope = hostScope === 'system' ? 'system' : 'container';
     return {
       id: process.id,
       processId: process.id,
@@ -419,26 +435,31 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
       output: process.output,
       cursor: process.cursor,
       ...(exitCode !== undefined ? { exitCode } : {}),
-      protected: isSystemProcess(entry.cmd),
+      protected: isSystemProcess(entry.cmd) || hostScope === 'system',
+      scope,
       hostStatus: entry.status,
       startTime: entry.startTime,
     };
   }
 
-  /** 未拥有进程（系统进程 / 用户终端底座等）：id 用 succinix-<pid>，protected 按 host cmd 判定。 */
+  /** 未拥有进程（系统进程 / 用户终端命令等）：id 用 succinix-<pid>，scope 按 host 归属标注。
+   *  unknown 归属 → killable:false（宁严勿松，UI 灰显不可操作）。 */
   private toUnownedProcessView(entry: SuccinixProcessEntry): SuccinixProcessView {
+    const scope = resolveProcessScope(entry);
     return {
       id: `succinix-${entry.pid}`,
       pid: entry.pid,
       command: entry.cmd,
       sessionId: '',
       runId: '',
-      containerId: '',
+      containerId: scope === 'container' ? (entry.containerId ?? '') : '',
       isRunning: entry.status === 'running',
       output: entry.outputTail ?? '',
       cursor: 0,
       ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}),
-      protected: isSystemProcess(entry.cmd),
+      protected: scope === 'system',
+      scope,
+      ...(scope === 'unknown' ? { killable: false } : {}),
       hostStatus: entry.status,
       startTime: entry.startTime,
     };
@@ -463,6 +484,7 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
       cursor: process.cursor,
       ...(process.exitCode !== undefined ? { exitCode: process.exitCode } : {}),
       protected: false,
+      scope: 'container',
       killable: false,
       hostStatus: 'running',
       startTime: 0,

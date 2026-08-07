@@ -32,6 +32,12 @@ export function WorkspaceRuntimeProvider({ children }: PropsWithChildren) {
     errorSubscriptionRef.current = instance.runtime.subscribeErrors(setError);
     setWebcontainer(instance.webcontainer);
     setRuntime(instance.runtime);
+    // Runtime 测试钩子（?sunam_test=1，仅查询参数触发，生产无影响）：暴露运行时单例供
+    // Playwright page.evaluate 直接调用 getSuccinixProcesses / stopProcessByPid —— 真实 WC 的
+    // 跨容器进程隔离断言（两容器互不可见 + 跨容器 kill 拒绝）需直达 app 后端守卫而非 UI。
+    if (new URLSearchParams(window.location.search).has('sunam_test')) {
+      (window as unknown as { __sunamRuntime?: WorkspaceRuntimeInstance }).__sunamRuntime = instance;
+    }
   }, []);
 
   const attachChatOnly = useCallback(() => {

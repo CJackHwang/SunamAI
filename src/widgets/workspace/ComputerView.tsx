@@ -227,7 +227,7 @@ const ComputerView = ({ webcontainer, runtime, rootDir, onReady, activeTab, onTa
         if (process.processId) {
           void runtime?.stopProcess(process.processId, { sessionId: process.sessionId, runId: process.runId, containerId: process.containerId });
         } else if (process.pid !== undefined) {
-          void runtime?.stopProcessByPid(process.pid);
+          void runtime?.stopProcessByPid(process.pid, activeContainerId ?? undefined);
         }
       }} /></div>}
       <div className="terminal-panel terminal-file-panel" id="terminal-segment-panel-files" role="tabpanel" aria-labelledby="terminal-segment-files" data-active={activeTab === 'ai' && containerSegment === 'files'}>{isBooted && <Suspense fallback={null}><FileManager wc={webcontainer} rootDir={rootDir} /></Suspense>}</div>

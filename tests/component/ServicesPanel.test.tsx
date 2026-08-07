@@ -1,7 +1,9 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '@/shared/i18n';
 import { ServicesPanel } from '@/features/terminal-session/ServicesPanel';
+
+afterEach(() => cleanup());
 
 describe('ServicesPanel', () => {
   const actions = { isRestarting: false, onStopPort: vi.fn(async () => true), onForceRestart: vi.fn(async () => undefined) };
@@ -43,6 +45,26 @@ describe('ServicesPanel', () => {
     const button = screen.getByRole('button', { name: /系统进程/ });
     expect(button).toBeDisabled();
     expect(screen.queryByRole('button', { name: /强制终止 succinix-1/ })).not.toBeInTheDocument();
+  });
+
+  it('groups processes into system / current-container / unknown and drives killability (TASK-CISOL R4)', () => {
+    render(<I18nProvider><ServicesPanel ports={[]} processes={[
+      { id: 'sys-1', sessionId: '', runId: '', containerId: '', command: 'node host.js', isRunning: true, output: '', cursor: 0, scope: 'system', protected: true },
+      { id: 'own-1', sessionId: 's-1', runId: 'r-1', containerId: 'c-1', command: 'node server.js', isRunning: true, output: '', cursor: 0, scope: 'container' },
+      { id: 'unk-1', sessionId: '', runId: '', containerId: '', command: 'node weird.js', isRunning: true, output: '', cursor: 0, scope: 'unknown' },
+    ]} onPreview={vi.fn()} onKillProcess={vi.fn()} {...actions} /></I18nProvider>);
+    // 三个分组标签（数据驱动分组，不改样式）。
+    expect(screen.getByText('系统进程')).toBeInTheDocument();
+    expect(screen.getByText('当前容器进程')).toBeInTheDocument();
+    expect(screen.getByText('未知归属')).toBeInTheDocument();
+    // 系统进程：protected 徽标 + 禁 stop + 运行时说明。
+    expect(screen.getByText('[系统] sys-1')).toBeInTheDocument();
+    expect(screen.getByText('Succinix 运行时，关闭会破坏容器功能')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /受保护的系统进程.*sys-1/ })).toBeDisabled();
+    // 当前容器进程：可 stop。
+    expect(screen.getByRole('button', { name: /强制终止 own-1/ })).toBeEnabled();
+    // 未知归属：灰显禁操作（不可 stop + 对应说明）。
+    expect(screen.getByRole('button', { name: /归属未知 — 不可操作 unk-1/ })).toBeDisabled();
   });
 
   it('stops managed ports and reserves force restart for orphaned ports', async () => {

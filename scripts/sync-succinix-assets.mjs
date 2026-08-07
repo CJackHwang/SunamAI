@@ -19,7 +19,10 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const explicitSource = process.env.SUCCINIX_SOURCE_DIR;
-const sourceRoot = resolve(explicitSource ?? `${process.env.HOME}/Desktop/MyProject/WebUnix/public`);
+// 本地 WebUnix（现为 Succinix 仓库）默认检出路径：~/Desktop/MyProject/Succinix/public。
+// 旧默认 ~/Desktop/MyProject/WebUnix/public 已随仓库改名失效（存在性检查会回落 npm 包，
+// 但那包不含最新 host.js 归属字段 —— 本地开发必须优先本地构建产物）。
+const sourceRoot = resolve(explicitSource ?? `${process.env.HOME}/Desktop/MyProject/Succinix/public`);
 const targetRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../public/succinix');
 
 // 本地 WebUnix 来源：权威构建产物（host.js / lifo-core.js / pyodide）。

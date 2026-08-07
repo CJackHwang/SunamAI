@@ -28,6 +28,10 @@ export interface SuccinixProcessEntry {
   startTime: number;
   exitCode?: number;
   outputTail?: string;
+  /** 进程归属（TASK-CISOL R1，host ps() 新增字段）：system / container / unknown */
+  scope?: 'system' | 'container' | 'unknown';
+  /** scope=container 时所属虚拟容器 id（如 c-1） */
+  containerId?: string;
 }
 
 export interface SuccinixRunOptions {

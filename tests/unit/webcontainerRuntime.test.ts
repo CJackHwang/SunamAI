@@ -274,10 +274,66 @@ describe('WebContainerAgentRuntime process ownership', () => {
 
   it('kills a non-system process by pid (M5)', async () => {
     const { runtime } = createRuntime();
-    mockPs.mockResolvedValueOnce([{ pid: 7, cmd: 'node server.js', status: 'running', startTime: 1 }]);
-    const result = await runtime.stopProcessByPid(7);
+    mockPs.mockResolvedValueOnce([{ pid: 7, cmd: 'node server.js', status: 'running', startTime: 1, scope: 'container', containerId: 'c-1' }]);
+    const result = await runtime.stopProcessByPid(7, 'c-1');
     expect(result.ok).toBe(true);
     expect(mockKill).toHaveBeenCalledWith(7);
+    runtime.dispose();
+  });
+
+  it('filters out processes belonging to other containers (TASK-CISOL R2)', async () => {
+    const { runtime } = createRuntime();
+    mockPs.mockResolvedValueOnce([
+      { pid: 1, cmd: 'node server.js', status: 'running', startTime: 10, scope: 'container', containerId: 'c-1' },
+      { pid: 2, cmd: 'node other.js', status: 'running', startTime: 20, scope: 'container', containerId: 'c-2' },
+      { pid: 3, cmd: 'node host.js', status: 'running', startTime: 30, scope: 'system' },
+    ]);
+    const views = await runtime.getSuccinixProcesses('c-1');
+    expect(views.map((view) => view.pid)).toEqual(expect.arrayContaining([1, 3]));
+    expect(views.map((view) => view.pid)).not.toContain(2);
+    // 反方向：容器 B 也看不到容器 A 的进程（互不可见）。
+    mockPs.mockResolvedValueOnce([
+      { pid: 1, cmd: 'node server.js', status: 'running', startTime: 10, scope: 'container', containerId: 'c-1' },
+      { pid: 2, cmd: 'node other.js', status: 'running', startTime: 20, scope: 'container', containerId: 'c-2' },
+      { pid: 3, cmd: 'node host.js', status: 'running', startTime: 30, scope: 'system' },
+    ]);
+    const viewsFromB = await runtime.getSuccinixProcesses('c-2');
+    expect(viewsFromB.map((view) => view.pid)).toEqual(expect.arrayContaining([2, 3]));
+    expect(viewsFromB.map((view) => view.pid)).not.toContain(1);
+    runtime.dispose();
+  });
+
+  it('marks unknown-ownership processes non-operable and groups them as unknown (TASK-CISOL R2)', async () => {
+    const { runtime } = createRuntime();
+    mockPs.mockResolvedValueOnce([
+      { pid: 7, cmd: 'node weird.js', status: 'running', startTime: 1, scope: 'unknown' },
+    ]);
+    const views = await runtime.getSuccinixProcesses('c-1');
+    const unknown = views.find((view) => view.pid === 7);
+    expect(unknown).toBeDefined();
+    expect(unknown?.scope).toBe('unknown');
+    expect(unknown?.killable).toBe(false);
+    expect(unknown?.protected).toBe(false);
+    runtime.dispose();
+  });
+
+  it('refuses to kill a process from another container by pid (TASK-CISOL R3)', async () => {
+    const { runtime } = createRuntime();
+    mockPs.mockResolvedValueOnce([{ pid: 4, cmd: 'node server.js', status: 'running', startTime: 1, scope: 'container', containerId: 'c-2' }]);
+    const result = await runtime.stopProcessByPid(4, 'c-1');
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/another container/);
+    expect(mockKill).not.toHaveBeenCalled();
+    runtime.dispose();
+  });
+
+  it('refuses to kill a process with unknown ownership by pid (TASK-CISOL R3)', async () => {
+    const { runtime } = createRuntime();
+    mockPs.mockResolvedValueOnce([{ pid: 5, cmd: 'node weird.js', status: 'running', startTime: 1, scope: 'unknown' }]);
+    const result = await runtime.stopProcessByPid(5, 'c-1');
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/unknown ownership/);
+    expect(mockKill).not.toHaveBeenCalled();
     runtime.dispose();
   });
 
