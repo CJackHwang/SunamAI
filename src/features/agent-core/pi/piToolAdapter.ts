@@ -31,7 +31,7 @@ import type { AgentToolResult as AppAgentToolResult } from '../types';
  *   内容类型，只保留文本描述；图像回传依赖 pi 自身的内容通道，属后续工作。
  * - P4（R2）：根 agent 的子 agent 工具走真编排器（PiSubagentCoordinator），见
  *   piSubagentCoordinator.ts；本文件不再注入「pi 通道暂不支持子 agent」的降级标注。
- *   子 agent 会话注入的哨兵 host（PI_UNSUPPORTED_SUBAGENTS）只用于「子 agent 不能继续委派」，
+ *   子 agent 会话注入的哨兵 host（PI_CHILD_NO_DELEGATION）只用于「子 agent 不能继续委派」，
  *   对齐现有引擎「children cannot delegate」语义。
  */
 export const PI_TOOL_CATALOG: RegisteredTool[] = [
@@ -172,7 +172,7 @@ const subagentUnavailable = (tool: string): never => {
   throw new Error(`Tool ${tool} is unavailable: subagent delegation is allowed only from the root agent, not from a child agent.`);
 };
 
-export const PI_UNSUPPORTED_SUBAGENTS: SubagentHost = {
+export const PI_CHILD_NO_DELEGATION: SubagentHost = {
   spawn: () => subagentUnavailable('spawn_subagent'),
   wait: () => subagentUnavailable('wait_subagents'),
   message: () => subagentUnavailable('message_subagent'),

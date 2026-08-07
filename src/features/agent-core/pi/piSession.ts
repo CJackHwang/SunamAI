@@ -18,7 +18,7 @@ import {
   isCompactionNeeded,
   type PiCompactionRunner,
 } from './piCompaction';
-import { createPiAgentTools, PI_UNSUPPORTED_SUBAGENTS, resolveEnabledPiTools, UNWIRED_PI_RUNTIME } from './piToolAdapter';
+import { createPiAgentTools, PI_CHILD_NO_DELEGATION, resolveEnabledPiTools, UNWIRED_PI_RUNTIME } from './piToolAdapter';
 import { PiSubagentCoordinator, type PiSubagentCoordinatorOptions } from './piSubagentCoordinator';
 
 /**
@@ -201,6 +201,8 @@ export class PiEventBridge {
   private sequence = 0;
   private streamIndex = 0;
   private currentStreamId: string | null = null;
+  /** P4 L-2 修复：子 agent usage 统计真实化（modelTurns/toolCalls 累计，随 run_finished 上报）。 */
+  private readonly usage = { modelTurns: 0, toolCalls: 0 };
 
   constructor(options: { runId: string; sessionId: string; run: AgentRun; onEvent: (event: AgentEvent) => void; onRunChange: (run: AgentRun) => void }) {
     this.runId = options.runId;
@@ -237,6 +239,8 @@ export class PiEventBridge {
       case 'message_end': {
         const message = event.message;
         if (message.role !== 'assistant') break;
+        // P4 L-2 修复：累计模型轮次（子 agent usage 统计真实化）
+        this.usage.modelTurns += 1;
         const streamId = this.currentStreamId ?? `${this.runId}:msg-${++this.streamIndex}`;
         this.currentStreamId = null;
         this.emit('message', { message: piMessageToAppMessage(message), streamId });
@@ -256,6 +260,8 @@ export class PiEventBridge {
       case 'tool_execution_end':
         // P3：工具已注册，工具调用结果进入模型转录驱动对话继续；按「UI 视觉零改动」约束，
         // 不在聊天流中渲染工具消息（现有引擎的 tool 消息渲染不变）。
+        // P4 L-2 修复：累计工具调用数（子 agent usage 统计真实化）
+        if (event.type === 'tool_execution_end') this.usage.toolCalls += 1;
         break;
       case 'turn_end':
         break;
@@ -274,6 +280,9 @@ export class PiEventBridge {
   private setPhase(phase: AgentPhase): void {
     this.run.phase = phase;
     this.run.updatedAt = Date.now();
+    // P4 L-2 修复：usage 统计随 run 状态同步（子 agent notification 读 run.modelTurns/toolCalls）
+    this.run.modelTurns = this.usage.modelTurns;
+    this.run.toolCalls = this.usage.toolCalls;
     this.onRunChange({ ...this.run, task: { ...this.run.task, plan: [...this.run.task.plan], evidence: [...this.run.task.evidence] } });
   }
 
@@ -477,7 +486,7 @@ export class PiSession {
       agentRole: run.agentRole ?? 'root',
       ...(this.options.containerAvailable !== undefined ? { containerAvailable: this.options.containerAvailable } : {}),
       ...(this.options.enabledTools ? { shellAvailable: this.options.enabledTools.has('run_command') } : {}),
-      subagents: this.options.subagents ?? this.coordinator ?? PI_UNSUPPORTED_SUBAGENTS,
+      subagents: this.options.subagents ?? this.coordinator ?? PI_CHILD_NO_DELEGATION,
       mutationLease: this.mutationLease,
       getTask: () => this.options.run.task,
       updateTask: (updater) => this.applyTaskUpdate(updater),

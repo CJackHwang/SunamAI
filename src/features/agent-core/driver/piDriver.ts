@@ -56,6 +56,8 @@ type PiSessionConstructor = (options: PiDriverOptions) => PiSessionLike;
 export class PiDriver implements AgentDriver {
   readonly id: AgentDriverId = 'pi';
   readonly capabilities: AgentDriverCapabilities = {
+    // steer 目前仅内部用于子 agent 编排（P4）；用户中途引导（guideActiveTask）对 driver
+    // 运行一律返回 false（useAgentV2），此处声明 steer 指子 agent steering 能力，非用户引导。
     steer: true,
     subagents: true,
     requiresLocalEnvironment: false,

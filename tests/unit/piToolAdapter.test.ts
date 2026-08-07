@@ -4,7 +4,7 @@ import { Agent } from '@earendil-works/pi-agent-core';
 import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage, AgentTool as PiAgentTool, StreamFn } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream, validateToolArguments } from '@earendil-works/pi-ai';
 import type { Api, AssistantMessage, Context as PiContext, Message as PiMessage, Model } from '@earendil-works/pi-ai';
-import { createPiAgentTools, PI_TOOL_CATALOG, PI_UNSUPPORTED_SUBAGENTS, resolveEnabledPiTools, UNWIRED_PI_RUNTIME } from '@/features/agent-core/pi/piToolAdapter';
+import { createPiAgentTools, PI_TOOL_CATALOG, PI_CHILD_NO_DELEGATION, resolveEnabledPiTools, UNWIRED_PI_RUNTIME } from '@/features/agent-core/pi/piToolAdapter';
 import { PiSession, type PiAgentLike } from '@/features/agent-core/pi/piSession';
 import type { AgentRun, TaskContract } from '@/features/agent-core/types';
 import { ContainerMutationLease } from '@/features/agent-core/agentFamily';
@@ -361,10 +361,10 @@ describe('PiSession tool wiring (R2)', () => {
 
 describe('pi subagent host wiring (P4-R2)', () => {
   it('keeps the child-agent sentinel rejecting (children cannot delegate)', () => {
-    expect(() => PI_UNSUPPORTED_SUBAGENTS.spawn({ taskId: 't', role: 'explore', prompt: 'p' })).toThrow(/allowed only from the root agent/);
-    expect(() => PI_UNSUPPORTED_SUBAGENTS.wait(['r1'])).toThrow(/allowed only from the root agent/);
-    expect(() => PI_UNSUPPORTED_SUBAGENTS.message('r1', 'hi')).toThrow(/allowed only from the root agent/);
-    expect(PI_UNSUPPORTED_SUBAGENTS.snapshot()).toEqual([]);
+    expect(() => PI_CHILD_NO_DELEGATION.spawn({ taskId: 't', role: 'explore', prompt: 'p' })).toThrow(/allowed only from the root agent/);
+    expect(() => PI_CHILD_NO_DELEGATION.wait(['r1'])).toThrow(/allowed only from the root agent/);
+    expect(() => PI_CHILD_NO_DELEGATION.message('r1', 'hi')).toThrow(/allowed only from the root agent/);
+    expect(PI_CHILD_NO_DELEGATION.snapshot()).toEqual([]);
   });
 
   it('injects the real subagent coordinator into the root pi session tool context', async () => {

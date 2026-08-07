@@ -7,7 +7,7 @@ import { createChaosContract } from '../prompt';
 import { initialTask } from '../task';
 import { CHILD_COMMON_TOOLS, CHILD_TASK_TOOLS } from '../engine';
 import type { PiAgentFactory, PiSession, PiSessionOptions } from './piSession';
-import { PI_UNSUPPORTED_SUBAGENTS } from './piToolAdapter';
+import { PI_CHILD_NO_DELEGATION } from './piToolAdapter';
 
 /**
  * P4 pi 通道子 agent 编排器：多 Agent 实例 + 并发池实现子 agent 委派。
@@ -332,7 +332,7 @@ export class PiSubagentCoordinator implements SubagentHost {
       ...(this.options.containerAvailable !== undefined ? { containerAvailable: this.options.containerAvailable } : {}),
       ...(this.options.createAgent ? { createAgent: this.options.createAgent } : {}),
       // 子 agent 不能再委派：subagent 工具不在子工具集内，host 用如实拒绝的哨兵兜底。
-      subagents: PI_UNSUPPORTED_SUBAGENTS,
+      subagents: PI_CHILD_NO_DELEGATION,
       // 子 run 不占独立 pi 会话：跳过会话仓库持久化，仅走 v3 事件路由（避免历史串扰）。
       persistSession: false,
     });

@@ -292,6 +292,8 @@ export function useAgentV2(
     if (!sessionId || !containerId || !runtime || !userPrompt.trim()) return;
     // P6（R4）：驱动层与现有引擎并行存在。pi 引擎开关默认关；开且无 resume/附件时走驱动层
     // （默认 PiDriver 包 pi 通道，行为不变；AGENT_DRIVER 可切换外部 CLI 桥）。
+    // 注意：AGENT_DRIVER 仅在驱动层内选择实现（pi/claude-code/codex），要生效必须先开 pi 引擎
+    // 开关（sunam_v2_feature_pi_engine）——未开时走旧引擎，AGENT_DRIVER 配置不生效。
     // 驱动层尚不支持断点恢复与附件，这些情况回退现有引擎。
     if (isPiEngineEnabled() && !resume && (!attachments || attachments.length === 0)) {
       void launchDriverTask(userPrompt, sessionId, containerId);
