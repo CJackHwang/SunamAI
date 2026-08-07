@@ -6,6 +6,7 @@ export const STORAGE_KEYS = {
   locale: 'sunam_v2_locale',
   capabilityConfig: 'sunam_v2_capability_config',
   piEngine: 'sunam_v2_feature_pi_engine',
+  agentDriver: 'sunam_v2_agent_driver',
 } as const;
 
 export interface StorageLike {
