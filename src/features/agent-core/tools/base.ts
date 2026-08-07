@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 import type { ToolCapabilityDeclaration } from '@/shared/contracts/capability';
 import type { AgentRole, AgentToolResult, SubagentNotification, SubagentRole, TaskContract } from '../types';
-import type { ContainerMutationLease } from '../agentFamily';
+import type { ContainerMutationLease } from '../mutationLease';
 
 export interface SubagentHost {
   spawn(input: { taskId: string; role: SubagentRole; prompt: string; writeScope?: string[] }): Promise<{ runId: string; taskId: string; status: string }>;

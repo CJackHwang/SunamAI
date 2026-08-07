@@ -7,7 +7,7 @@ import type { Api, AssistantMessage, Context as PiContext, Message as PiMessage,
 import { createPiAgentTools, PI_TOOL_CATALOG, PI_CHILD_NO_DELEGATION, createPiToolAdapter, resolveEnabledPiTools, UNWIRED_PI_RUNTIME } from '@/features/agent-core/pi/piToolAdapter';
 import { PiSession, type PiAgentLike } from '@/features/agent-core/pi/piSession';
 import type { AgentRun, TaskContract } from '@/features/agent-core/types';
-import { ContainerMutationLease } from '@/features/agent-core/agentFamily';
+import { ContainerMutationLease } from '@/features/agent-core/mutationLease';
 import type { ToolExecutionContext, SubagentHost } from '@/features/agent-core/tools/base';
 import type { AgentWorkspaceRuntime, ProcessStatus } from '@/shared/contracts/agentRuntime';
 import { initialTask } from '@/features/agent-core/task';

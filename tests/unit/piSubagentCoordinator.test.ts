@@ -5,7 +5,7 @@ import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import type { AssistantMessage, Message as PiMessage } from '@earendil-works/pi-ai';
 import type { AgentWorkspaceRuntime, ProcessStatus, ShellRunRequest, ShellRunResult, WorkspaceTreeEntry } from '@/shared/contracts/agentRuntime';
 import type { AgentRun } from '@/features/agent-core/types';
-import { CHILD_COMMON_TOOLS, CHILD_TASK_TOOLS } from '@/features/agent-core/engine';
+import { CHILD_COMMON_TOOLS, CHILD_TASK_TOOLS } from '@/features/agent-core/pi/piSubagentCoordinator';
 import { PiSession, type PiAgentFactory, type PiAgentLike } from '@/features/agent-core/pi/piSession';
 import { PiSubagentCoordinator, type PiSubagentCoordinatorOptions } from '@/features/agent-core/pi/piSubagentCoordinator';
 

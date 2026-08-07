@@ -5,9 +5,15 @@ import type { SubagentHost } from '../tools/base';
 import type { AgentEvent, AgentRun, DelegatedAgentTask, SubagentNotification, SubagentRole } from '../types';
 import { createChaosContract } from '../prompt';
 import { initialTask } from '../task';
-import { CHILD_COMMON_TOOLS, CHILD_TASK_TOOLS } from '../engine';
 import type { PiAgentFactory, PiSession, PiSessionOptions } from './piSession';
 import { PI_CHILD_NO_DELEGATION } from './piToolAdapter';
+
+/**
+ * 子 agent 角色工具集（R4：自 engine.ts 迁出）。旧引擎删除后，这是 pi 通道的
+ * 子 agent 工具子集唯一来源——不发明新子集，对齐原 CHILD_COMMON_TOOLS/CHILD_TASK_TOOLS。
+ */
+export const CHILD_COMMON_TOOLS = ['workspace_tree', 'read_file', 'search_workspace', 'list_resources', 'read_resource_text', 'read_resource_image', 'update_plan', 'report_progress', 'ask_parent', 'complete_task'];
+export const CHILD_TASK_TOOLS = [...CHILD_COMMON_TOOLS, 'materialize_resource', 'run_command', 'manage_process', 'read_user_terminal'];
 
 /**
  * P4 pi 通道子 agent 编排器：多 Agent 实例 + 并发池实现子 agent 委派。
@@ -51,7 +57,7 @@ const MAX_CHILDREN_PER_ROOT = 6;
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
 
-/** 子 agent 工具集：对齐现有 engine.ts 的 CHILD_COMMON_TOOLS/CHILD_TASK_TOOLS（不发明新子集）。 */
+/** 子 agent 工具集：本文件的 CHILD_COMMON_TOOLS/CHILD_TASK_TOOLS（R4 迁入，不发明新子集）。 */
 function childToolsForRole(role: SubagentRole): string[] {
   return role === 'explore' ? CHILD_COMMON_TOOLS : CHILD_TASK_TOOLS;
 }

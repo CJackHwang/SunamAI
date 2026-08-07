@@ -7,7 +7,7 @@ import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 import type { ChatAttachment, Message } from '@/entities/message/types';
 import type { AgentResource } from '@/entities/resource/types';
 import { v3Persistence } from '@/entities/persistence/v3Repository';
-import { ContainerMutationLease } from '../agentFamily';
+import { ContainerMutationLease } from '../mutationLease';
 import { ResourceProcessorRegistry } from '../resourceProcessor';
 import type { AgentEventStore } from '../eventStore';
 import type { RegisteredTool, SubagentHost, ToolExecutionContext } from '../tools/base';

@@ -6,25 +6,20 @@ import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
 import { CHAT_ONLY_CONTAINER_ID, DEFAULT_CAPABILITY_CONFIG, type CapabilityConfig } from '@/shared/contracts/capability';
 import { capabilityRegistry } from './capability/registry';
 import { ensureCapabilityRegistry } from './capability/manifest';
-import { AgentEngine, type AgentResumeState } from './engine';
 import { AgentEventStore } from './eventStore';
-import { OpenAIChatModelClient } from './modelClient';
-import { projectMessages, projectModelMessages } from './projector';
+import { projectMessages } from './projector';
 import { isActiveAgentPhase, normalizeSubagentRole, type AgentEvent, type AgentRun } from './types';
 import { toErrorMessage } from '@/shared/lib/errors';
-import { AgentFamilyCoordinator } from './subagentCoordinator';
 import { registerWorkspaceDeletionPreparation } from '@/entities/workspace/deletionCoordinator';
 import { createId } from '@/shared/lib/ids';
 import { createChaosContract } from './prompt';
-import { initialTask, rebuildTaskForResume } from './task';
-import { isPiEngineEnabled } from './pi/featureFlag';
+import { initialTask, rebuildTaskForResume, type AgentResumeState } from './task';
 import { createAgentDriver } from './driver/create';
 import type { AgentDriver } from './driver/types';
 
 type UpdateSessionStatus = (id: string, status: SessionStatus) => void;
 const MESSAGE_WINDOW_SIZE = 250;
-interface ActiveExecution { sessionId: string; containerId: string; controller: AbortController; engine: AgentEngine; coordinator: AgentFamilyCoordinator; completion: Promise<void>; }
-/** P6（R4）：驱动层运行记录（默认 PiDriver；CLI 桥浏览器壳内优雅拒绝）。 */
+/** 驱动层运行记录（默认 PiDriver；CLI 桥浏览器壳内优雅拒绝）。 */
 interface DriverExecution { sessionId: string; containerId: string; controller: AbortController; completion: Promise<void>; }
 interface StreamingState { streamId: string; content: string; reasoning: string; toolCalls: NonNullable<Message['tool_calls']>; }
 export type AgentConversationView = { kind: 'root' } | { kind: 'subagent'; sessionId: string; runId: string };
@@ -81,7 +76,6 @@ export function useAgentV2(
   capabilities: { config: CapabilityConfig; containerAvailable: boolean } = { config: DEFAULT_CAPABILITY_CONFIG, containerAvailable: true },
 ) {
   const storeRef = useRef(new AgentEventStore());
-  const executionsRef = useRef(new Map<string, ActiveExecution>());
   const driverExecutionsRef = useRef(new Map<string, DriverExecution>());
   const driverRunIdsRef = useRef(new Set<string>());
   const recoveredSessionsRef = useRef(new Set<string>());
@@ -109,18 +103,14 @@ export function useAgentV2(
   );
 
   useEffect(() => {
-    const executions = executionsRef.current;
     const driverExecutions = driverExecutionsRef.current;
     const unregister = registerWorkspaceDeletionPreparation(async (target) => {
-      const matches = [...executions.values()].filter((execution) => target.kind === 'session' ? execution.sessionId === target.id : execution.containerId === target.id);
-      matches.forEach((execution) => execution.controller.abort(new DOMException(`${target.kind} deleted.`, 'AbortError')));
       const driverMatches = [...driverExecutions.values()].filter((execution) => target.kind === 'session' ? execution.sessionId === target.id : execution.containerId === target.id);
       driverMatches.forEach((execution) => execution.controller.abort(new DOMException(`${target.kind} deleted.`, 'AbortError')));
-      await Promise.all([...matches, ...driverMatches].map((execution) => execution.completion));
+      await Promise.all(driverMatches.map((execution) => execution.completion));
     });
     return () => {
       unregister();
-      executions.forEach((execution) => execution.controller.abort(new DOMException('Agent workspace closed.', 'AbortError')));
       driverExecutions.forEach((execution) => execution.controller.abort(new DOMException('Agent workspace closed.', 'AbortError')));
     };
   }, []);
@@ -137,8 +127,7 @@ export function useAgentV2(
     void (async () => {
       const store = storeRef.current;
       const loaded = await store.loadSessionEvents(activeSessionId);
-      const hasActiveExecution = [...executionsRef.current.values()].some((execution) => execution.sessionId === activeSessionId)
-        || [...driverExecutionsRef.current.values()].some((execution) => execution.sessionId === activeSessionId);
+      const hasActiveExecution = [...driverExecutionsRef.current.values()].some((execution) => execution.sessionId === activeSessionId);
       const restoredRuns = !recoveredSessionsRef.current.has(activeSessionId) && !hasActiveExecution
         ? await store.markInterruptedRuns(activeSessionId)
         : await store.loadSessionRuns(activeSessionId);
@@ -293,74 +282,19 @@ export function useAgentV2(
     driverExecutionsRef.current.set(runId, { sessionId, containerId, controller, completion });
   }, [apiKey, apiModel, appendEvent, baseUrl, capabilities.containerAvailable, enabledTools, runtime, sunamModel, updateRun]);
 
-  const launchTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, inheritedMessages?: Message[], attachments?: ChatAttachment[], resume?: AgentResumeState) => {
+  const launchTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, attachments?: ChatAttachment[], resume?: AgentResumeState) => {
     const sessionId = overrideSessionId ?? activeSessionId;
     const containerAvailable = capabilities.containerAvailable;
     const containerId = overrideContainerId ?? activeContainerId ?? (containerAvailable ? undefined : CHAT_ONLY_CONTAINER_ID);
     if (!sessionId || !containerId || !runtime || !userPrompt.trim()) return;
-    // R1-R3（全面切换）：pi 引擎默认开启，附件与断点恢复同样走驱动层（pi 通道全场景接管）。
-    // AGENT_DRIVER 仅在驱动层内选择实现（pi/claude-code/codex），要生效必须先开 pi 引擎
-    // 开关（sunam_v2_feature_pi_engine）——关闭时走旧引擎，AGENT_DRIVER 配置不生效。
-    if (isPiEngineEnabled()) {
-      void launchDriverTask(userPrompt, sessionId, containerId, attachments, resume);
-      return;
-    }
-    // 逃生门（localStorage 关闭 pi）：回退现有引擎。
-    setPersistenceError(null);
-    [...executionsRef.current.values()].filter((execution) => execution.sessionId === sessionId).forEach((execution) => execution.controller.abort(new DOMException('Superseded by a newer run.', 'AbortError')));
-    const controller = new AbortController();
-    const rootEvents = projectConversationEvents(events, runs, { kind: 'root' });
-    const initialMessages: Message[] = inheritedMessages ?? (sessionId === sessionRef.current ? projectModelMessages(rootEvents) : []);
-    const createClient = () => new OpenAIChatModelClient({ apiKey, baseUrl, model: apiModel }, sessionId);
-    const engine = new AgentEngine({
-      sessionId,
-      containerId,
-      persona: sunamModel,
-      model: apiModel,
-      input: userPrompt.trim(),
-      ...(attachments ? { attachments } : {}),
-      initialMessages,
-      client: createClient(),
-      runtime,
-      store: storeRef.current,
-      signal: controller.signal,
-      onEvent: appendEvent,
-      onRunChange: updateRun,
-      enabledTools,
-      containerAvailable,
-      ...(resume ? { resume } : {}),
-    });
-    const onChildrenPruned = (runIds: string[]) => {
-      const removed = new Set(runIds);
-      setRuns((previous) => previous.filter((run) => !removed.has(run.id)));
-      setEvents((previous) => previous.filter((event) => !removed.has(event.runId)));
-      setChildRunsBySession((previous) => Object.fromEntries(Object.entries(previous).map(([key, value]) => [key, value.filter((run) => !removed.has(run.id))])));
-      setStreamingByRunId((previous) => Object.fromEntries(Object.entries(previous).filter(([runId]) => !removed.has(runId))));
-      setCompactingByRunId((previous) => Object.fromEntries(Object.entries(previous).filter(([runId]) => !removed.has(runId))));
-    };
-    const coordinator = new AgentFamilyCoordinator({
-      root: engine, createClient, runtime, store: storeRef.current, signal: controller.signal, persona: sunamModel, model: apiModel, onEvent: appendEvent, onRunChange: updateRun, onChildrenPruned,
-      enabledTools, containerAvailable,
-    });
-    engine.setSubagentHost(coordinator);
-    updateRun(engine.getRun());
-    const runId = engine.getRun().id;
-    const completion = engine.execute()
-      .catch((error) => setPersistenceError(toErrorMessage(error)))
-      .finally(() => {
-        executionsRef.current.delete(runId);
-        setCompactingByRunId((previous) => {
-          if (!previous[runId]) return previous;
-          const next = { ...previous };
-          delete next[runId];
-          return next;
-        });
-      });
-    executionsRef.current.set(runId, { sessionId, containerId, controller, engine, coordinator, completion });
-  }, [activeContainerId, activeSessionId, apiKey, apiModel, appendEvent, baseUrl, capabilities.containerAvailable, enabledTools, events, launchDriverTask, runs, runtime, sunamModel, updateRun]);
+    // R4（旧引擎删除）：pi 通道为唯一实现，附件与断点恢复统一经驱动层
+    // （PiSession 构造多模态消息 / 从会话历史继续）。AGENT_DRIVER 仅在驱动层内
+    // 选择实现（pi/claude-code/codex），不再有旧引擎回退路径。
+    void launchDriverTask(userPrompt, sessionId, containerId, attachments, resume);
+  }, [activeContainerId, activeSessionId, capabilities.containerAvailable, launchDriverTask, runtime]);
 
   const startTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, attachments?: ChatAttachment[]) => {
-    launchTask(userPrompt, overrideSessionId, overrideContainerId, undefined, attachments);
+    launchTask(userPrompt, overrideSessionId, overrideContainerId, attachments);
   }, [launchTask]);
 
   /** R2：pi 通道断点恢复。PiSession 以会话历史为权威上下文（P2 刷新后自动 seed），
@@ -381,73 +315,35 @@ export function useAgentV2(
       ].filter(Boolean).join('\n\n');
       const checkpointSummary = [baseSummary, recoveryNotes].filter(Boolean).join('\n\n');
       const prompt = `Continue from checkpoint: ${checkpointSummary}. Inspect the current workspace, preserve truthful evidence, and finish only after verification.`;
-      launchTask(prompt, target.sessionId, target.containerId, undefined, undefined, { sourceRunId: target.id, task: target.task, summary: checkpointSummary, ...(workspaceDrift ? { workspaceDrift } : {}), ...(subagentStatus.length ? { subagentStatus } : {}) });
+      launchTask(prompt, target.sessionId, target.containerId, undefined, { sourceRunId: target.id, task: target.task, summary: checkpointSummary, ...(workspaceDrift ? { workspaceDrift } : {}), ...(subagentStatus.length ? { subagentStatus } : {}) });
     })().catch((error) => setPersistenceError(toErrorMessage(error)));
   }, [launchTask, runtime]);
-
-  /** 逃生门（pi 关闭）：现有引擎的 checkpoint 恢复路径。 */
-  const resumeLegacyRun = useCallback((target: AgentRun) => {
-    if (!runtime) return;
-    void storeRef.current.latestCheckpoint(target.id).then(async (checkpoint) => {
-      await runtime.ensureContainer(target.containerId);
-      const currentRevision = await runtime.getWorkspaceRevision(target.containerId);
-      const workspaceDrift = detectWorkspaceDrift(checkpoint?.workspaceRevision, currentRevision);
-      const currentSequence = await storeRef.current.latestEventSequence(target.id);
-      const eventTailDrift = detectEventTailDrift(checkpoint?.eventTailSequence, currentSequence);
-      const delegatedTasks = await storeRef.current.listAgentTasks(target.rootRunId ?? target.id);
-      const subagentStatus = delegatedTasks.map((task) => `- ${task.runId ?? task.id} [${normalizeSubagentRole(task.role)}/${task.status}] ${task.taskId}: ${task.prompt}${task.summary ? ` — ${task.summary}` : ''}`);
-      const inherited = checkpoint?.messages ?? (target.sessionId === sessionRef.current ? projectModelMessages(projectConversationEvents(events, runs, { kind: 'root' })) : []);
-      const baseSummary = checkpoint?.summary ?? target.summary ?? 'reassess the interrupted task';
-      const recoveryNotes = [
-        workspaceDrift ? `Workspace drift detected: checkpoint revision ${workspaceDrift.checkpointRevision}, current revision ${workspaceDrift.currentRevision}. Prior file reads and verification must be refreshed.` : '',
-        eventTailDrift ? `Event drift detected: checkpoint tail ${eventTailDrift.checkpointSequence}, persisted run tail ${eventTailDrift.currentSequence}.` : '',
-        subagentStatus.length ? `Recovered delegated tasks:\n${subagentStatus.join('\n')}` : '',
-      ].filter(Boolean).join('\n\n');
-      const checkpointSummary = [baseSummary, recoveryNotes].filter(Boolean).join('\n\n');
-      const prompt = `Continue from checkpoint: ${checkpointSummary}. Inspect the current workspace, preserve truthful evidence, and finish only after verification.`;
-      launchTask(prompt, target.sessionId, target.containerId, inherited, undefined, { sourceRunId: target.id, task: target.task, summary: checkpointSummary, ...(workspaceDrift ? { workspaceDrift } : {}), ...(eventTailDrift ? { eventTailDrift } : {}), ...(subagentStatus.length ? { subagentStatus } : {}) });
-    }).catch((error) => setPersistenceError(toErrorMessage(error)));
-  }, [events, launchTask, runs, runtime]);
 
   const resumeTask = useCallback((run?: AgentRun | null) => {
     const target = run ?? runs.find((candidate) => candidate.phase === 'interrupted') ?? runs[0] ?? null;
     if (!target || !runtime) return;
-    // R2：pi 引擎开启时经驱动层断点恢复（PiSession 自动从会话历史继续）；关闭时回退现有引擎。
-    if (isPiEngineEnabled()) {
-      resumeDriverRun(target);
-      return;
-    }
-    resumeLegacyRun(target);
-  }, [resumeDriverRun, resumeLegacyRun, runs, runtime]);
+    // R4（旧引擎删除）：断点恢复统一经驱动层（PiSession 自动从会话历史继续），
+    // 不再有旧引擎的 checkpoint 回退路径。
+    resumeDriverRun(target);
+  }, [resumeDriverRun, runs, runtime]);
 
   const stopTask = useCallback(() => {
     if (activeSessionId) {
-      [...executionsRef.current.values()].filter((execution) => execution.sessionId === activeSessionId).forEach((execution) => execution.controller.abort());
       [...driverExecutionsRef.current.values()].filter((execution) => execution.sessionId === activeSessionId).forEach((execution) => execution.controller.abort());
     }
   }, [activeSessionId]);
 
-  const stopSubagent = useCallback(async (runId: string): Promise<boolean> => {
-    for (const execution of executionsRef.current.values()) {
-      if (await execution.coordinator.stopAndWait(runId)) return true;
-    }
+  const stopSubagent = useCallback(async (_runId: string): Promise<boolean> => {
+    // R4（旧引擎删除）：子 agent 停止由 pi 编排器（PiSubagentCoordinator）在驱动内部
+    // 管理，驱动接口不暴露单子 agent 停止；子 agent UI 停止按钮如实返回 false（R5 边界）。
     return false;
   }, []);
 
-  const guideActiveTask = useCallback(async (message: string): Promise<boolean> => {
-    if (!activeSessionId || !message.trim()) return false;
-    // 驱动层运行暂未接入用户中途引导（pi steer 面向子 agent 编排；CLI 桥不支持 steer）；
-    // 明确返回 false 交由 UI 提示。外部 CLI 桥的 steer 能力位如实为 false（R5）。
-    if ([...driverExecutionsRef.current.values()].some((execution) => execution.sessionId === activeSessionId)) return false;
-    const execution = [...executionsRef.current.values()].find((candidate) => candidate.sessionId === activeSessionId && isRootRun(candidate.engine.getRun()));
-    if (!execution) return false;
-    try {
-      return await execution.engine.enqueueUserGuidance(message);
-    } catch (error) {
-      setPersistenceError(toErrorMessage(error));
-      return false;
-    }
-  }, [activeSessionId]);
+  const guideActiveTask = useCallback(async (_message: string): Promise<boolean> => {
+    // R4（旧引擎删除）：所有运行均走驱动层（pi）。pi 通道未接入用户中途引导
+    // （steer 仅面向子 agent 编排；CLI 桥不支持 steer），如实返回 false 交由 UI 提示（R5）。
+    return false;
+  }, []);
 
   const deleteSubagent = useCallback(async (sessionId: string, runId: string): Promise<boolean> => {
     try {
