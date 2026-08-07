@@ -17,6 +17,7 @@ export const jaJP = {
   'update.reload': '今すぐ更新',
   'containerNotice.title': 'コンテナの初期化に失敗しました',
   'containerNotice.body': 'お使いのブラウザが Succinix をサポートしていない可能性があります（クロスオリジン分離の欠如など）。コンテナ機能を諦めてチャットのみで続行できます。機能パネルからいつでも再試行できます。',
+  'containerNotice.recorded': 'コンテナ環境は利用できません（記録済み）。手動で再試行できます。',
   'containerNotice.continue': 'コンテナを諦めてチャットを続ける',
   'containerNotice.retry': '再試行',
   'capability.title': '機能ライブラリ',

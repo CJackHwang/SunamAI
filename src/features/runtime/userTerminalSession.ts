@@ -20,6 +20,10 @@ const RED = '\x1b[31m';
 const GRAY = '\x1b[90m';
 const RESET = '\x1b[0m';
 
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 // 对齐 Succinix main.ts 的 WELCOME_BANNER（版本 + kernel/userland/exec 行）。
 export const SUCCINIX_BANNER =
   'Succinix 0.2.0 — kernel: JS runtime + WebContainer | userland: Lifo | exec: TerminalExecutor\n' +
@@ -29,6 +33,9 @@ export const SUCCINIX_BANNER =
 const COMMAND_TIMEOUT_MS = 60_000;
 // boot 自检里 echo 探路命令的超时（首条 Lifo 命令可能需冷启动沙箱，放宽到 15s）。
 const SELF_CHECK_TIMEOUT_MS = 15_000;
+// R1：boot() 等待 Succinix host 就绪的截止。后台 bootSuccinixHost 自带 6s 探活 deadline，
+// 这里放宽到 8s 覆盖"终端显示时 host 仍在后台启动"的余量；host 起不来则超时后如实报 FAIL。
+const HOST_READY_WAIT_MS = 8_000;
 
 /** 宿主把会话输出桥接到 xterm + 用户终端缓冲（Agent 的 read_user_terminal 读取）。 */
 export interface UserTerminalOutput {
@@ -155,15 +162,23 @@ export class UserTerminalSession {
   }
 
   /**
-   * 终端就绪引导：Succinix 横幅 → 自检摘要 → REPL 边界标注 → 提示符。
+   * 终端就绪引导：Succinix 横幅 → 等待 host 就绪 → 自检摘要 → REPL 边界标注 → 提示符。
    * 自检期间置 busy，用户输入排队（对齐 Succinix ?test=1 语义）。host boot（bootSuccinixHost）
    * 已做过 ping 探活，但不做功能自检——这里触发一次轻量自检（ping/cwd/echo/ps），如实报告。
+   * R1：WC 容器就绪即调用本方法（横幅立即可见）；Succinix host 可能仍在后台 boot，
+   * 先等待 host ping 就绪再做自检，boot 日志/自检结果在 host 就绪后滚动出现。
+   * @param options.hostReadyDeadlineMs 等待 host 就绪的截止（测试注入短 deadline；生产默认 8s）。
    */
-  async boot(): Promise<void> {
+  async boot(options?: { hostReadyDeadlineMs?: number }): Promise<void> {
     this.busy = true;
     try {
       this.write(`${SUCCINIX_BANNER}\r\n`);
-      this.write(await this.runSelfCheck());
+      const hostReady = await this.waitForHostReady(options?.hostReadyDeadlineMs ?? HOST_READY_WAIT_MS);
+      if (hostReady) {
+        this.write(await this.runSelfCheck());
+      } else {
+        this.write(`${RED}[ FAIL ] Succinix host did not become ready — container commands unavailable${RESET}\r\n`);
+      }
       this.write(`${GRAY}note: line-command mode — interactive REPL (python / node) is not supported${RESET}\r\n`);
     } finally {
       this.busy = false;
@@ -180,6 +195,20 @@ export class UserTerminalSession {
   }
 
   // ─── 内部 ───
+
+  /** R1：轮询 ping 等待 Succinix host 就绪（后台 boot 可能仍在进行）。就绪返回 true；超时返回 false。 */
+  private async waitForHostReady(deadlineMs: number): Promise<boolean> {
+    const deadline = Date.now() + deadlineMs;
+    for (;;) {
+      try {
+        if (await this.rpc.ping()) return true;
+      } catch {
+        // host 未就绪 / 探活 RPC 异常：继续轮询
+      }
+      if (Date.now() >= deadline) return false;
+      await sleep(100);
+    }
+  }
 
   /** 整行命令执行：busy 置位 → execute → 结算出队或提示符（对齐 Succinix runCommand）。 */
   async runCommand(command: string): Promise<void> {

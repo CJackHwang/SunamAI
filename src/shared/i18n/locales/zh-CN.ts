@@ -15,6 +15,7 @@ export const zhCN = {
   'update.reload': '立即更新',
   'containerNotice.title': '容器初始化失败',
   'containerNotice.body': '可能是浏览器环境不支持 Succinix（如缺少跨域隔离）。您可以放弃容器功能，以纯聊天模式继续使用；之后可随时在能力库中重试。',
+  'containerNotice.recorded': '容器环境不可用（已记录），可手动重试',
   'containerNotice.continue': '放弃容器，继续纯聊天',
   'containerNotice.retry': '重试',
   'capability.title': '能力库',

@@ -224,11 +224,36 @@ describe('UserTerminalSession boot (V2TERM R3)', () => {
     expect(rpc.run).toHaveBeenCalledWith(expect.stringContaining('echo succinix-self-test-ok'), expect.anything());
   });
 
-  it('reports a FAIL summary when a self-check probe fails', async () => {
+  it('reports a FAIL summary when the host is ready but a self-check probe fails', async () => {
     const { written, rpc, session } = createHarness();
-    rpc.ping.mockResolvedValueOnce(false);
+    rpc.ps.mockRejectedValueOnce(new Error('ps boom'));
     await session.boot();
     expect(written.join('')).toContain('[ FAIL ] 3/4 checks passed');
+  });
+
+  it('reports a FAIL summary when the host never becomes ready', async () => {
+    const { written, rpc, session } = createHarness();
+    rpc.ping.mockResolvedValue(false);
+    await session.boot({ hostReadyDeadlineMs: 20 });
+    const text = written.join('');
+    // 横幅仍立即可见（终端未等 host 就显示），随后如实报告 host 未就绪。
+    expect(text).toContain('Succinix 0.2.0 — kernel:');
+    expect(text).toContain('[ FAIL ] Succinix host did not become ready');
+    expect(text).toContain('guest@succinix:~$ ');
+  });
+
+  it('waits for the Succinix host before running the self-check (R1 timing)', async () => {
+    const { written, rpc, session } = createHarness();
+    const pending = createDeferred<boolean>();
+    rpc.ping.mockReturnValueOnce(pending.promise);
+    const bootPromise = session.boot();
+    // host 未就绪：横幅已写，自检尚未开始（echo 探路未发）。
+    expect(written.join('')).toContain('Succinix 0.2.0 — kernel:');
+    expect(rpc.run).not.toHaveBeenCalled();
+    pending.resolve(true);
+    await bootPromise;
+    expect(written.join('')).toContain('[  OK  ] 4 checks passed');
+    expect(written.join('')).toContain('guest@succinix:~$ ');
   });
 
   it('queues input typed during boot and runs it after the prompt', async () => {

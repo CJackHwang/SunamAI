@@ -17,6 +17,7 @@ export const enUS = {
   'update.reload': 'Update now',
   'containerNotice.title': 'Container failed to start',
   'containerNotice.body': 'Your browser may not support Succinix (e.g. missing cross-origin isolation). You can dismiss this and continue in chat-only mode; you can retry anytime in the capability panel.',
+  'containerNotice.recorded': 'Container environment unavailable (recorded). You can retry manually.',
   'containerNotice.continue': 'Dismiss and continue chat-only',
   'containerNotice.retry': 'Retry',
   'capability.title': 'Capabilities',

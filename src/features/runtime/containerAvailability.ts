@@ -1,6 +1,7 @@
 import type { CapabilityAvailability } from '@/shared/contracts/capability';
 import { toErrorMessage } from '@/shared/lib/errors';
-import { getWorkspaceRuntime } from './runtimeSingleton';
+import { getWorkspaceRuntime, waitForWorkspaceHostReady } from './runtimeSingleton';
+import { clearContainerUnavailable, markContainerUnavailable } from './containerUnavailable';
 
 export type ContainerBootOutcome = 'enabled' | 'restricted';
 
@@ -13,6 +14,10 @@ export type ContainerBootOutcome = 'enabled' | 'restricted';
  *    panel is the retry affordance). Success → 'enabled'; failure stays 'restricted' and
  *    does not re-notify.
  *  - No automatic retries: every boot is user-initiated, so a flaky browser never loops.
+ *
+ *  R2：boot 失败（环境不支持 Succinix → 受限）时持久化标记（markContainerUnavailable），
+ *  像主动关闭一样记录——下次进入由 provider 读取标记跳过自动开启。成功 boot / 手动重试
+ *  清除标记重新检测（R3：判定标准不变，只改触发后的持久化行为）。
  */
 export class ContainerAvailabilityController {
   private availability: CapabilityAvailability = 'enabled';
@@ -46,6 +51,8 @@ export class ContainerAvailabilityController {
   }
 
   async retry(): Promise<ContainerBootOutcome> {
+    // R2：手动重试清除受限标记，重新检测（失败会再次落标记）。
+    clearContainerUnavailable();
     this.booting = null;
     return this.boot();
   }
@@ -64,11 +71,18 @@ export class ContainerAvailabilityController {
   private async boot(): Promise<ContainerBootOutcome> {
     this.setStarting(true);
     try {
+      // R1：getWorkspaceRuntime 在 WC 容器就绪即 resolve；waitForWorkspaceHostReady 等待
+      // 后台 Succinix host boot 完成——可用性结论仍以"WC + host 全就绪"为准（判定不变）。
       await getWorkspaceRuntime();
+      await waitForWorkspaceHostReady();
+      // 成功 boot：清除受限标记（环境已可用）。
+      clearContainerUnavailable();
       this.set('enabled');
       return 'enabled';
     } catch (error) {
       this.set('restricted');
+      // R2：受限 → 持久化标记（下次进入不自动开启）。
+      markContainerUnavailable();
       this.notifyFailure(toErrorMessage(error));
       return 'restricted';
     } finally {
