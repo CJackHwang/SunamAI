@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect } from 'react';
 import { generateAutoTitle } from '@/entities/workspace/titleService';
 import type { TranslationKey } from '@/shared/i18n';
-import { readAppSettings } from '@/shared/lib/settings';
+import { resolveChatSettings } from '@/shared/config/settingsStore';
 import type { SidebarContextMenuState, SidebarEditingState, SidebarResourceKind } from './sidebarResources';
 import { sidebarResourceLabel, findSidebarResource } from './sidebarResources';
 import type { Container, Session } from '@/entities/workspace/store';
@@ -53,12 +53,15 @@ export function useSidebarActions(
 
   const handleGenerateTitle = async (type: SidebarResourceKind, id: string) => {
     closeContextMenu();
-    const { apiKey, baseUrl, apiModel } = readAppSettings();
+    const resolved = resolveChatSettings();
+    const apiKey = resolved?.providerApiKey ?? '';
 
     if (!apiKey) {
       alert(t('sidebar.apiKeyRequired'));
       return;
     }
+    const baseUrl = resolved?.providerBaseUrl ?? '';
+    const apiModel = resolved?.apiModel ?? '';
     setGeneratingTitleId(id);
 
     try {

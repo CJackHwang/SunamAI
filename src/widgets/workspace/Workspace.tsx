@@ -10,7 +10,7 @@ import { MobileNavigation } from '@/features/chat/ui/MobileNavigation';
 import { ModelSelector } from '@/features/chat/ui/ModelSelector';
 import { SubagentFooter } from '@/features/chat/ui/SubagentFooter';
 import { generateTitle } from '@/entities/workspace/titleService';
-import type { SunamModel } from '@/shared/config/models';
+import type { PersonaSelectorOption } from '@/shared/config/personas';
 import type { ChatAttachment } from '@/entities/message/types';
 import { useWorkspaceActions, useWorkspaceSelector } from '@/entities/workspace/useWorkspaceStore';
 import { useWorkspaceRuntime } from '@/features/runtime/WorkspaceRuntimeContext';
@@ -36,8 +36,9 @@ interface WorkspaceProps {
   apiKey: string;
   baseUrl: string;
   apiModel: string;
-  sunamModel: SunamModel;
-  setSunamModel: (model: SunamModel) => void;
+  personaName: string;
+  personaOptions: PersonaSelectorOption[];
+  onSelectPersona: (personaId: string) => void;
   onMobileSidebarToggle?: () => void;
   activeSessionId: string | null;
   activeContainerId: string | null;
@@ -46,7 +47,7 @@ interface WorkspaceProps {
   onConversationViewChange: (view: AgentConversationView) => void;
 }
 
-export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSunamModel, onMobileSidebarToggle, activeSessionId, activeContainerId, agent, conversationView, onConversationViewChange }: WorkspaceProps) {
+export default function Workspace({ apiKey, baseUrl, apiModel, personaName, personaOptions, onSelectPersona, onMobileSidebarToggle, activeSessionId, activeContainerId, agent, conversationView, onConversationViewChange }: WorkspaceProps) {
   const { t } = useI18n();
   const { runtime, webcontainer, isReady: isRuntimeReady, error: runtimeError, isRestarting, forceRestart, getContainerRoot, effectiveContainerState, containerStarting } = useWorkspaceRuntime();
   const containerAvailable = effectiveContainerState === 'enabled';
@@ -209,7 +210,7 @@ export default function Workspace({ apiKey, baseUrl, apiModel, sunamModel, setSu
   return (
     <div className="workspace-container" data-active-tab={mobileActive} data-layout={layoutState} data-layout-transition={layoutTransition ?? undefined} onAnimationEnd={finishLayoutTransition}>
       <div className="chat-section">
-        <ModelSelector model={sunamModel} isOpen={isModelMenuOpen} onToggle={() => setIsModelMenuOpen((open) => !open)} onSelect={(model) => { setSunamModel(model); setIsModelMenuOpen(false); }} {...(onMobileSidebarToggle ? { onMobileSidebarToggle } : {})} />
+        <ModelSelector model={personaName} options={personaOptions} isOpen={isModelMenuOpen} onToggle={() => setIsModelMenuOpen((open) => !open)} onSelect={(personaId) => { onSelectPersona(personaId); setIsModelMenuOpen(false); }} {...(onMobileSidebarToggle ? { onMobileSidebarToggle } : {})} />
         <ChatMessageList messages={messages} messageKeys={messageKeys} isRunning={isRunning} containerRef={containerRef} contentRef={contentRef} onScroll={handleChatScroll} bottomInset={(isSubagentView ? 68 : composerHeight) + 16} streamingContent={streamingContent} streamingReasoning={streamingReasoning} streamingToolCalls={streamingToolCalls} {...(streamingKey ? { streamingKey } : {})} isCompacting={isCompacting} {...(userMessageEntrance ? { userMessageEntrance, onUserMessageEntranceConsumed: (requestId: number) => setUserMessageEntrance((current) => current?.id === requestId ? null : current) } : {})} />
         {isSubagentView ? <SubagentFooter isRunning={isRunning} isAtBottom={isAtBottom} taskList={viewedRun && viewedRun.task.plan.length > 0 ? <RunBoard run={viewedRun} events={events} liveOutput={streamingContent} /> : undefined} onStop={() => { void stopSubagent(conversationView.runId); }} onReturn={() => onConversationViewChange({ kind: 'root' })} onScrollToBottom={scrollToBottom} /> : <ChatComposer input={input} attachments={attachments} attachmentError={attachmentError} isRunning={Boolean(isRunning)} isTerminalReady={containerAvailable ? isTerminalReady : !containerStarting} isAtBottom={isAtBottom} canAttach={canAttach} taskList={<RunBoard run={activeRun ?? latestRun} runs={runs} events={events} liveOutput={streamingContent} {...(isRuntimeReady && containerAvailable ? { onResume: () => resumeTask(latestRun) } : {})} onLoadRunEvents={loadRunEvents} />} onFilesSelected={(files) => { void readChatAttachments([...attachments.flatMap((attachment) => attachment.file ?? []), ...files]).then((next) => { setAttachments(next); setAttachmentError(null); }).catch((error) => setAttachmentError(error instanceof Error ? error.message : String(error))); }} onRemoveAttachment={(index) => setAttachments((current) => current.filter((_attachment, candidateIndex) => candidateIndex !== index))} onInputChange={(value, element) => { setInput(value); element.style.height = '44px'; element.style.height = `${Math.min(element.scrollHeight, 120)}px`; }} onSubmit={handleSubmit} onStop={stopTask} onScrollToBottom={scrollToBottom} onHeightChange={setComposerHeight} />}
       </div>

@@ -65,6 +65,10 @@ export interface AgentDriverInit {
  * （PiDriver 转发给 PiSession；CLI 桥忽略）。
  */
 export interface AgentDriverFactoryInput extends AgentDriverInit {
+  /** R4：渠道供应商请求 API（缺省 openai-completions）。 */
+  providerApi?: 'openai-completions' | 'anthropic-messages';
+  /** R5：皮套模型参数（温度等，供应商支持时生效）。 */
+  samplingParams?: Record<string, unknown>;
   /** P3：现有 AgentWorkspaceRuntime（容器/进程/资源）。缺省时容器类工具如实报不可用。 */
   runtime?: AgentWorkspaceRuntime;
   /** P2：v3 事件仓库（pi 事件同步写 v3，刷新后 UI 列表可恢复）。 */

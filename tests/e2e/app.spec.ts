@@ -1,30 +1,17 @@
 import { expect, test } from '@playwright/test';
-
-async function configure(page: import('@playwright/test').Page) {
-  await page.route('https://e2e.invalid/v1/models', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [{ id: 'e2e-model' }] }) }));
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
-  await page.reload();
-  await page.getByLabel('接口地址 (OpenAI Compatible)').fill('https://e2e.invalid/v1');
-  await page.getByLabel('API 密钥').fill('e2e-key');
-  await page.getByLabel('模型').fill('temporary-model');
-  await page.getByRole('button', { name: '获取模型' }).click();
-  await expect(page.getByLabel('模型')).toHaveValue('e2e-model');
-  await page.getByRole('button', { name: '保存并继续' }).click();
-  await expect(page.locator('textarea[placeholder="问 Sunam 任何问题..."]')).toBeEnabled({ timeout: 100_000 });
-}
+import { configureE2E } from './configure';
 
 test('first visit preserves the API configuration gate', async ({ page }) => {
   await page.addInitScript(() => localStorage.clear());
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: '配置' })).toBeVisible();
-  await expect(page.getByText('请先配置 API Key 以开始使用。')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '设置' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '添加供应商' })).toBeVisible();
 });
 
 test('leaving the application requests browser confirmation', async ({ page }) => {
   await page.addInitScript(() => localStorage.clear());
   await page.goto('/');
-  await page.getByRole('heading', { name: '配置' }).click();
+  await page.getByRole('heading', { name: '设置' }).click();
 
   const dialogPromise = page.waitForEvent('dialog');
   const reloadPromise = page.reload();
@@ -36,7 +23,7 @@ test('leaving the application requests browser confirmation', async ({ page }) =
 
 test('settings and session/container CRUD remain durable and isolated', async ({ page }) => {
   test.setTimeout(120_000);
-  await configure(page);
+  await configureE2E(page);
   const history = page.locator('.sidebar-section').filter({ hasText: '历史对话' });
   const containers = page.locator('.sidebar-section').filter({ hasText: '容器' });
   const firstSession = history.locator('.sidebar-session-group').filter({ has: page.locator('.sidebar-session-summary', { hasText: '新对话' }) });

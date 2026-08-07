@@ -1,87 +1,45 @@
-import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import SettingsModal from '../widgets/settings/SettingsModal.tsx';
+import React, { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import { Sidebar } from '../widgets/sidebar/Sidebar.tsx';
 import { configureWorkspaceCreationDefaults, useWorkspaceActions, useWorkspaceSelector } from '@/entities/workspace/useWorkspaceStore';
-import { readAppSettings, saveConnectionSettings, saveSunamModel } from '@/shared/lib/settings';
-import type { SunamModel } from '@/shared/config/models';
-import { useI18n, type Locale } from '@/shared/i18n';
+import { useAppConfig } from '@/features/settings/useAppConfig';
+import { useI18n } from '@/shared/i18n';
 import { LoadingState } from '@/shared/ui/AsyncState';
 import './MainPage.css';
 
 const ConfiguredPage = lazy(() => import('./ConfiguredPage'));
+const SettingsPage = lazy(() => import('./SettingsPage'));
 
 const MainPage: React.FC = () => {
-  const [initialSettings] = useState(readAppSettings);
-  const [apiKey, setApiKey] = useState(initialSettings.apiKey);
-  const [baseUrl, setBaseUrl] = useState(initialSettings.baseUrl);
-  const [apiModel, setApiModel] = useState(initialSettings.apiModel);
-  const { locale, setLocale, t } = useI18n();
+  const config = useAppConfig();
+  const { t } = useI18n();
   configureWorkspaceCreationDefaults({ sessionTitle: t('workspace.defaultSessionName'), containerName: t('workspace.defaultContainerName') });
   const activeSessionId = useWorkspaceSelector((state) => state.activeSessionId);
   const activeContainerId = useWorkspaceSelector((state) => state.activeContainerId);
   const hydrated = useWorkspaceSelector((state) => state.hydrated);
   const persistenceError = useWorkspaceSelector((state) => state.persistenceError);
   const { updateSessionStatus, reloadWorkspace } = useWorkspaceActions();
-  const [sunamModel, setSunamModel] = useState<SunamModel>(initialSettings.sunamModel);
-  
-  const [isSettingsOpen, setIsSettingsOpen] = useState(!apiKey);
-  const [isSettingsClosing, setIsSettingsClosing] = useState(false);
-  const settingsCloseTimer = useRef<number | null>(null);
 
-  useEffect(() => () => {
-    if (settingsCloseTimer.current !== null) window.clearTimeout(settingsCloseTimer.current);
-  }, []);
+  const [view, setView] = useState<'main' | 'settings'>(() => (config.settings ? 'main' : 'settings'));
 
-  const openSettings = () => {
-    if (settingsCloseTimer.current !== null) window.clearTimeout(settingsCloseTimer.current);
-    settingsCloseTimer.current = null;
-    setIsSettingsClosing(false);
-    setIsSettingsOpen(true);
-  };
+  const handleOpenSettings = useCallback(() => setView('settings'), []);
+  const handleBackToMain = useCallback(() => setView('main'), []);
 
-  const closeSettings = () => {
-    if (isSettingsClosing) return;
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-      setIsSettingsOpen(false);
-      return;
-    }
-    setIsSettingsClosing(true);
-    settingsCloseTimer.current = window.setTimeout(() => {
-      setIsSettingsOpen(false);
-      setIsSettingsClosing(false);
-      settingsCloseTimer.current = null;
-    }, 240);
-  };
+  const personaOptions = useMemo(
+    () => config.personas.filter((persona) => persona.enabled).map((persona) => ({ id: persona.id, name: persona.name })),
+    [config.personas],
+  );
 
-  const handleSaveSettings = (key: string, url: string, newApiModel: string) => {
-    setApiKey(key);
-    setBaseUrl(url);
-    setApiModel(newApiModel);
-    saveConnectionSettings({ apiKey: key, baseUrl: url, apiModel: newApiModel });
-    closeSettings();
-  };
+  const settings = config.settings;
+  const activeProviderApi = settings ? config.providers.find((provider) => provider.id === settings.providerId)?.api : undefined;
 
-  const handleSunamModelChange = (model: SunamModel) => {
-    setSunamModel(model);
-    saveSunamModel(model);
-  };
-
+  // 未配置供应商 → 直接进入独立设置页（替代旧弹窗配置门）。
+  if (!settings || view === 'settings') {
+    return <Suspense fallback={<LoadingState className="app-centered-state">{t('common.loading')}</LoadingState>}><SettingsPage config={config} onBack={settings ? handleBackToMain : () => undefined} /></Suspense>;
+  }
 
   return (
     <>
-      {apiKey && hydrated ? <Suspense fallback={<LoadingState className="app-centered-state">{t('common.loading')}</LoadingState>}><ConfiguredPage apiKey={apiKey} baseUrl={baseUrl} apiModel={apiModel} sunamModel={sunamModel} setSunamModel={handleSunamModelChange} activeSessionId={activeSessionId} activeContainerId={activeContainerId} updateSessionStatus={updateSessionStatus} persistenceError={persistenceError} onReloadWorkspace={() => { void reloadWorkspace(); }}>{({ agent, conversationView, onConversationViewChange, isMobileOpen, onCloseMobile, containerAvailable }) => <Sidebar onOpenSettings={openSettings} isMobileOpen={isMobileOpen} onCloseMobile={onCloseMobile} agent={agent} conversationView={conversationView} onConversationViewChange={onConversationViewChange} containerAvailable={containerAvailable} />}</ConfiguredPage></Suspense> : <div className="app-container"><Sidebar onOpenSettings={openSettings} /><main className="app-main">{persistenceError && <div className="persistence-error motion-notice-in" role="alert"><span>{t('persistence.unavailable')}: {persistenceError}</span><button className="btn btn-secondary" onClick={() => { void reloadWorkspace(); }}>{t('common.retry')}</button></div>}<div className="app-workspace">{apiKey ? <LoadingState className="app-centered-state">{persistenceError ? t('persistence.unavailable') : t('common.loading')}</LoadingState> : <div className="app-centered-state"><p>{t('main.configureApiKey')}</p></div>}</div></main></div>}
-      {isSettingsOpen && (
-        <SettingsModal
-          initialApiKey={apiKey}
-          initialBaseUrl={baseUrl}
-          initialModel={apiModel}
-          locale={locale}
-          onLocaleChange={(nextLocale: Locale) => setLocale(nextLocale)}
-          onSave={handleSaveSettings}
-          onClose={() => apiKey && closeSettings()}
-          isExiting={isSettingsClosing}
-        />
-      )}
+      {settings && hydrated ? <Suspense fallback={<LoadingState className="app-centered-state">{t('common.loading')}</LoadingState>}><ConfiguredPage apiKey={settings.providerApiKey} baseUrl={settings.providerBaseUrl} apiModel={settings.apiModel} personaName={settings.personaName} systemPrompt={settings.systemPrompt} samplingParams={settings.params as Record<string, unknown>} {...(activeProviderApi ? { providerApi: activeProviderApi } : {})} personaOptions={personaOptions} onSelectPersona={config.selectPersona} activeSessionId={activeSessionId} activeContainerId={activeContainerId} updateSessionStatus={updateSessionStatus} persistenceError={persistenceError} onReloadWorkspace={() => { void reloadWorkspace(); }}>{({ agent, conversationView, onConversationViewChange, isMobileOpen, onCloseMobile, containerAvailable }) => <Sidebar onOpenSettings={handleOpenSettings} isMobileOpen={isMobileOpen} onCloseMobile={onCloseMobile} agent={agent} conversationView={conversationView} onConversationViewChange={onConversationViewChange} containerAvailable={containerAvailable} />}</ConfiguredPage></Suspense> : <div className="app-container"><Sidebar onOpenSettings={handleOpenSettings} /><main className="app-main">{persistenceError && <div className="persistence-error motion-notice-in" role="alert"><span>{t('persistence.unavailable')}: {persistenceError}</span><button className="btn btn-secondary" onClick={() => { void reloadWorkspace(); }}>{t('common.retry')}</button></div>}<div className="app-workspace"><LoadingState className="app-centered-state">{persistenceError ? t('persistence.unavailable') : t('common.loading')}</LoadingState></div></main></div>}
     </>
   );
 };

@@ -1,26 +1,8 @@
 import { expect, test } from '@playwright/test';
-
-function sse(delta: object): string {
-  return `data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`;
-}
+import { configureE2E } from './configure';
 
 async function configure(page: import('@playwright/test').Page) {
-  await page.route('https://e2e.invalid/v1/models', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [{ id: 'e2e-model' }] }) }));
-  await page.route('https://e2e.invalid/v1/chat/completions', (route) => route.fulfill({ contentType: 'text/event-stream', body: sse({ content: '纯聊天应答' }) }));
-  await page.goto('/');
-  await page.evaluate(() => {
-    localStorage.clear();
-    // TASK-PISWITCH R3：pi 引擎默认开启；这批 e2e 走旧引擎逃生门。
-    localStorage.setItem('sunam_v2_feature_pi_engine', '0');
-  });
-  await page.reload();
-  await page.getByLabel('接口地址 (OpenAI Compatible)').fill('https://e2e.invalid/v1');
-  await page.getByLabel('API 密钥').fill('e2e-key');
-  await page.getByLabel('模型').fill('temporary-model');
-  await page.getByRole('button', { name: '获取模型' }).click();
-  await expect(page.getByLabel('模型')).toHaveValue('e2e-model');
-  await page.getByRole('button', { name: '保存并继续' }).click();
-  await expect(page.locator('textarea[placeholder="问 Sunam 任何问题..."]')).toBeEnabled({ timeout: 100_000 });
+  await configureE2E(page, { routeChat: true, piEngineOff: true });
 }
 
 async function openCapabilityTab(page: import('@playwright/test').Page) {

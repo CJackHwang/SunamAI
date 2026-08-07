@@ -74,6 +74,11 @@ export function useAgentV2(
   updateSessionStatus: UpdateSessionStatus,
   conversationView: AgentConversationView = { kind: 'root' },
   capabilities: { config: CapabilityConfig; containerAvailable: boolean } = { config: DEFAULT_CAPABILITY_CONFIG, containerAvailable: true },
+  // R4/R5：皮套/供应商驱动的运行期配置。systemPrompt 为皮套自定义系统提示词，
+  // samplingParams 为皮套模型参数（温度等），providerApi 为渠道请求 API。
+  personaStyle?: string,
+  samplingParams?: Record<string, unknown>,
+  providerApi?: 'openai-completions' | 'anthropic-messages',
 ) {
   const storeRef = useRef(new AgentEventStore());
   const driverExecutionsRef = useRef(new Map<string, DriverExecution>());
@@ -230,7 +235,7 @@ export function useAgentV2(
       createdAt: now,
       updatedAt: now,
       task,
-      chaos: createChaosContract(sunamModel),
+      chaos: createChaosContract(sunamModel, personaStyle),
       // v3 isRun 要求 maxToolCalls > 0（旧引擎默认 150）；pi 通道自治循环不强制预算，
       // 但该 run 会持久化到 v3（刷新恢复/断点续跑依赖），必须通过 schema 校验。
       budget: { maxModelTurns: 1, maxToolCalls: 1, maxDurationMs: 5 * 60_000 },
@@ -252,6 +257,9 @@ export function useAgentV2(
         apiKey,
         baseUrl,
         apiModel,
+        ...(personaStyle ? { systemPrompt: personaStyle } : {}),
+        ...(samplingParams ? { samplingParams } : {}),
+        ...(providerApi ? { providerApi } : {}),
         sessionId,
         runId,
         run,
@@ -280,7 +288,7 @@ export function useAgentV2(
         driverExecutionsRef.current.delete(runId);
       });
     driverExecutionsRef.current.set(runId, { sessionId, containerId, controller, completion });
-  }, [apiKey, apiModel, appendEvent, baseUrl, capabilities.containerAvailable, enabledTools, runtime, sunamModel, updateRun]);
+  }, [apiKey, apiModel, appendEvent, baseUrl, capabilities.containerAvailable, enabledTools, personaStyle, providerApi, runtime, samplingParams, sunamModel, updateRun]);
 
   const launchTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, attachments?: ChatAttachment[], resume?: AgentResumeState) => {
     const sessionId = overrideSessionId ?? activeSessionId;

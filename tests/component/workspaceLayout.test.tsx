@@ -52,7 +52,7 @@ function renderWorkspace(value: WorkspaceRuntimeContextValue) {
     <I18nProvider>
       <WorkspaceRuntimeContext.Provider value={value}>
         <CapabilityProvider>
-          <Workspace apiKey="" baseUrl="" apiModel="" sunamModel="Sunam 6.9 Pron" setSunamModel={vi.fn()} activeSessionId={null} activeContainerId={null} agent={fakeAgent()} conversationView={{ kind: 'root' }} onConversationViewChange={vi.fn()} />
+          <Workspace apiKey="" baseUrl="" apiModel="" personaName="Sunam 6.9 Pron" personaOptions={[{ id: 'persona-1', name: 'Sunam 6.9 Pron' }]} onSelectPersona={vi.fn()} activeSessionId={null} activeContainerId={null} agent={fakeAgent()} conversationView={{ kind: 'root' }} onConversationViewChange={vi.fn()} />
         </CapabilityProvider>
       </WorkspaceRuntimeContext.Provider>
     </I18nProvider>,

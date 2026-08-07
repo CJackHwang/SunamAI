@@ -8,6 +8,7 @@ import type { IndexedDbSessionRepo } from '../pi/indexedDbSessionStorage';
 import type { PiAgentFactory } from '../pi/piSession';
 import type { PiSubagentCoordinatorOptions } from '../pi/piSubagentCoordinator';
 import type { AgentDriver, AgentDriverCapabilities, AgentDriverId, AgentDriverInit } from './types';
+import type { ProviderApi } from '@/shared/config/providers';
 
 /**
  * PiDriver（TASK-P6 R2）：现有 piSession 的薄适配层，默认驱动。
@@ -20,6 +21,10 @@ import type { AgentDriver, AgentDriverCapabilities, AgentDriverId, AgentDriverIn
  */
 
 export interface PiDriverOptions extends AgentDriverInit {
+  /** R4：渠道供应商请求 API（缺省 openai-completions）。 */
+  providerApi?: ProviderApi;
+  /** R5：皮套模型参数（温度等，供应商支持时生效）。 */
+  samplingParams?: Record<string, unknown>;
   /** P3：现有 AgentWorkspaceRuntime（容器/进程/资源）。 */
   runtime?: AgentWorkspaceRuntime;
   /** P2：v3 事件仓库（pi 事件同步写 v3）。 */
