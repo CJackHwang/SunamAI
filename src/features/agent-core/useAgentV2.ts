@@ -21,7 +21,7 @@ import type { AgentDriver } from './driver/types';
 type UpdateSessionStatus = (id: string, status: SessionStatus) => void;
 const MESSAGE_WINDOW_SIZE = 250;
 /** 驱动层运行记录（默认 PiDriver；CLI 桥浏览器壳内优雅拒绝）。 */
-interface DriverExecution { sessionId: string; containerId: string; controller: AbortController; completion: Promise<void>; }
+interface DriverExecution { sessionId: string; containerId: string; controller: AbortController; completion: Promise<void>; steer: (message: string) => boolean; }
 interface StreamingState { streamId: string; content: string; reasoning: string; toolCalls: NonNullable<Message['tool_calls']>; }
 export type AgentConversationView = { kind: 'root' } | { kind: 'subagent'; sessionId: string; runId: string };
 
@@ -293,7 +293,7 @@ export function useAgentV2(
       .finally(() => {
         driverExecutionsRef.current.delete(runId);
       });
-    driverExecutionsRef.current.set(runId, { sessionId, containerId, controller, completion });
+    driverExecutionsRef.current.set(runId, { sessionId, containerId, controller, completion, steer: (message) => driver.steer?.(message) ?? false });
   }, [apiKey, apiModel, appendEvent, baseUrl, capabilities.containerAvailable, enabledTools, personaStyle, providerApi, runtime, samplingParams, sunamModel, updateRun]);
 
   const launchTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, attachments?: ChatAttachment[], resume?: AgentResumeState) => {
@@ -356,11 +356,15 @@ export function useAgentV2(
     return false;
   }, []);
 
-  const guideActiveTask = useCallback(async (_message: string): Promise<boolean> => {
-    // R4（旧引擎删除）：所有运行均走驱动层（pi）。pi 通道未接入用户中途引导
-    // （steer 仅面向子 agent 编排；CLI 桥不支持 steer），如实返回 false 交由 UI 提示（R5）。
-    return false;
-  }, []);
+  const guideActiveTask = useCallback(async (message: string): Promise<boolean> => {
+    // R6：用户中途引导经驱动层 steer 接入——PiDriver 转发给 PiSession.steer，
+    // pi Agent 把引导排队到当前 assistant turn 之后注入（对齐旧引擎 queuedUserGuidance
+    // 语义）；外部 CLI 桥不支持 steer 时如实返回 false。
+    if (!activeSessionId) return false;
+    const executions = [...driverExecutionsRef.current.values()].filter((execution) => execution.sessionId === activeSessionId);
+    if (!executions.length) return false;
+    return executions.at(-1)!.steer(message);
+  }, [activeSessionId]);
 
   const deleteSubagent = useCallback(async (sessionId: string, runId: string): Promise<boolean> => {
     try {

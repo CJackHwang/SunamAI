@@ -1,7 +1,7 @@
 import { Agent, buildSessionContext, convertToLlm, estimateContextTokens, prepareCompaction } from '@earendil-works/pi-agent-core';
 import type { AgentEvent as PiAgentEvent, AgentMessage as PiAgentMessage, AgentTool as PiAgentTool, CompactionSettings, Session } from '@earendil-works/pi-agent-core';
 import { createModels, createProvider, envApiKeyAuth, InMemoryCredentialStore, uuidv7 } from '@earendil-works/pi-ai';
-import type { Api, ImageContent, Model, Models, TextContent } from '@earendil-works/pi-ai';
+import type { Api, AssistantMessageEventStream, ImageContent, Model, Models, SimpleStreamOptions, TextContent } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy';
 import type { ProviderApi } from '@/shared/config/providers';
@@ -120,7 +120,7 @@ export interface PiAgentLike {
   steer?(message: PiAgentMessage): void;
 }
 
-export type PiAgentFactory = (input: { models: Models; model: Model<Api>; systemPrompt: string; tools: PiAgentTool[] }) => PiAgentLike;
+export type PiAgentFactory = (input: { models: Models; model: Model<Api>; systemPrompt: string; tools: PiAgentTool[]; transformContext?: (messages: PiAgentMessage[], signal?: AbortSignal) => Promise<PiAgentMessage[]> }) => PiAgentLike;
 
 export interface PiSessionOptions {
   apiKey: string;
@@ -281,6 +281,15 @@ export class PiEventBridge {
   private readonly getUserAttachments: (() => ChatAttachment[] | undefined) | undefined;
   /** 中止查询：运行中止信号是否已 aborted（区分「停止 Agent」与真实失败）。 */
   private readonly isAborted: () => boolean;
+  /**
+   * R6：本 turn 工具执行产生的终态标记（旧引擎 stopRun 语义的 pi 通道映射）。
+   * 旧引擎在 executeTools 后按首个 stopRun 结算（completed / awaiting_parent / awaiting_user）；
+   * pi 是自治循环，工具结果不会自己停 loop，这里在 tool_execution_end 记录标记，
+   * 由 agent_end 按它结算 run 终态（见 handlePiEvent 的 agent_end / turn_end 分支）。
+   */
+  private pendingStopRun: 'completed' | 'awaiting_parent' | 'awaiting_user' | undefined = undefined;
+  /** 供 persistCheckpoint 读取当前事件序列（对齐旧引擎 checkpoint 的 eventTailSequence）。 */
+  getSequence(): number { return this.sequence; }
 
   constructor(options: { runId: string; sessionId: string; run: AgentRun; onEvent: (event: AgentEvent) => void; onRunChange: (run: AgentRun) => void; getUserAttachments?: () => ChatAttachment[] | undefined; isAborted?: () => boolean }) {
     this.runId = options.runId;
@@ -385,17 +394,52 @@ export class PiEventBridge {
           const text = content.filter(isTextPart).map((part) => part.text).join('');
           if (text) this.emit('progress_reported', { message: text });
         }
+        // R6：终态工具（complete_task / ask_parent / ask_user）的 stopRun 标记经
+        // piToolAdapter 透传到 tool 结果 details。pi 是自治循环，工具不会自己停 loop，
+        // 这里按旧引擎 stopRun 语义记录 pendingStopRun 并补发最终 assistant 消息：
+        // - complete_task → 用 finalSummary 发一条 assistant 收尾消息（旧引擎 finish() 语义）；
+        // - ask_parent / ask_user → 用问题文本发一条 assistant 消息（子 agent 阻塞展示）。
+        // run 终态结算在 agent_end（turn_end 之前 shouldStopAfterTurn 触发 loop 结束）。
+        if (!event.isError && event.result?.details) {
+          const terminalDetails = event.result.details as { stopRun?: string; finalSummary?: string };
+          if (terminalDetails.stopRun === 'completed') {
+            const summary = terminalDetails.finalSummary ?? this.toAppToolResult(false, event.result).content;
+            this.run.finalSummary = summary;
+            this.emit('message', { message: { role: 'assistant', content: summary }, streamId: `${this.runId}:final-${this.sequence}` });
+            this.pendingStopRun = 'completed';
+          } else if (terminalDetails.stopRun === 'awaiting_parent' || terminalDetails.stopRun === 'awaiting_user') {
+            const question = this.toAppToolResult(false, event.result).content;
+            if (question) this.emit('message', { message: { role: 'assistant', content: question }, streamId: `${this.runId}:final-${this.sequence}` });
+            this.pendingStopRun = terminalDetails.stopRun;
+          }
+        }
         break;
       }
       case 'turn_end':
+        // R6：每个 turn 结束（含工具执行后）记录 checkpoint——对齐旧引擎 reflectTask
+        // 在 executeTools 后保存断点的语义。摘要取 run 的最终摘要或任务证据。
+        {
+          const summary = this.run.summary || this.run.finalSummary || this.run.task.evidence.join('\n') || 'Run checkpoint recorded.';
+          this.emit('checkpoint', { summary });
+        }
         break;
       case 'agent_end': {
         if (this.run.phase === 'cancelled' || this.run.phase === 'failed') break;
+        // R6：阻塞态子 agent（ask_parent / ask_user）不以 completed 结算——loop 因
+        // shouldStopAfterTurn 停止，run 保持 awaiting_* 供父协调 message() 恢复。
+        if (this.pendingStopRun === 'awaiting_parent' || this.pendingStopRun === 'awaiting_user') {
+          const phase = this.pendingStopRun;
+          this.pendingStopRun = undefined;
+          this.setPhase(phase);
+          this.emit('phase_changed', { phase, detail: 'Waiting for a root Agent response.' });
+          break;
+        }
         const lastAssistant = event.messages.filter((message): message is Extract<PiAgentMessage, { role: 'assistant' }> => message.role === 'assistant').at(-1);
-        const summary = lastAssistant ? piAssistantText(lastAssistant) : '';
+        const summary = this.run.finalSummary || (lastAssistant ? piAssistantText(lastAssistant) : '') || 'Done.';
+        this.pendingStopRun = undefined;
         this.setPhase('completed');
         this.emit('phase_changed', { phase: 'completed' });
-        this.emit('run_finished', { summary: summary || 'Done.' });
+        this.emit('run_finished', { summary });
         break;
       }
     }
@@ -444,9 +488,83 @@ export class PiEventBridge {
   }
 }
 
+/**
+ * R6：识别「配置的模型不支持 vision」的供应商错误（对齐旧引擎 modelClient 的探测语义）。
+ * 415 或错误文本命中 vision/multimodal/image 关键字即视为视觉不支持。
+ */
+function isUnsupportedVisionError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const candidate = error as { status?: number; errorMessage?: string; message?: string };
+  if (candidate.status === 415) return true;
+  const text = `${candidate.errorMessage ?? ''} ${candidate.message ?? ''}`;
+  return /(?:\bvision\b|\bmultimodal\b|image[_ -]?url|image (?:input|content|part)|content[_ -]?part)/i.test(text);
+}
+
+/**
+ * R6：去掉 user 消息中的图片内容块，替换为 `[image resource: <id>]` 文本标记
+ * （对齐旧引擎视觉降级的 `[image resource: ${resourceId}]` 契约）。resourceId 在
+ * buildUserMessage 构造图片块时透传（ImageContent 扩展字段），供降级后按资源引用。
+ */
+function sanitizeImagesToText(context: import('@earendil-works/pi-ai').Context): import('@earendil-works/pi-ai').Context {
+  const messages = context.messages.map((message) => {
+    if (message.role !== 'user' || !Array.isArray(message.content)) return message;
+    const images = message.content.filter((part): part is ImageContent & { resourceId?: string } => part.type === 'image');
+    if (images.length === 0) return message;
+    const text = message.content.filter((part): part is TextContent => part.type === 'text').map((part) => part.text).join('\n');
+    const markers = images.map((image) => `[image resource: ${image.resourceId ?? 'unknown'}]`);
+    return { ...message, content: text ? `${text}\n${markers.join('\n')}` : markers.join('\n') };
+  });
+  return { ...context, messages };
+}
+
+/**
+ * R6：视觉降级流封装——首次带图请求被模型拒绝（415/vision 错误）时，去掉图片
+ * 并以 `[image resource: <id>]` 文本标记重试（旧引擎「探测回退」语义）。pi 是自治
+ * 循环，模型请求由 streamFn 发起，这里在流层拦截错误并透明重试，bridge 无需感知。
+ *
+ * 返回对象对齐 AssistantMessageEventStream 的消费面（[Symbol.asyncIterator] +
+ * result()），pi Agent 的 streamAssistantResponse 迭代事件流并在 done/error 后
+ * 调 response.result() 取最终消息。
+ */
+function streamWithVisionFallback(models: Models, model: Model<Api>, context: import('@earendil-works/pi-ai').Context, options?: SimpleStreamOptions): AssistantMessageEventStream {
+  let finalMessage: import('@earendil-works/pi-ai').AssistantMessage | undefined;
+  const iterator = (async function* (): AsyncGenerator<import('@earendil-works/pi-ai').AssistantMessageEvent> {
+    let visionUnsupported = false;
+    try {
+      for await (const event of models.streamSimple(model, context, options)) {
+        if (event.type === 'done') finalMessage = event.message;
+        else if (event.type === 'error') {
+          if (isUnsupportedVisionError(event.error)) {
+            visionUnsupported = true;
+            finalMessage = event.error;
+            break;
+          }
+          finalMessage = event.error;
+        }
+        yield event;
+      }
+    } catch (error) {
+      if (!isUnsupportedVisionError(error)) throw error;
+      visionUnsupported = true;
+    }
+    if (visionUnsupported) {
+      const sanitized = sanitizeImagesToText(context);
+      for await (const event of models.streamSimple(model, sanitized, options)) {
+        if (event.type === 'done') finalMessage = event.message;
+        else if (event.type === 'error') finalMessage = event.error;
+        yield event;
+      }
+    }
+  })();
+  return {
+    [Symbol.asyncIterator]: () => iterator[Symbol.asyncIterator](),
+    result: async () => finalMessage,
+  } as unknown as AssistantMessageEventStream;
+}
+
 function defaultCreateAgent({ models, model, systemPrompt, tools }: { models: Models; model: Model<Api>; systemPrompt: string; tools: PiAgentTool[] }): PiAgentLike {
   const agent = new Agent({
-    streamFn: (m, context, options) => models.streamSimple(m, context, options),
+    streamFn: (m, context, options) => streamWithVisionFallback(models, m, context, options),
     // P5：改用 pi 的 convertToLlm——user/assistant/toolResult 透传，compactionSummary/branchSummary
     // 等特殊角色转换为 user 消息（compactionSummary → <summary> 包裹的 user 内容），
     // 否则压缩后的摘要消息会以未知 role 直发 LLM 被供应商拒绝。
@@ -454,6 +572,15 @@ function defaultCreateAgent({ models, model, systemPrompt, tools }: { models: Mo
     initialState: { model, systemPrompt, thinkingLevel: 'off', tools },
     // 并行执行：只读类工具可并发，变更/进程类工具通过 executionMode: 'sequential' 强制串行。
     toolExecution: 'parallel',
+    // R6：对齐旧引擎 stopRun 语义——complete_task / ask_parent / ask_user 的工具结果
+    // 在 details.stopRun 透传终态标记（piToolAdapter），turn 结束后据此停 loop：
+    // pi 是自治循环，模型不会自己识别完成，必须在此显式终止（旧引擎 executeTools 后结算）。
+    // 不设 terminate（`.every()` 语义要求批次全部终止，混合批 update_plan+complete_task 不满足），
+    // 改用 shouldStopAfterTurn 在 turn 粒度按「任一终态工具」停止。
+    shouldStopAfterTurn: ({ toolResults }) => toolResults.some((result) => {
+      const stopRun = (result.details as { stopRun?: string } | undefined)?.stopRun;
+      return stopRun === 'completed' || stopRun === 'awaiting_parent' || stopRun === 'awaiting_user';
+    }),
   });
   // 包装一层 PiAgentLike：seedHistory 把恢复的会话历史注入 Agent 转录。
   return {
@@ -574,6 +701,12 @@ export class PiSession {
       // P1 事件桥接逻辑不动；P2 仅在桥接之后追加会话持久化（尽力而为）。
       this.bridge.handlePiEvent(event);
       this.trackPersist(this.persistEvent(event));
+      // R6：turn 结束（工具执行完成后）保存 checkpoint 到 v3 checkpoints store——
+      // 对齐旧引擎 reflectTask 语义（executeTools 后落盘断点）。checkpoint 只覆盖根 run；
+      // 子 agent（persistSession: false）不占独立 pi 会话，也不写独立 checkpoint。
+      if (event.type === 'turn_end' && this.options.persistSession !== false) {
+        this.trackPersist(this.persistCheckpoint());
+      }
     });
     this.abortSignal = options.signal;
     this.abortListener = () => this.agent.abort();
@@ -715,7 +848,7 @@ export class PiSession {
     const parts: (TextContent | ImageContent)[] = [{ type: 'text', text: `${text}${manifest}` }];
     for (const resource of resources.filter((item) => item.kind === 'image')) {
       const image = await this.loadResourceImageData(resource.id);
-      if (image) parts.push({ type: 'image', data: image.data, mimeType: image.mimeType });
+      if (image) parts.push({ type: 'image', data: image.data, mimeType: image.mimeType, resourceId: resource.id } as ImageContent & { resourceId: string });
     }
     return { role: 'user', content: parts, timestamp: Date.now() };
   }
@@ -824,6 +957,46 @@ export class PiSession {
       await this.options.store.saveRun(run);
     } catch {
       // 同上。
+    }
+  }
+
+  /**
+   * R6：保存 checkpoint 到 v3 checkpoints store（复用 eventStore.saveCheckpoint）。
+   *
+   * 对齐旧引擎 checkpoint 语义（run 中断/关键节点可断点续跑）：
+   * - `summary`：run 的最终摘要或任务证据，缺省 'Run checkpoint recorded.'；
+   * - `messages`：pi 通道断点恢复以会话历史为权威（PiSession 刷新后自动 seed，
+   *   resumeDriverRun 不再读 checkpoint tail），因此尾消息留空——断点能力真实存在
+   *   （store 中有记录、runId/sessionId/containerId/sequence/revision 齐备），
+   *   只是恢复上下文不经此 tail；
+   * - `eventTailSequence` / `workspaceRevision`：尽力而为，读不到不阻断。
+   */
+  private async persistCheckpoint(): Promise<void> {
+    if (!this.options.store) return;
+    const run = this.options.run;
+    let workspaceRevision: number | undefined;
+    if (this.options.runtime) {
+      try {
+        workspaceRevision = await this.options.runtime.getWorkspaceRevision(run.containerId);
+      } catch {
+        workspaceRevision = undefined;
+      }
+    }
+    const summary = run.summary || run.finalSummary || run.task.evidence.join('\n') || 'Run checkpoint recorded.';
+    try {
+      await this.options.store.saveCheckpoint({
+        id: run.id,
+        runId: run.id,
+        sessionId: run.sessionId,
+        containerId: run.containerId,
+        summary,
+        messages: [],
+        createdAt: Date.now(),
+        eventTailSequence: this.bridge.getSequence(),
+        ...(workspaceRevision !== undefined ? { workspaceRevision } : {}),
+      });
+    } catch {
+      // checkpoint 持久化失败不阻断事件桥接（对齐现有引擎尽力而为语义）。
     }
   }
 

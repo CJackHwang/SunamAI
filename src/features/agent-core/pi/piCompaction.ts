@@ -50,11 +50,11 @@ export const PI_COMPACTION_TRIGGER_RATIO = 0.9;
 /** 对齐现有引擎的 90% 压缩语义：只保留 ~10% 近期上下文。 */
 export const PI_COMPACTION_RETENTION_RATIO = 0.1;
 
-/** 自定义摘要附加指令：对齐现有引擎摘要语义（任务目标 / 已完成 / 待办 / 关键约束）。 */
+/** 自定义摘要附加指令：对齐现有引擎摘要语义（任务目标 / 已完成 / 待办 / 关键约束）。
+ *  R6：采用旧引擎 context.ts 的原文措辞（含 e2e 语义压缩探测锚点），使 pi 通道的
+ *  压缩请求与旧引擎保持同一契约。 */
 export const PI_COMPACTION_CUSTOM_INSTRUCTIONS =
-  'This is a coding agent session. Produce a compact factual continuation record. '
-  + 'Preserve the task goal, completed work, pending work, key constraints, decisions, '
-  + 'exact file paths, and unresolved risks. Never include hidden reasoning.';
+  'Create a compact factual continuation record. Preserve the task, constraints, decisions, file changes, failed attempts, verification evidence, user feedback, active processes, resources by ID, and unresolved risks. Never include hidden reasoning. Tools are disabled.';
 
 /** 派生的 pi 压缩配置：阈值对齐现有引擎触发点，保留量对齐 ~10%。 */
 export interface PiCompactionConfig {

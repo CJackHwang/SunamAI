@@ -235,7 +235,22 @@ export function createPiToolAdapter(tool: RegisteredTool, getContext: () => Tool
       const result = await tool.execute(parsed.data, { ...context, signal: signal ?? context.signal });
       // pi 执行模型：失败 throw，不编码错误到 content。
       if (!result.ok) throw new Error(result.content);
-      return toPiToolResult(result, loadImageData);
+      const piResult = await toPiToolResult(result, loadImageData);
+      // R6：对齐旧引擎 stopRun 语义——complete_task / ask_parent / ask_user 返回
+      // stopRun 终态标记（controlTools），pi 是自治循环不认 stopRun，这里把标记透传
+      // 到 tool 结果 details，供 PiEventBridge（finalSummary/阻塞态结算）与
+      // defaultCreateAgent.shouldStopAfterTurn（turn 后停 loop）消费。
+      if (result.stopRun === 'completed' || result.stopRun === 'awaiting_parent' || result.stopRun === 'awaiting_user') {
+        return {
+          ...piResult,
+          details: {
+            ...(result.data as Record<string, unknown> | undefined),
+            stopRun: result.stopRun,
+            ...(result.finalSummary !== undefined ? { finalSummary: result.finalSummary } : {}),
+          },
+        };
+      }
+      return piResult;
     },
   };
 }

@@ -125,6 +125,8 @@ interface QueuedChild {
   startedAt?: number;
   terminalSummary?: string;
   terminalError?: string;
+  /** R6：子 agent 经 ask_parent/ask_user 阻塞等待父协调（会话保留，message() 恢复）。 */
+  blocked?: boolean;
 }
 
 export class PiSubagentCoordinator implements SubagentHost {
@@ -216,9 +218,17 @@ export class PiSubagentCoordinator implements SubagentHost {
   async message(runId: string, message: string): Promise<boolean> {
     const child = this.children.get(runId);
     if (!child || TERMINAL_STATUSES.has(child.task.status)) return false;
+    child.task = { ...child.task, status: 'running', updatedAt: Date.now(), summary: `Root Agent guidance: ${message}` };
+    await this.saveTask(child.task);
+    if (child.blocked && child.session) {
+      // R6：恢复阻塞等待的子 agent——阻塞时 loop 已结束（shouldStopAfterTurn），
+      // 重新 prompt 启动新 loop，引导消息作为新 user 消息进入转录。
+      child.blocked = false;
+      void this.resumeBlockedChild(child, message);
+      return true;
+    }
     if (child.session) {
-      child.task = { ...child.task, status: 'running', updatedAt: Date.now(), summary: `Root Agent guidance: ${message}` };
-      await this.saveTask(child.task);
+      // 活跃子 agent：steer 把消息排队到当前 assistant turn 之后注入。
       child.session.steer(message);
     } else {
       // 尚未启动（排队中）：入队，启动后注入。
@@ -301,16 +311,47 @@ export class PiSubagentCoordinator implements SubagentHost {
     child.startedAt = Date.now();
     child.task = { ...child.task, status: 'running', updatedAt: child.startedAt };
     await this.saveTask(child.task);
-    let session: PiSession;
+    const session = this.createChildSession(child);
+    child.session = session;
+    // 父协调消息在启动前已到达：启动后立即注入（steer 队列，当前 turn 后生效）。
+    for (const message of child.messages) session.steer(message);
+    child.messages = [];
     try {
-      session = this.createChildSession(child);
-      child.session = session;
-      // 父协调消息在启动前已到达：启动后立即注入（steer 队列，当前 turn 后生效）。
-      for (const message of child.messages) session.steer(message);
-      child.messages = [];
       await session.prompt(child.task.prompt);
     } finally {
-      // 运行结束即销毁会话（解除订阅与外部信号转发）；已完成运行上 abort 为 no-op。
+      // R6：阻塞等待父协调的子 agent（ask_parent/ask_user）保留会话，供 message() 恢复；
+      // 终态子 agent 立即销毁（解除订阅与外部信号转发；已完成运行上 abort 为 no-op）。
+      if (child.run.phase !== 'awaiting_parent' && child.run.phase !== 'awaiting_user') {
+        session.destroy();
+        if (child.session === session) delete child.session;
+      }
+    }
+    if (child.run.phase === 'awaiting_parent' || child.run.phase === 'awaiting_user') {
+      await this.publishBlocked(child);
+      return;
+    }
+    await this.finishChild(child, await this.terminalNotification(child));
+  }
+
+  /** R6：子 agent 阻塞等待父协调——发布 blocked 通知但不结算终态（不设 terminalSettled）。 */
+  private async publishBlocked(child: QueuedChild): Promise<void> {
+    // 阻塞摘要取 ask_parent/ask_user 的问题文本（桥接已把问题作为 assistant 消息发出）。
+    const question = [...child.events].reverse().find((event): event is Extract<AgentEvent, { kind: 'message'; message: { role: string; content: unknown } }> =>
+      event.kind === 'message' && event.message.role === 'assistant');
+    if (question && typeof question.message.content === 'string') child.terminalSummary = question.message.content;
+    const notification = await this.terminalNotification(child);
+    child.blocked = true;
+    this.publish(child, notification);
+  }
+
+  /** R6：恢复阻塞子 agent——重新 prompt（引导消息作为新 user 消息进入转录），完成后结算终态。 */
+  private async resumeBlockedChild(child: QueuedChild, message: string): Promise<void> {
+    try {
+      await child.session?.prompt(message);
+    } catch (error) {
+      this.finishUnexpectedFailure(child, error);
+      return;
+    } finally {
       child.session?.destroy();
       delete child.session;
     }
