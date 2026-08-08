@@ -120,7 +120,19 @@ export interface PiAgentLike {
   steer?(message: PiAgentMessage): void;
 }
 
-export type PiAgentFactory = (input: { models: Models; model: Model<Api>; systemPrompt: string; tools: PiAgentTool[]; transformContext?: (messages: PiAgentMessage[], signal?: AbortSignal) => Promise<PiAgentMessage[]> }) => PiAgentLike;
+export type PiAgentFactory = (input: {
+  models: Models;
+  model: Model<Api>;
+  systemPrompt: string;
+  tools: PiAgentTool[];
+  transformContext?: (messages: PiAgentMessage[], signal?: AbortSignal) => Promise<PiAgentMessage[]>;
+  /**
+   * P5：下一轮前的压缩回调（agent loop 的 prepareNextTurnWithContext）。
+   * 返回压缩后的上下文消息（无压缩返回 undefined）——pi 是自治循环，用户中途引导经 steer
+   * 排队到当前 turn 之后，此回调在 steering 注入前运行，使超大上下文在进入下一轮前先压缩。
+   */
+  prepareNextTurn?: () => Promise<PiAgentMessage[] | undefined>;
+}) => PiAgentLike;
 
 export interface PiSessionOptions {
   apiKey: string;
@@ -159,6 +171,8 @@ export interface PiSessionOptions {
   createCoordinator?: (deps: PiSubagentCoordinatorOptions) => SubagentHost;
   /** P4：子 agent 场景——跳过 pi 会话仓库持久化（子 run 不占独立 pi 会话，避免历史串扰）。 */
   persistSession?: boolean;
+  /** P4：子 agent 清理——新根 run 启动时编排器剪掉上一根族的终态子 run，通知 UI 移除对应行。 */
+  onChildrenPruned?: (runIds: string[]) => void;
   /** P5：覆盖压缩设置（测试注入点）；缺省按 apiModel 对齐现有引擎 90% 语义。 */
   compactionSettings?: CompactionSettings;
   /** P5：覆盖压缩阈值上下文窗口（测试注入点）；缺省取 profileForModel(apiModel).contextWindowTokens。 */
@@ -183,6 +197,26 @@ const EMPTY_USAGE = {
 
 const isTextPart = (part: unknown): part is { type: 'text'; text: string } =>
   typeof part === 'object' && part !== null && (part as { type?: string }).type === 'text' && typeof (part as { text?: string }).text === 'string';
+
+/**
+ * 递归剔除 undefined 字段（含数组中的 undefined 元素），使消息可被 pi Session 的
+ * assertJsonSerializable 接受（Durable payload 拒收 undefined）。用于会话持久化——
+ * 供应商/mock 的可选字段（responseId/rawStopReason 等）未回填时为 undefined，直接写入会抛错。
+ */
+function stripUndefined(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefined(item)).filter((item) => item !== undefined);
+  }
+  if (value !== null && typeof value === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (item === undefined) continue;
+      result[key] = stripUndefined(item);
+    }
+    return result;
+  }
+  return value;
+}
 
 const isThinkingPart = (part: unknown): part is { type: 'thinking'; thinking: string } =>
   typeof part === 'object' && part !== null && (part as { type?: string }).type === 'thinking' && typeof (part as { thinking?: string }).thinking === 'string';
@@ -290,6 +324,8 @@ export class PiEventBridge {
   private pendingStopRun: 'completed' | 'awaiting_parent' | 'awaiting_user' | undefined = undefined;
   /** 供 persistCheckpoint 读取当前事件序列（对齐旧引擎 checkpoint 的 eventTailSequence）。 */
   getSequence(): number { return this.sequence; }
+  /** 用户中途引导（steer）已即时投递到 UI 的 user 消息——agent 注入时按引用去重，避免双显。 */
+  private readonly steeredMessages = new Set<PiAgentMessage>();
 
   constructor(options: { runId: string; sessionId: string; run: AgentRun; onEvent: (event: AgentEvent) => void; onRunChange: (run: AgentRun) => void; getUserAttachments?: () => ChatAttachment[] | undefined; isAborted?: () => boolean }) {
     this.runId = options.runId;
@@ -310,6 +346,8 @@ export class PiEventBridge {
         break;
       case 'message_start':
         if (event.message.role === 'user') {
+          // P5：用户中途引导（steer）已在 PiSession.steer 即时投递到 UI，agent 注入时按引用去重。
+          if (this.steeredMessages.has(event.message)) break;
           this.streamIndex += 1;
           const appMessage = piMessageToAppMessage(event.message);
           const attachments = this.getUserAttachments?.();
@@ -486,6 +524,26 @@ export class PiEventBridge {
   emitCompactionStatus(active: boolean): void {
     this.emit('context_compaction_status', { active, transient: true });
   }
+
+  /**
+   * P5：用户中途引导（steer）即时投递到 UI——对齐旧引擎 enqueueUserGuidance 的
+   * emitProjectedMessage 语义（旧引擎在入队时就把 user 消息投影到聊天流）。记录消息引用，
+   * 使 agent 在下一轮注入同一 steer 消息时按引用去重（见 message_start 分支）。
+   */
+  emitUserGuidance(message: PiAgentMessage): void {
+    if (message.role !== 'user') return;
+    this.steeredMessages.add(message);
+    this.streamIndex += 1;
+    this.emit('message', { message: piMessageToAppMessage(message), streamId: `${this.runId}:user-${this.streamIndex}` });
+  }
+
+  /**
+   * P5：压缩完成事件（非 transient，进 v3 事件流）——对齐旧引擎 context_compacted 契约，
+   * RunBoard 据此渲染「上下文已自动压缩 · before → after tokens」。
+   */
+  emitCompacted(stats: { summary: string; beforeTokens: number; afterTokens: number }): void {
+    this.emit('context_compacted', { summary: stats.summary, fallback: false, beforeTokens: stats.beforeTokens, afterTokens: stats.afterTokens });
+  }
 }
 
 /**
@@ -562,7 +620,13 @@ function streamWithVisionFallback(models: Models, model: Model<Api>, context: im
   } as unknown as AssistantMessageEventStream;
 }
 
-function defaultCreateAgent({ models, model, systemPrompt, tools }: { models: Models; model: Model<Api>; systemPrompt: string; tools: PiAgentTool[] }): PiAgentLike {
+function defaultCreateAgent({ models, model, systemPrompt, tools, prepareNextTurn }: {
+  models: Models;
+  model: Model<Api>;
+  systemPrompt: string;
+  tools: PiAgentTool[];
+  prepareNextTurn?: () => Promise<PiAgentMessage[] | undefined>;
+}): PiAgentLike {
   const agent = new Agent({
     streamFn: (m, context, options) => streamWithVisionFallback(models, m, context, options),
     // P5：改用 pi 的 convertToLlm——user/assistant/toolResult 透传，compactionSummary/branchSummary
@@ -581,6 +645,21 @@ function defaultCreateAgent({ models, model, systemPrompt, tools }: { models: Mo
       const stopRun = (result.details as { stopRun?: string } | undefined)?.stopRun;
       return stopRun === 'completed' || stopRun === 'awaiting_parent' || stopRun === 'awaiting_user';
     }),
+    // P5：压缩在 turn 之间发生——prepareNextTurnWithContext 在 steering 注入前运行，
+    // 返回压缩后的上下文（摘要 + 保留尾）替换下一轮的 currentContext。
+    ...(prepareNextTurn ? {
+      prepareNextTurnWithContext: async (nextTurnContext) => {
+        const compacted = await prepareNextTurn();
+        if (!compacted) return undefined;
+        return {
+          context: {
+            systemPrompt: nextTurnContext.context.systemPrompt,
+            messages: compacted,
+            ...(nextTurnContext.context.tools ? { tools: nextTurnContext.context.tools } : {}),
+          },
+        };
+      },
+    } : {}),
   });
   // 包装一层 PiAgentLike：seedHistory 把恢复的会话历史注入 Agent 转录。
   return {
@@ -664,7 +743,15 @@ export class PiSession {
       loadImageData: options.loadImageData ?? ((resourceId) => this.loadResourceImageData(resourceId)),
     });
     const createAgent = options.createAgent ?? defaultCreateAgent;
-    this.agent = createAgent({ models, model, systemPrompt, tools });
+    this.agent = createAgent({
+      models,
+      model,
+      systemPrompt,
+      tools,
+      // P5：turn 之间压缩——steering 注入前先检查阈值（compactForNextTurn 引用 this.bridge/this.session，
+      // 回调在 agent loop 中才执行，彼时构造已完成）。
+      prepareNextTurn: () => this.compactForNextTurn(),
+    });
     const createSessionRepo = options.createSessionRepo ?? (() => new IndexedDbSessionRepo());
     // 会话 ID 与现有 UI 会话 ID 对齐：按 sessionId 打开或创建持久化 pi 会话。
     // P4：子 agent 场景（persistSession: false）跳过会话仓库，避免子 run 串扰根会话历史。
@@ -747,6 +834,7 @@ export class PiSession {
       onEvent: this.options.onEvent,
       onRunChange: this.options.onRunChange,
       ...(this.options.createAgent ? { createAgent: this.options.createAgent } : {}),
+      ...(this.options.onChildrenPruned ? { onChildrenPruned: this.options.onChildrenPruned } : {}),
       createSession: (childOptions) => new PiSession(childOptions),
     };
   }
@@ -881,13 +969,40 @@ export class PiSession {
     if (!this.session || !this.compactionSettings.enabled) return;
     const entries = await this.session.findEntries({ order: 'oldestFirst' });
     if (!isCompactionNeeded(entries, this.compactionContextWindow, this.compactionSettings)) return;
+    const compacted = await this.runCompaction(entries);
+    if (compacted) this.agent.seedHistory?.(compacted);
+  }
+
+  /**
+   * P5：turn 之间压缩（agent loop 的 prepareNextTurnWithContext 回调）。
+   * pi 是自治循环，用户中途引导经 steer 排队到当前 turn 之后；本回调在 steering 注入前
+   * 运行——先冲刷会话写入（使估算覆盖刚落定的超大 assistant 消息），达阈值则压缩并返回
+   * 压缩后的上下文（摘要 + 保留尾），由 defaultCreateAgent 替换下一轮的 currentContext。
+   */
+  private async compactForNextTurn(): Promise<PiAgentMessage[] | undefined> {
+    if (!this.session || !this.compactionSettings.enabled) return undefined;
+    await this.pendingPersist;
+    const entries = await this.session.findEntries({ order: 'oldestFirst' });
+    if (!isCompactionNeeded(entries, this.compactionContextWindow, this.compactionSettings)) return undefined;
+    const compacted = await this.runCompaction(entries);
+    if (compacted) this.agent.seedHistory?.(compacted);
+    return compacted;
+  }
+
+  /**
+   * P5：压缩执行核心——发 transient 状态事件（驱动现有压缩指示）、跑摘要生成、写回
+   * 会话 compaction entry、记录前后 token 统计、发非 transient context_compacted 事件
+   * （RunBoard 渲染「上下文已自动压缩 · before → after tokens」）。
+   * 失败（网络/中止）时跳过压缩并返回 undefined，不阻断对话（R3 差异如实标注）。
+   */
+  private async runCompaction(entries: import('@earendil-works/pi-agent-core').Entry[]): Promise<PiAgentMessage[] | undefined> {
     this.bridge.emitCompactionStatus(true);
     try {
       const preparationResult = prepareCompaction(entries, this.compactionSettings);
-      if (!preparationResult.ok || !preparationResult.value) return;
+      if (!preparationResult.ok || !preparationResult.value) return undefined;
       const value = await this.compactRunner(preparationResult.value);
       const compactedMessages = buildCompactedAgentMessages(value);
-      await this.session.appendEntry({
+      await this.session!.appendEntry({
         type: 'compaction',
         id: uuidv7(),
         summary: value.summary,
@@ -896,16 +1011,19 @@ export class PiSession {
         ...(value.details !== undefined ? { details: value.details } : {}),
         ...(value.usage !== undefined ? { usage: value.usage } : {}),
       }, 'main');
-      this.agent.seedHistory?.(compactedMessages);
+      const afterTokens = estimateContextTokens(compactedMessages).tokens;
       this.lastCompaction = {
         beforeTokens: value.tokensBefore,
-        afterTokens: estimateContextTokens(compactedMessages).tokens,
+        afterTokens,
         summary: value.summary,
         at: Date.now(),
       };
+      this.bridge.emitCompacted({ summary: value.summary, beforeTokens: value.tokensBefore, afterTokens });
+      return compactedMessages;
     } catch {
       // 摘要生成失败（网络/中止）：跳过压缩继续对话，不阻断 prompt。
       // R3 差异如实标注：现有引擎有确定性兜底摘要，pi compact() 只走 LLM 摘要。
+      return undefined;
     } finally {
       this.bridge.emitCompactionStatus(false);
     }
@@ -934,7 +1052,9 @@ export class PiSession {
     if (event.type !== 'message_end' || event.message.role !== 'assistant') return;
     if (!this.session) return;
     try {
-      await this.session.appendMessage(event.message);
+      // P5：mock/供应商的 assistant 消息可能带 undefined 可选字段（responseId/rawStopReason 等），
+      // pi Session.commitEntry 的 assertJsonSerializable 会拒收——持久化前剔除 undefined，使会话可累积。
+      await this.session.appendMessage(stripUndefined(event.message) as PiAgentMessage);
     } catch {
       // 会话持久化失败不阻断事件桥接（尽力而为）；边界见 TASK-P2 R4。
     }
@@ -1029,7 +1149,11 @@ export class PiSession {
    */
   steer(message: string): boolean {
     if (this.disposed || this.abortSignal?.aborted) return false;
-    this.agent.steer?.({ role: 'user', content: message, timestamp: Date.now() });
+    const steered: PiAgentMessage = { role: 'user', content: message, timestamp: Date.now() };
+    // P5：对齐旧引擎 queuedUserGuidance——入队时即时把 user 消息投影到聊天流（UI 立即显示），
+    // agent 注入同一引用时 bridge 按引用去重，不双显。
+    this.bridge.emitUserGuidance(steered);
+    this.agent.steer?.(steered);
     return true;
   }
 

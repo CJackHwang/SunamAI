@@ -215,6 +215,26 @@ export function useAgentV2(
     }
   }, [updateSessionStatus]);
 
+  /** P4：新根 run 启动时编排器剪掉上一根族的终态子 run——同步移除对应 run/事件/子行（root-family 语义）。 */
+  const handleChildrenPruned = useCallback((runIds: string[]) => {
+    if (!runIds.length) return;
+    setRuns((previous) => previous.filter((run) => !runIds.includes(run.id)));
+    setEvents((previous) => previous.filter((event) => !runIds.includes(event.runId)));
+    setChildRunsBySession((previous) => {
+      const next: Record<string, AgentRun[]> = {};
+      for (const [sessionId, runs] of Object.entries(previous)) {
+        const filtered = runs.filter((run) => !runIds.includes(run.id));
+        next[sessionId] = filtered;
+      }
+      return next;
+    });
+    setStreamingByRunId((previous) => {
+      const next = { ...previous };
+      for (const id of runIds) delete next[id];
+      return next;
+    });
+  }, []);
+
   /** P6（R4）：经驱动层启动一次运行。默认 PiDriver（包 piSession，现有行为不变）；
    *  配置 AGENT_DRIVER=claude-code/codex 时走外部 CLI 桥——浏览器壳内不可行，
    *  prompt() 以本地环境错误优雅拒绝（R5 边界如实），由调用方 catch 标记 run 失败。
@@ -281,6 +301,8 @@ export function useAgentV2(
         store: storeRef.current,
         // R1：附件透传给 pi 驱动（PiSession 构造多模态 user 消息）。
         ...(attachments ? { attachments } : {}),
+        // P4：子 agent 清理——新根 run 启动时剪掉上一根族终态子 run，UI 同步移除对应行。
+        onChildrenPruned: handleChildrenPruned,
       });
     } catch (error) {
       driverRunIdsRef.current.delete(runId);
@@ -294,7 +316,7 @@ export function useAgentV2(
         driverExecutionsRef.current.delete(runId);
       });
     driverExecutionsRef.current.set(runId, { sessionId, containerId, controller, completion, steer: (message) => driver.steer?.(message) ?? false });
-  }, [apiKey, apiModel, appendEvent, baseUrl, capabilities.containerAvailable, enabledTools, personaStyle, providerApi, runtime, samplingParams, sunamModel, updateRun]);
+  }, [apiKey, apiModel, appendEvent, baseUrl, capabilities.containerAvailable, enabledTools, handleChildrenPruned, personaStyle, providerApi, runtime, samplingParams, sunamModel, updateRun]);
 
   const launchTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, attachments?: ChatAttachment[], resume?: AgentResumeState) => {
     // R4 逃生门（M1 终审组2）：localStorage 关 pi → 不启动 Agent 运行（聊天-only），

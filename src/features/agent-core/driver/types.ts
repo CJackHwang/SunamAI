@@ -79,4 +79,6 @@ export interface AgentDriverFactoryInput extends AgentDriverInit {
   containerAvailable?: boolean;
   /** R1：本次启动的附件（pi 驱动嵌入多模态 user 消息；CLI 桥忽略）。 */
   attachments?: ChatAttachment[];
+  /** P4：子 agent 清理——新根 run 启动时编排器剪掉上一根族的终态子 run，通知 UI 移除对应行。 */
+  onChildrenPruned?: (runIds: string[]) => void;
 }

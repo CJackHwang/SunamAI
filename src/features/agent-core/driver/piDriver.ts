@@ -49,6 +49,8 @@ export interface PiDriverOptions extends AgentDriverInit {
   compactionRunner?: PiCompactionRunner;
   /** R1：本次启动的附件（PiSession 构造多模态 user 消息）。 */
   attachments?: ChatAttachment[];
+  /** P4：子 agent 清理——新根 run 启动时编排器剪掉上一根族的终态子 run，通知 UI 移除对应行。 */
+  onChildrenPruned?: (runIds: string[]) => void;
 }
 
 /** 只暴露 PiSession 与 AgentDriver 对齐的能力面，避免 PiDriver 依赖具体类类型。 */

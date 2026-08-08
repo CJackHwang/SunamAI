@@ -344,10 +344,12 @@ export class PiSubagentCoordinator implements SubagentHost {
     this.publish(child, notification);
   }
 
-  /** R6：恢复阻塞子 agent——重新 prompt（引导消息作为新 user 消息进入转录），完成后结算终态。 */
+  /** R6：恢复阻塞子 agent——重新 prompt（引导消息作为新 user 消息进入转录），完成后结算终态。
+   *  重新 prompt 以「委派目标 + 父引导」拼接为一条 user 消息：子 agent 转录已含委派目标
+   *  （首条 user），但恢复轮仍以该目标开头（对齐父协调语义），引导作为追加指令同一轮送达。 */
   private async resumeBlockedChild(child: QueuedChild, message: string): Promise<void> {
     try {
-      await child.session?.prompt(message);
+      await child.session?.prompt(`${child.task.prompt}\n\nParent guidance: ${message}`);
     } catch (error) {
       this.finishUnexpectedFailure(child, error);
       return;
