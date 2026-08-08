@@ -1,6 +1,13 @@
 # 发布与优化冻结验收
 
-本清单用于影响 Agent、资源、持久化、WebContainer、子 Agent 或交互布局的发布。只有所有冻结门槛通过，才可认定基础接近当前可接受极限并进入独立功能开发。
+> **⚠ 历史文档（pi 前）**：本清单是针对旧 `AgentEngine` + WebContainer 时代的验收记录，
+> 保留作为历史审计痕迹。**2026-08 起 pi 为唯一引擎、容器环境为 Succinix**，当前能力清单见
+> [FEATURES.md](FEATURES.md)（中文 [FEATURES.zh-CN.md](FEATURES.zh-CN.md)），当前架构见
+> [architecture.md](architecture.md)，Agent 运行设计见 [agent-v2-design.md](agent-v2-design.md)。
+> 下列正文中的 `AgentEngine`、`shell_run` 等旧术语与 pi 时代的实现不对应，仅作历史记录，不作为
+> 现行验收依据。pi 时代的发布仍须满足本节第 1 条的自动化门禁与阈值。
+
+本清单用于影响 Agent、资源、持久化、Succinix/WebContainer、子 Agent 或交互布局的发布。只有所有冻结门槛通过，才可认定基础接近当前可接受极限并进入独立功能开发。
 
 ## 1. 自动化门禁
 

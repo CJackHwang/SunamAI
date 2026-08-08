@@ -1,37 +1,57 @@
 <p align="center">
-  <img src="docs/assets/header-max.png" alt="Sunam — The useless AI agent" width="100%" />
+  <img src="docs/assets/header-max.png" alt="Sunam — browser-native AI coding assistant" width="100%" />
 </p>
 
 # Sunam
 
-Sunam 是运行在浏览器中的开源 AI 编程助手。它通过 OpenAI-compatible Chat Completions API 连接模型，并使用 [WebContainer](https://webcontainers.io/) 在浏览器内提供隔离文件系统、终端、进程和本地服务预览。
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-项目适合希望自行选择模型服务、在单个浏览器工作区内完成聊天、资源分析、文件编辑、命令执行与分工验证的开发者。Sunam 不提供模型服务、账号系统或托管后端。
+> Language: **English** | [简体中文](docs/README.zh-CN.md)
 
-## 主要能力
+**A browser-native AI coding assistant: the pi agent engine working inside a Succinix container environment. No installation, no backend — your browser tab is the workspace.**
 
-- OpenAI-compatible 模型：配置服务地址、API Key 和模型，可从兼容的 `/models` 接口读取模型列表。
-- 浏览器内工作区：WebContainer 提供文件管理、终端、前后台进程、端口服务和可恢复文件快照。
-- 自动上下文管理：按模型 token 窗口自动压缩完整消息/工具组，保留计划、证据、资源引用、工作区版本和最近相关文件，不提供需要用户操作的压缩按钮。
-- 连续流式聊天：正文、思考过程与工具调用在同一消息气泡内连续呈现；共享尺寸动效协调流式扩展、折叠和工具插入，用户上滚后不会被自动跟随打断，并提供 reduced-motion 回退。
-- 资源附件：文本、代码、PNG/JPEG/WebP/GIF 和通用二进制作为本地资源保存；文本按范围读取，图片按需送入视觉模型，其他文件可 materialize 到工作区。
-- 多模态降级：模型明确拒绝视觉输入时自动改用文本与持久资源引用；与视觉无关的 400/422 错误原样上抛，不进行无效二次调用。
-- 子 Agent：根 Agent 在 `explore`（只读探索）与 `task`（完整任务权限、不可递归委派）之间选型，最多三路混合并发；模型执行可并行，实际写入与命令通过容器 lease 串行，父 Agent 负责综合当前工作区版本的证据。
-- 能力库（Capability Library）：右侧栏集中管理 AI 可感知的能力。每个工具通过 `defineTool` 注入式声明归属（编译期强制，缺声明无法编译），按模块（Agent运行时 / 虚拟容器 / 资源附件 / 笔记预留 / 其他）提供双层开关——模块总开关控制用户侧功能块，工具子开关控制 AI 侧可感知工具，实现个性化与权限管理；为未来 MCP / 第三方插件 / 笔记扩展预留热插拔模块宿主。
-- 容器三态与纯聊天降级：容器状态为 已开启 / 已关闭 / 启动受限；boot 失败不阻断应用，弹窗告知后可继续纯聊天。关闭容器即真正释放（flush 快照落盘 → teardown 释放内存/进程），重开从 IndexedDB 快照恢复；Agent run 活跃时容器开关锁定，避免打断任务。
-- 子任务记录按需加载：展开 RunBoard 中的子任务时，才读取该子 Run 最近 250 条事件并显示最近 transcript，不占用主聊天首屏。
-- 可恢复执行：Run、事件、单一 checkpoint、子任务、终端记录和快照保存在浏览器；刷新后活动父子 Run 标记为 `interrupted`，继续时创建新 Run，不复活旧请求、控制器或 PID。
-- 可恢复写入：workspace 保存、session/container 删除和 reset 使用同一串行队列；Run、checkpoint、terminal 和 snapshot 分别串行保存。显式 snapshot flush 会取消尚未触发的 debounce，避免重复快照；失败保留上一份完整版本，已排队的后续快照仍会继续。
-- 中文、English、日本語界面，以及可安装 PWA。
+Sunam runs entirely in a Chromium browser tab. It pairs the **pi** agent engine ([`@earendil-works/pi-agent-core`](https://www.npmjs.com/package/@earendil-works/pi-agent-core) + [`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai)) with the **Succinix** container environment ([`@succinix/engine`](https://www.npmjs.com/package/@succinix/engine), WebContainer-based) so the agent can chat, inspect and edit a real workspace, run commands, manage processes and services, and verify its own results — all client-side, with your own model provider.
 
-## 开始使用
+Sunam does not host models, accounts, or a backend. It connects directly from the browser to any OpenAI-compatible (or Anthropic-messages) model service you configure.
 
-### 前置条件
+---
 
-- Node.js 22（CI 使用版本）
-- npm
-- 现代 Chromium 浏览器（推荐 Chrome 或 Edge）
-- 可用的 OpenAI-compatible 模型服务和 API Key
+## Features
+
+### pi agent engine
+
+- **One agent engine — pi.** The former custom `AgentEngine` has been removed; the [pi framework](https://www.npmjs.com/package/@earendil-works/pi-agent-core) is the only execution kernel. It drives chat, tool calls, subagents and compaction, and bridges every pi event into the existing UI state model.
+- **18 agent tools.** Workspace (`workspace_tree` / `read_file` / `search_workspace`), process (`run_command` / `manage_process` / `read_user_terminal`), resources (`list_resources` / `read_resource_text` / `read_resource_image` / `materialize_resource`), subagents (`spawn_subagent` / `wait_subagents` / `message_subagent`), and control (`update_plan` / `report_progress` / `ask_user` / `ask_parent` / `complete_task`). Every tool carries a `capability` declaration that is enforced at compile time.
+- **Automatic context compaction.** Before each turn, pi checks the effective context window (model-profile-derived, conservative 32k for unknown models) and compacts at 90% of the usable window: a summary plus a retained tail is written back to the persisted session, so long conversations keep working without a user-facing compression button.
+- **Subagents.** Up to **3 concurrent** child runs (6 per root, depth 1). `explore` children are read-only; `task` children have full non-delegating tools. Children inherit the parent's turn/tool/time budgets with independent counters, and real workspace mutations are serialized through a global container mutation lease.
+- **Resource attachments.** Up to 8 resources per message (text 2 MiB, images 10 MiB, other binaries 20 MiB, 50 MiB per batch), SHA-256 deduplicated per session, persisted as Blobs in IndexedDB with durable references in the message ledger. Images are re-scaled to a ≤1.5 MiB model copy.
+- **Driver abstraction.** The UI talks to an `AgentDriver` interface. The built-in **pi driver** is the default; experimental ClaudeCode / Codex CLI bridges exist behind the same interface but are not shipped as defaults.
+- **Honest boundaries.** The pi channel does not implement the old engine's "retry with text when vision is refused" fallback: if the configured model rejects images, the request fails honestly. `ask_user` / `ask_parent` blocking semantics are not preserved in pi's autonomous loop — the adapter returns the question as a tool result and the model asks in its reply.
+
+### Succinix container environment
+
+- **Real container in the browser.** Succinix runs a [TerminalExecutor](https://github.com/CJackHwang/Succinix) host inside WebContainer: `node` / `npm` / `npx` run on a **real Node.js** child process, `python` / `pip` on a **resident Pyodide** daemon, and everything else (`grep`, `sed`, `tar`, pipes, redirects, …) on the **Lifo** Unix userland — all sharing one filesystem.
+- **File-RPC command channel.** The agent and the user terminal execute commands through Succinix's file RPC (`/cmd.json` → `/result-<id>.json`, one result file per request). Timeouts, exit codes, stdout/stderr and the `runtime` tag flow through unchanged.
+- **Cross-container process isolation.** The Succinix process table carries a `scope` (`system` / `container` / `unknown`) and an optional `containerId`. Sunam filters processes per virtual container and blocks cross-container kills; protected system processes cannot be stopped from the UI.
+- **Snapshots — dual layer.** Succinix automatically snapshots the container filesystem to IndexedDB (`succinix-persist`, text-first, honest exclusions), while Sunam keeps its agent session checkpoints in `sunam-v3`. Refresh restores both the workspace files and the agent conversation.
+- **Virtual ports & services.** `server-ready` events register preview URLs; the services panel shows managed ports and offers precise stop actions (never guessing a PID from a port number).
+
+### Standalone settings page
+
+- **Providers** — manage model providers (16 presets including DeepSeek, OpenAI, Anthropic, OpenRouter, Groq, Mistral, xAI, Cerebras, …), each with its own base URL, API key, default model and request API (`openai-completions` or `anthropic-messages`), plus a global conversation model with a "fetch models" button.
+- **Personas** — reusable system prompts with model parameters (temperature / top-p / max tokens) and a model binding that is either `auto` (follow the global model) or pinned to a specific provider + model. Enabled personas appear instantly in the chat model selector.
+- **About** — project info, GitHub repo, AGPL-3.0 license, and a direct link to the **Succinix** project.
+
+### Product
+
+- **Chat / Computer / Capability Library** — the "Sunam computer" merges terminal, user shell, services and files into one view with a capsule dynamic island; the capability library panel gives module-level and per-tool switches for what the AI can perceive.
+- **Container three states** — `enabled` / `off` / `restricted` (boot failure). Off truly releases the container (flush snapshot → teardown); restricted degrades gracefully to chat-only.
+- **Multilingual & PWA** — 中文 / English / 日本語 UI, installable as a PWA.
+
+## Quick Start
+
+Requirements: **Node.js 22**, npm, a modern **Chromium** browser (Chrome/Edge), and an OpenAI-compatible or Anthropic-messages model service with an API key.
 
 ```bash
 git clone https://github.com/CJackHwang/SunamAI.git
@@ -40,113 +60,83 @@ npm ci
 npm run dev
 ```
 
-开发服务器固定为 <http://localhost:7891>。首次进入应用后填写 API 服务地址、API Key 和模型名称。模型服务至少需要兼容 `/chat/completions`；没有 `/models` 接口时可手动输入模型名。
+The dev server is fixed at <http://localhost:7891> and serves the required cross-origin-isolation headers (COOP/COEP). Open it, go to **Settings → Providers**, add a provider (or pick a preset) and save your API key, then start a conversation.
 
-推荐流程：选择会话和容器，描述任务并按需附加资源，在 RunBoard 查看计划、压缩和子任务摘要，在文件/终端/服务面板核对结果。复杂任务只有在当前工作区版本通过验证后才能完成。Agent 对用户交互终端只有有限缓冲读取权限，不能向其中注入命令；所有 Agent 命令必须通过自有的 `run_command` 进程执行。所有可能改变工作区的 shell 都是明确的 revision 边界；即使文件监听通知延迟，验证也不会错误认证命令执行前的版本。
+Suggested workflow: pick a session and a container, describe a task and attach resources as needed, then watch the plan, compaction and subagent summaries in the RunBoard and verify results in the file / terminal / services views. Complex tasks only complete after the current workspace revision passes verification.
 
-## 资源与上下文
+## Tech Stack
 
-每条消息最多 8 个资源：文本单文件 2 MiB、图片原图 10 MiB、其他二进制 20 MiB，单批总量 50 MiB。限制在 UI 和资源处理核心中都会执行；已经持久化的 resource ID 引用同样计入 8 个和 50 MiB，缺失或跨会话引用会直接失败。
+| Layer | Choice |
+| --- | --- |
+| Agent engine | [`@earendil-works/pi-agent-core`](https://www.npmjs.com/package/@earendil-works/pi-agent-core) + [`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai) |
+| Container environment | [Succinix](https://github.com/CJackHwang/Succinix) / [`@succinix/engine`](https://www.npmjs.com/package/@succinix/engine) over [`@webcontainer/api`](https://www.npmjs.com/package/@webcontainer/api) |
+| UI | React 19, xterm.js, react-markdown, lucide-react |
+| Language & build | TypeScript (strict), Vite 8, Vitest, Playwright, Oxlint |
+| Persistence | IndexedDB (`sunam-v3`, `succinix-persist`) + Local Storage (`sunam_v2_*`) |
+| License | AGPL-3.0 |
 
-- 同一会话按 SHA-256 去重；资源读取和视觉映射再次校验会话归属。
-- 图片校验真实 MIME，最长边缩放到 2048，模型副本不超过 1.5 MiB，同时保留原图；浏览器无法解码并验证尺寸时安全拒绝，不会绕过上限放行。
-- Blob 只存在 IndexedDB `resources` store；event、message、checkpoint 只持久化资源 ID，不保存附件正文、Blob 或 Base64。
-- data URL 只在实际视觉请求的适配器边界临时生成，不进入持久 ledger。
-- 自动压缩在有效 token 窗口达到 90% 前触发；UI 只在 RunBoard 显示一次非打扰状态。
+## Data & Privacy
 
-子 Agent 每个根任务最多创建 6 个，最大深度为 1。每个子 Run 完整继承当前主 Run 的模型轮、工具调用和运行时长上限，并使用独立计数器；父或兄弟 Agent 不会提前耗尽它的预算。当前版本不实现递归 swarm、team、mailbox 或并行 writer。
+Sunam is a pure frontend application. The browser talks directly to the model service you configure.
 
-## 配置与数据安全
-
-Sunam 是纯前端应用，浏览器直接向你指定的模型服务发起请求。
-
-| 数据 | 保存位置 | 注意事项 |
+| Data | Stored in | Notes |
 | --- | --- | --- |
-| API 地址、API Key、模型、界面语言与能力开关配置 | Local Storage（`sunam_v2_*`） | 不要在公共设备或共享浏览器保存个人密钥。设置键保留 v2 名称以维持配置兼容；能力配置只存与默认不同的 override。 |
-| 会话、容器、Run、事件、资源、子任务、终端记录、快照 | IndexedDB（`sunam-v3`） | 旧 v2 repository/schema 等生产实现已删除；生产代码不打开、读取、迁移或删除旧 `sunam-v2` 工作数据库。清理站点数据会删除本地数据。 |
-| 当前提示、选定图片、模型主动读取的文件/资源片段和工具结果 | 你配置的模型服务 | Sunam 不会默认上传整个工作区；实际发送内容仍适用提供商的隐私、保留、配额与计费规则。 |
+| API keys, provider/persona config, language | Local Storage (`sunam_v2_*`) | Do not save personal keys on a shared device. |
+| Sessions, containers, runs, events, resources, terminal history, snapshots | IndexedDB (`sunam-v3` + `succinix-persist`) | Clearing site data deletes everything. |
+| Prompts, selected files, tool results sent to the model | Your configured provider | Sunam never uploads the whole workspace by default; the provider's own privacy / retention rules apply. |
 
-不要把真实密钥提交到仓库、构建产物或前端环境变量。公开部署时建议每位用户自行配置密钥；如使用服务端代理，应自行设计鉴权、配额、审计和密钥保护。模型服务必须允许部署域名的 CORS 请求。
+Never commit real keys. Deployments should let each user configure their own key, or proxy through a backend you design with its own auth / audit / quota. The model service must allow CORS from your deployment origin.
 
-## 部署
+## Deployment
 
-WebContainer 需要 cross-origin isolation。生产站点必须使用 HTTPS，并返回：
+WebContainers require cross-origin isolation. A production site must be HTTPS and return:
 
 ```text
 Cross-Origin-Embedder-Policy: credentialless
 Cross-Origin-Opener-Policy: same-origin
 ```
 
-仓库中的 `vercel.json` 已包含这些响应头。Vercel 或其他静态托管使用 `npm run build`，发布 `dist/`，并确保 Node.js 版本为 22。上线后至少验证容器创建、文件读写、终端启动和本地服务预览。
+The repo's `vercel.json` already ships these headers. For Vercel or any static host: `npm run build`, publish `dist/`, keep Node 22. After launch, at least verify container creation, file read/write, terminal boot and local-service preview.
 
-## 开发与验证
+## Development & Verification
 
 ```bash
-npm run dev            # 开发服务器，端口 7891
-npm run typecheck      # 严格 TypeScript 检查
+npm run dev            # dev server on port 7891
+npm run typecheck      # strict TypeScript
 npm run lint           # Oxlint
-npm run test           # Vitest 单元与组件测试
-npm run test:coverage  # 全核心覆盖率
-npm run test:e2e       # Playwright 端到端流程
-npm run test:visual    # 桌面/移动视觉回归
-npm run test:runtime   # 真实 WebContainer 验收
-npm run check:audit    # 生产依赖 high/critical 审计
-npm run build          # 类型检查与生产构建
-npm run check          # typecheck、lint、架构边界、覆盖率、build、包体
-npm run check:all      # check、E2E、visual、runtime、生产依赖审计
+npm run test           # Vitest unit & component tests
+npm run test:coverage  # full core coverage
+npm run test:e2e       # Playwright end-to-end flows
+npm run test:visual    # desktop / mobile visual regression
+npm run test:runtime   # real Succinix/WebContainer acceptance
+npm run check:audit    # production dependency high/critical audit
+npm run build          # typecheck + production build
+npm run check          # typecheck + lint + architecture + coverage + build + bundle
+npm run check:all      # check + e2e + visual + runtime + audit
 ```
 
-冻结门槛：核心 lines/functions/statements ≥85%、branches ≥80%；初始 JS ≤90 KiB gzip、总 JS ≤350 KiB gzip、生产 `dist` ≤1.8 MiB。Playwright 视觉差异上限为 0.2%。
+Freeze gates: core lines/functions/statements ≥85%, branches ≥80%; initial JS ≤90 KiB gzip, total JS ≤350 KiB gzip (pi lazy-load channel +~95 KiB, see `scripts/check-bundle.mjs`), production `dist` ≤1.8 MiB. Playwright visual diff limit 0.2%.
 
-### Trellis 工程工作流
+The repository uses the **Trellis** engineering workflow. Root `AGENTS.md` is the unified AI engineering entry; the real project specs live in `.trellis/spec/`, task & research records in `.trellis/tasks/`, and per-developer logs in `.trellis/workspace/`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide.
 
-仓库已使用 Trellis 0.6.9 完成 Codex 初始化。根 `AGENTS.md` 是统一的 AI 工程入口，项目真实规范位于 `.trellis/spec/`，任务与研究记录位于 `.trellis/tasks/`，开发者日志位于 `.trellis/workspace/`。架构、Agent Runtime、持久化、组件、Hook、状态、类型和质量门禁都应先同步到 Spec，再由后续任务复用。
+## Documentation
 
-```bash
-trellis --version
-python3 ./.trellis/scripts/task.py list
-python3 ./.trellis/scripts/task.py current --source
-python3 ./.trellis/scripts/task.py validate <task-id>
-```
+English · 中文:
 
-本项目的 `.trellis/config.yaml` 使用 Codex `inline` 模式，避免主任务上下文被不必要地拆散；`session_auto_commit` 为 `false`，Trellis 的 journal/archive 改动必须与其他变更一起人工审查和暂存，不会自动创建提交。Codex 使用者需要在用户级 `~/.codex/config.toml` 启用 `[features].hooks = true`，并在 Codex TUI 中通过一次 `/hooks` 审批项目 hook。未审批时根 `AGENTS.md` 仍生效，但每回合工作流注入和 Trellis 命令菜单不会激活。
+- **README** — this document: [English](README.md) · [中文](docs/README.zh-CN.md)
+- **FEATURES** — implemented capabilities & honest boundaries: [English](docs/FEATURES.md) · [中文](docs/FEATURES.zh-CN.md)
+- **Architecture** — module responsibilities, dependency boundaries, key data flows: [架构与依赖边界](docs/architecture.md)
+- **Agent runtime design** — pi session, driver, IndexedDB persistence, compaction, subagents: [Agent 运行设计](docs/agent-v2-design.md)
+- **Capability extension guide** — building capability modules / MCP / plugins: [能力库扩展模块开发指南](docs/extension-development.md)
+- **Dependency advisory policy** — production audit gate & the PWA/Workbox exception: [依赖 Advisory 策略](docs/dependency-advisories.md)
+- **Release & freeze acceptance** — the legacy (pre-pi) acceptance checklist: [发布与优化冻结验收](docs/refactor-acceptance.md)
+- **CHANGELOG** — change history: [English](CHANGELOG.md) · [中文](CHANGELOG.zh-CN.md)
+- **CONTRIBUTING** — how to contribute: [English](CONTRIBUTING.md) · [中文](CONTRIBUTING.zh-CN.md)
 
-修改工程约定时同时更新 `.trellis/spec/`、根 `AGENTS.md`（如适用）以及受影响的 README/`docs/`。不要在 `.agents/` 下再建立第二份 `AGENTS.md`。
+## Succinix
 
-首次执行浏览器测试通常需要与当前 Playwright 版本匹配的 Chromium。也可通过 `PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium` 显式使用已有 Chromium/Chrome；测试仍需要权限启动本地预览服务。`check:audit` 需要能访问 npm registry。缺少浏览器、端口权限或网络时必须把对应检查记录为未执行，不能标记为通过。
+Sunam depends on **[Succinix](https://github.com/CJackHwang/Succinix)** — a browser-native Linux (WebContainer + Lifo + real Node.js) that provides the container environment, terminal execution and process/port management this project is built on. Succinix is an independent open-source project; the `@succinix/engine` npm package is the integration surface Sunam consumes.
 
-### 当前验证状态
+## License
 
-2026-08-05 的当前工作区已通过一次完整 `npm run check`（typecheck、lint、架构边界、覆盖率、build、包体）：60 个测试文件、374 个核心测试，E2E 18/18、真实 WebContainer 3/3、视觉回归 6/6（基线已重生成并人工检查）、生产依赖审计返回 `found 0 vulnerabilities`。覆盖率为 statements 91.04%、branches 83.28%、functions 90.73%、lines 94.94%；初始 JS 88.09 KiB gzip、总 JS 337.59 KiB gzip、生产 `dist` 1.45 MiB。本次验证包含能力库（注入式注册、模块宿主、双层开关、容器三态与关闭即释放、run 锁、纯聊天降级、受限态 composer 可用、附件/任务列表联动），以及移动端终端触摸滚动、聊天表格内部横向滚动、电脑/终端/服务/文件合并胶囊灵动岛（灰底白滑块、点击/移动端滑动切换、空间不足纯 icon 伸缩动画）；尚未满足连续两次完整门禁才可声明的优化冻结复验。
-
-完整开发依赖审计仍有 8 个 high，全部位于 `vite-plugin-pwa@1.3.0` / `workbox-build@7.4.1` 构建链；npm 提议的 `vite-plugin-pwa@1.2.0` 不支持 Vite 8，因此按 [依赖 advisory 策略](docs/dependency-advisories.md) 作为上游兼容性例外跟踪，不影响生产依赖零漏洞门禁。
-
-## 常见问题
-
-### 终端或 WebContainer 无法启动
-
-确认使用 HTTPS（本地开发除外），并检查 COEP/COOP 响应头。某些浏览器扩展、代理或 CDN 可能移除这些头。
-
-### 无法加载模型或发送消息
-
-检查 API 地址、Key、模型名和 CORS。模型列表失败不一定代表聊天不可用，可直接输入模型名。
-
-### 刷新后数据不见了
-
-Sunam 只在当前浏览器配置文件保存数据。无痕窗口、清理站点数据、换浏览器或换设备都不会带走数据。IndexedDB 不可用时应用会报告持久化错误，而不会用临时内存伪装保存成功。
-
-删除 session 或 container 时，相关活动父/子 Run 会先被取消并等待收尾，再进入持久化清理事务，避免删除完成后旧执行把事件或资源写回。session 删除会清理该 session 的 terminal history；container 删除会清理该 container 的 snapshot 和 container-scoped Run 数据。
-
-## 文档与贡献
-
-- [架构与依赖边界](docs/architecture.md)
-- [Agent Runtime 设计](docs/agent-v2-design.md)
-- [能力库扩展模块开发指南](docs/extension-development.md)
-- [发布与优化冻结验收](docs/refactor-acceptance.md)
-- [依赖 advisory 策略](docs/dependency-advisories.md)
-
-提交前至少运行 `npm run check`；涉及交互、视觉或 WebContainer 时执行相应 Playwright 测试。贡献者须确保提交可按 AGPL-3.0-only 发布，并保留第三方组件的版权和许可证声明。
-
-## 许可证
-
-项目采用 [GNU Affero General Public License v3.0](LICENSE)。通过网络向用户提供修改版本时，应按 AGPL 第 13 节提供取得对应源代码的机会；完整条款以仓库内许可证与 [GNU 官方文本](https://www.gnu.org/licenses/agpl-3.0.html) 为准。
+[GNU Affero General Public License v3.0](LICENSE). When you offer a modified version over a network, you must make the corresponding source available under AGPL section 13. The full terms are in the repository's `LICENSE` and the [official GNU text](https://www.gnu.org/licenses/agpl-3.0.html).
