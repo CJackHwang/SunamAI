@@ -80,9 +80,15 @@ export class ContainerAvailabilityController {
       this.set('enabled');
       return 'enabled';
     } catch (error) {
+      // L2 竞态防御（终审）：forceRestart/dispose 清掉 hostBootPromise 后，在途的
+      // waitForWorkspaceHostReady 会以 "has not started" reject——这是信号被回收，不是
+      // 环境真实不可用。区分处理：该错误不落受限标记（避免误写持久化受限态）。
+      const isHostSignalRecycled = error instanceof Error && error.message.includes('has not started');
       this.set('restricted');
-      // R2：受限 → 持久化标记（下次进入不自动开启）。
-      markContainerUnavailable();
+      if (!isHostSignalRecycled) {
+        // R2：受限 → 持久化标记（下次进入不自动开启）。
+        markContainerUnavailable();
+      }
       this.notifyFailure(toErrorMessage(error));
       return 'restricted';
     } finally {

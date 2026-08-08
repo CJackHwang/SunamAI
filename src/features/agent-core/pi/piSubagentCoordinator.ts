@@ -43,8 +43,8 @@ export const CHILD_TASK_TOOLS = [...CHILD_COMMON_TOOLS, 'materialize_resource', 
  *   阻塞，`message_subagent` 通过 `messageFromParent` 唤醒同一 run；pi 的
  *   `ask_parent` 在适配层不设阻塞（见 piToolAdapter R4 说明），子 agent 是自治循环，
  *   因此 `message` 用 `steer()` 把消息排队到当前 turn 之后注入，而非唤醒阻塞。
- * - **changedPaths**：pi 事件桥不投射 tool_finished 事件（P3 UI 视觉零改动约束），
- *   子通知的 changedPaths 为空；子 agent 的变更可通过完整任务门禁另行核对。
+ * - **changedPaths**：pi 事件桥已透传 tool_finished（PITOOLUI 修复），但 toAppToolResult 不设
+ *   changedWorkspace，子通知的 changedPaths 保持为空；子 agent 的变更可通过完整任务门禁另行核对。
  * - **mutation 串行**：每个子 PiSession 自带独立 ContainerMutationLease，跨子 agent
  *   的并发写不共享根 lease 串行（现有引擎共享根 lease）。只读并发、写操作由运行时
  *   各自处理，写冲突风险如实保留。
