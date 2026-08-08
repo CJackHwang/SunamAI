@@ -363,7 +363,12 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
     ]);
     const tracked = this.processes.listTracked();
     const trackedByPid = new Map<number, ProcessStatus & { pid: number }>();
+    // TASK-CISOL R2 跨容器隔离的注册表兜底：全局 pid→容器 归属表（不限当前容器）。
+    // 当 host 归属标注缺失（旧 host 无 scope 字段 / cwd 盲区）时，注册表是所有权权威——
+    // 本 runtime 拉起的进程（session/run/container 元数据）按注册表判定归属，不依赖 host 标注。
+    const trackedOwnerByPid = new Map<number, string>();
     for (const process of tracked) {
+      trackedOwnerByPid.set(process.pid, process.containerId);
       if (containerId && process.containerId !== containerId) continue;
       trackedByPid.set(process.pid, process);
     }
@@ -379,7 +384,10 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
         views.push(this.toOwnedProcessView(owned, entry));
         continue;
       }
-      // TASK-CISOL R2：容器 A 看不到容器 B 的进程 —— 归属 container 且非当前容器则丢弃。
+      // TASK-CISOL R2：容器 A 看不到容器 B 的进程。注册表已知归属但属于其他容器 → 丢弃
+      //（即使 host 标注缺失/unknown，隔离仍须真隔离）；未拥有进程才按 host 归属判定。
+      const ownerContainerId = containerId ? trackedOwnerByPid.get(entry.pid) : undefined;
+      if (ownerContainerId !== undefined && ownerContainerId !== containerId) continue;
       const scope = resolveProcessScope(entry);
       if (scope === 'container' && entry.containerId !== containerId) continue;
       seen.add(entry.pid);
@@ -408,9 +416,28 @@ export class WebContainerAgentRuntime implements AgentWorkspaceRuntime {
    * M5 R2 + TASK-CISOL R3：按 host pid 停止进程（未拥有/系统进程路径），后端 kill 守卫——
    * pid 命中系统进程 / 其他容器进程 / 归属未知进程时拒绝并返回说明（UI 禁 stop + 此处
    * 后端拦截双保险）。仅 scope=container 且 containerId === 当前容器的进程可 kill。
+   * TASK-CISOL R2/R3 注册表权威：本 runtime 拉起的进程（注册表 tracked）即使 host 归属
+   * 标注缺失（旧 host 无 scope / cwd 盲区）也按注册表判定归属——跨容器拒绝、本容器放行，
+   * 不因 host 标注丢失而误拒本容器进程或放行其他容器进程。
    */
   async stopProcessByPid(pid: number, containerId?: string): Promise<{ ok: boolean; message: string }> {
     const entries = await this.succinix.ps();
+    const entry = entries.find((candidate) => candidate.pid === pid);
+    const tracked = this.processes.listTracked().find((process) => process.pid === pid);
+    if (tracked) {
+      if (isSystemProcess(entry?.cmd ?? tracked.command)) {
+        return { ok: false, message: `Process ${pid} is a protected system process and cannot be stopped.` };
+      }
+      // containerId 缺失时无法证实属于当前容器 → 拒绝（宁严勿松）。
+      if (!containerId) {
+        return { ok: false, message: `Process ${pid} has unknown ownership and cannot be stopped.` };
+      }
+      if (tracked.containerId !== containerId) {
+        return { ok: false, message: `Process ${pid} belongs to another container (${tracked.containerId}) and cannot be stopped from this container.` };
+      }
+      const result = await this.succinix.kill(pid);
+      return { ok: result.killed, message: result.message };
+    }
     const refusal = killRefusal(entries, pid, containerId);
     if (refusal) return { ok: false, message: refusal };
     const result = await this.succinix.kill(pid);

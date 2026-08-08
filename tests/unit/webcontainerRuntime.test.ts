@@ -317,6 +317,43 @@ describe('WebContainerAgentRuntime process ownership', () => {
     runtime.dispose();
   });
 
+  it('filters a registry-owned process from another container even when host scope is missing (TASK-CISOL R2 registry fallback)', async () => {
+    const { runtime } = createRuntime();
+    // 容器 A 经 runShell 后台拉起进程 → 注册表记录归属 c-1（host pid=1）。
+    await runtime.runShell({ command: 'node server.js', mode: 'background', sessionId: 's-1', runId: 'r-1', containerId: 'c-1' });
+    // 旧 host（无 scope/containerId 字段）ps() 返回该进程但无归属标注。
+    mockPs.mockResolvedValueOnce([{ pid: 1, cmd: 'node server.js', status: 'running', startTime: 10 }]);
+    // 容器 B 视图不得看到容器 A 的进程（隔离必须真隔离，不依赖 host 标注）。
+    const viewsFromB = await runtime.getSuccinixProcesses('c-2');
+    expect(viewsFromB.some((view) => view.command === 'node server.js')).toBe(false);
+    // 容器 A 自身仍可见（注册表所有权权威）。
+    mockPs.mockResolvedValueOnce([{ pid: 1, cmd: 'node server.js', status: 'running', startTime: 10 }]);
+    const viewsFromA = await runtime.getSuccinixProcesses('c-1');
+    expect(viewsFromA.some((view) => view.command === 'node server.js')).toBe(true);
+    runtime.dispose();
+  });
+
+  it('stops a registry-tracked process in the current container even when host scope is missing (TASK-CISOL R3 registry fallback)', async () => {
+    const { runtime } = createRuntime();
+    await runtime.runShell({ command: 'node server.js', mode: 'background', sessionId: 's-1', runId: 'r-1', containerId: 'c-1' });
+    mockPs.mockResolvedValueOnce([{ pid: 1, cmd: 'node server.js', status: 'running', startTime: 10 }]);
+    const result = await runtime.stopProcessByPid(1, 'c-1');
+    expect(result.ok).toBe(true);
+    expect(mockKill).toHaveBeenCalledWith(1);
+    runtime.dispose();
+  });
+
+  it('refuses to stop a registry-tracked process owned by another container when host scope is missing (TASK-CISOL R3 registry fallback)', async () => {
+    const { runtime } = createRuntime();
+    await runtime.runShell({ command: 'node server.js', mode: 'background', sessionId: 's-1', runId: 'r-1', containerId: 'c-1' });
+    mockPs.mockResolvedValueOnce([{ pid: 1, cmd: 'node server.js', status: 'running', startTime: 10 }]);
+    const result = await runtime.stopProcessByPid(1, 'c-2');
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/another container/);
+    expect(mockKill).not.toHaveBeenCalled();
+    runtime.dispose();
+  });
+
   it('refuses to kill a process from another container by pid (TASK-CISOL R3)', async () => {
     const { runtime } = createRuntime();
     mockPs.mockResolvedValueOnce([{ pid: 4, cmd: 'node server.js', status: 'running', startTime: 1, scope: 'container', containerId: 'c-2' }]);

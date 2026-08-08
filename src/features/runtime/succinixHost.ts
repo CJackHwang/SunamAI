@@ -72,17 +72,20 @@ export interface SuccinixHostHandle {
 }
 
 /**
- * 注入 host.js → spawn `node host.js` 常驻进程 → ping 探活 → 注入 lifo-core.js。
- * lifo-core.js 同步等待完成（run 的 cd 前缀依赖 Lifo 内核，首条命令即可用）；
- * python 资产后台懒注入（首个 python 命令前由 ensurePythonRuntime 兜底 await）。
+ * 注入 host.js → 注入 lifo-core.js → spawn `node host.js` 常驻进程 → ping 探活。
+ * lifo-core.js 在 host 启动前注入完成：run 的 cd 前缀依赖 Lifo 内核，host 拉起后首条
+ * Lifo 命令即可用——若在 host 就绪后才注入，agent 的首条前台命令（cd <root> && <cmd>）
+ * 可能先于注入到达，import("./lifo-core.js") 报 ERR_MODULE_NOT_FOUND 而失败（CI 慢环境
+ * 该竞态放大为确定性失败；CIRUNTIME）。python 资产后台懒注入（首个 python 命令前由
+ * ensurePythonRuntime 兜底 await）。
  * readyDeadlineMs 仅用于测试注入短 deadline；生产用默认 6s。
  */
 export async function bootSuccinixHost(webcontainer: WebContainer, client: SuccinixClient, readyDeadlineMs = BOOT_READY_DEADLINE_MS): Promise<SuccinixHostHandle> {
   await ensureAsset(webcontainer, HOST_JS, 'host.js');
+  await ensureAsset(webcontainer, LIFO_CORE_JS, 'lifo-core.js');
   const hostProcess = await webcontainer.spawn('node', ['host.js']);
   try {
     await waitForHostReady(client, readyDeadlineMs);
-    await ensureAsset(webcontainer, LIFO_CORE_JS, 'lifo-core.js');
     // python 运行时约 13MB，首用前懒注入；此处后台预热，失败不影响 host 拉起。
     void ensurePythonRuntime(webcontainer.fs).catch(() => {});
     return { hostProcess };
