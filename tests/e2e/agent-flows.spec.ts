@@ -1,7 +1,14 @@
 import { expect, test } from '@playwright/test';
 
 function sse(delta: object): string {
-  return `data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`;
+  const hasToolCalls = Array.isArray((delta as { tool_calls?: unknown[] }).tool_calls) && (delta as { tool_calls: unknown[] }).tool_calls.length > 0;
+  const finishReason = hasToolCalls ? 'tool_calls' : 'stop';
+  return [
+    `data: ${JSON.stringify({ choices: [{ delta }] })}`,
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finishReason }] })}`,
+    'data: [DONE]',
+    '',
+  ].join('\n\n');
 }
 
 function toolCalls(calls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>): string {
@@ -10,7 +17,8 @@ function toolCalls(calls: Array<{ id: string; name: string; arguments: Record<st
 
 function proseAndToolCalls(content: string, calls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>): string {
   const toolDelta = { choices: [{ delta: { tool_calls: calls.map((call, index) => ({ index, id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } })) } }] };
-  return `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\ndata: ${JSON.stringify(toolDelta)}\n\ndata: [DONE]\n\n`;
+  const finishDelta = { choices: [{ delta: {}, finish_reason: 'tool_calls' }] };
+  return `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\ndata: ${JSON.stringify(toolDelta)}\n\ndata: ${JSON.stringify(finishDelta)}\n\ndata: [DONE]\n\n`;
 }
 
 async function openConfigured(page: import('@playwright/test').Page, baseUrl: string) {

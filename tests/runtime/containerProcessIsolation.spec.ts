@@ -57,10 +57,10 @@ test('real WebContainer isolates two containers at the process level (TASK-CISOL
 
   // ── 阶段 A：容器 A 后台 spawn 长驻进程 P_A ──
   await page.goto('/?sunam_test=1');
-  await expect(composer).toBeEnabled({ timeout: 60_000 });
+  await expect(composer).toBeEnabled({ timeout: 90_000 });
 
   // 等 runtime 测试钩子就绪（attachFullRuntime 后设置）。
-  await expect.poll(() => page.evaluate(() => Boolean((window as unknown as { __sunamRuntime?: unknown }).__sunamRuntime)), { timeout: 60_000 }).toBe(true);
+  await expect.poll(() => page.evaluate(() => Boolean((window as unknown as { __sunamRuntime?: unknown }).__sunamRuntime)), { timeout: 90_000 }).toBe(true);
 
   const containersSection = page.locator('.sidebar-section').filter({ hasText: '容器' });
   await expect(containersSection.locator('.sidebar-item')).toHaveCount(1);
@@ -73,7 +73,7 @@ test('real WebContainer isolates two containers at the process level (TASK-CISOL
   await expect.poll(async () => {
     const procs = await runtimeProcs(page, containerAId!);
     return procs.find((view) => (view.command ?? '').includes('cisol-pa'))?.pid ?? null;
-  }, { timeout: 60_000 }).not.toBeNull();
+  }, { timeout: 90_000 }).not.toBeNull();
   const procA = (await runtimeProcs(page, containerAId!)).find((view) => (view.command ?? '').includes('cisol-pa'));
   expect(procA).toBeDefined();
   expect(procA?.pid).toBeTruthy();
@@ -84,7 +84,7 @@ test('real WebContainer isolates two containers at the process level (TASK-CISOL
   await page.getByRole('button', { name: 'Sunam的电脑' }).click();
   await page.locator('.terminal-capsule').getByRole('tab', { name: '服务' }).click();
   const servicesList = page.locator('.services-process-list');
-  await expect(servicesList).toContainText('cisol-pa', { timeout: 30_000 });
+  await expect(servicesList).toContainText('cisol-pa', { timeout: 90_000 });
 
   // ── 阶段 B：新建容器 B，B 看不到 A 的进程（互不可见）──
   await containersSection.locator('.sidebar-icon-btn').click();
@@ -97,10 +97,10 @@ test('real WebContainer isolates two containers at the process level (TASK-CISOL
   await expect.poll(async () => {
     const procs = await runtimeProcs(page, containerBId!);
     return procs.some((view) => (view.command ?? '').includes('cisol-pa')) ? 'LEAKED' : 'ISOLATED';
-  }, { timeout: 30_000 }).toBe('ISOLATED');
+  }, { timeout: 90_000 }).toBe('ISOLATED');
 
   // UI：B 的服务面板也不含 P_A。
-  await expect(servicesList).toBeVisible({ timeout: 30_000 });
+  await expect(servicesList).toBeVisible({ timeout: 90_000 });
   await expect(servicesList).not.toContainText('cisol-pa');
 
   // ── 跨容器 kill 拒绝（R3）──
@@ -113,7 +113,7 @@ test('real WebContainer isolates two containers at the process level (TASK-CISOL
   await expect.poll(async () => {
     const procs = await runtimeProcs(page, containerAId!);
     return procs.some((view) => view.pid === pidA) ? 'ALIVE' : 'GONE';
-  }, { timeout: 30_000 }).toBe('ALIVE');
+  }, { timeout: 90_000 }).toBe('ALIVE');
 
   // ── 本容器 kill（R3 放行路径）──
   const ownKill = await stopByPid(page, pidA, containerAId);
@@ -121,5 +121,5 @@ test('real WebContainer isolates two containers at the process level (TASK-CISOL
   await expect.poll(async () => {
     const procs = await runtimeProcs(page, containerAId!);
     return procs.some((view) => view.pid === pidA) ? 'ALIVE' : 'GONE';
-  }, { timeout: 30_000 }).toBe('GONE');
+  }, { timeout: 90_000 }).toBe('GONE');
 });

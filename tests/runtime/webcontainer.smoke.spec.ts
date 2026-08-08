@@ -17,7 +17,14 @@ function readZipEntryNames(archive: Uint8Array): string[] {
 }
 
 function streamResponse(delta: object): string {
-  return `data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`;
+  const hasToolCalls = Array.isArray((delta as { tool_calls?: unknown[] }).tool_calls) && (delta as { tool_calls: unknown[] }).tool_calls.length > 0;
+  const finishReason = hasToolCalls ? 'tool_calls' : 'stop';
+  return [
+    `data: ${JSON.stringify({ choices: [{ delta }] })}`,
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finishReason }] })}`,
+    'data: [DONE]',
+    '',
+  ].join('\n\n');
 }
 
 function streamTools(calls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>): string {
@@ -365,7 +372,7 @@ test('real WebContainer materializes a resource and excludes generated directori
     turn += 1;
     if (turn === 1) {
       const transcript = JSON.stringify(body.messages ?? []);
-      const resourceId = transcript.match(/file resource: (res-[0-9a-f-]+)/i)?.[1];
+      const resourceId = transcript.match(/\[(?:text|image|binary): (res-[0-9a-f-]+)\]/i)?.[1];
       if (!resourceId) throw new Error('Runtime fixture did not receive a resource id.');
       await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
         { id: 'plan', name: 'update_plan', arguments: { items: [{ id: 'resource', title: 'Materialize and verify resource', status: 'in_progress' }] } },
@@ -377,10 +384,7 @@ test('real WebContainer materializes a resource and excludes generated directori
       await route.fulfill({ contentType: 'text/event-stream', body: streamTools([{ id: 'verify', name: 'run_command', arguments: { command: 'npm test', mode: 'foreground' } }]) });
       return;
     }
-    await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
-      { id: 'plan-done', name: 'update_plan', arguments: { items: [{ id: 'resource', title: 'Materialize and verify resource', status: 'completed' }] } },
-      { id: 'complete', name: 'complete_task', arguments: { summary: 'Resource materialized and snapshot filtered.', evidence: ['npm test passed in the materialized project.'] } },
-    ]) });
+    await route.fulfill({ contentType: 'text/event-stream', body: streamResponse({ content: 'Resource materialized and snapshot filtered.' }) });
   });
 
   await page.goto('/');
@@ -453,7 +457,7 @@ test('real WebContainer cascades parent cancellation into a task child process',
     rootTurn += 1;
     if (rootTurn === 1) {
       const transcript = JSON.stringify(body.messages ?? []);
-      const resourceId = transcript.match(/file resource: (res-[0-9a-f-]+)/i)?.[1];
+      const resourceId = transcript.match(/\[(?:text|image|binary): (res-[0-9a-f-]+)\]/i)?.[1];
       if (!resourceId) throw new Error('Cancellation fixture did not receive a resource id.');
       await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
         { id: 'plan', name: 'update_plan', arguments: { items: [{ id: 'cancel', title: 'Start and cancel child verification', status: 'in_progress' }] } },

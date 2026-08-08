@@ -279,14 +279,17 @@ export class PiEventBridge {
   private readonly pendingToolCalls = new Map<string, { name: string; args: unknown }>();
   /** R1：当前 prompt 的附件元数据（用于 UI 附件 chips；缺省不渲染）。 */
   private readonly getUserAttachments: (() => ChatAttachment[] | undefined) | undefined;
+  /** 中止查询：运行中止信号是否已 aborted（区分「停止 Agent」与真实失败）。 */
+  private readonly isAborted: () => boolean;
 
-  constructor(options: { runId: string; sessionId: string; run: AgentRun; onEvent: (event: AgentEvent) => void; onRunChange: (run: AgentRun) => void; getUserAttachments?: () => ChatAttachment[] | undefined }) {
+  constructor(options: { runId: string; sessionId: string; run: AgentRun; onEvent: (event: AgentEvent) => void; onRunChange: (run: AgentRun) => void; getUserAttachments?: () => ChatAttachment[] | undefined; isAborted?: () => boolean }) {
     this.runId = options.runId;
     this.sessionId = options.sessionId;
     this.run = options.run;
     this.onEvent = options.onEvent;
     this.onRunChange = options.onRunChange;
     this.getUserAttachments = options.getUserAttachments;
+    this.isAborted = options.isAborted ?? (() => false);
   }
 
   handlePiEvent(event: PiAgentEvent): void {
@@ -338,9 +341,18 @@ export class PiEventBridge {
           this.emit('phase_changed', { phase: 'cancelled', detail: 'Stopped by user.' });
           this.emit('run_finished', { summary: 'Agent stopped by user.' });
         } else if (message.stopReason === 'error') {
-          this.setPhase('failed');
-          this.emit('phase_changed', { phase: 'failed', detail: message.errorMessage ?? 'Pi agent failed.' });
-          this.emit('run_failed', { error: message.errorMessage ?? 'Pi agent failed.', recoverable: false });
+          // 中止竞态：工具执行中被 abort（如 wait_subagents 等待子 agent 时被停）后，下一轮
+          // LLM 调用会以 abort 错误收尾（stopReason='error' 而非 'aborted'）。此时信号已 aborted，
+          // 如实映射为 cancelled 而不是 failed，避免「停止主 Agent」落成失败态。
+          if (this.isAborted()) {
+            this.setPhase('cancelled');
+            this.emit('phase_changed', { phase: 'cancelled', detail: 'Stopped by user.' });
+            this.emit('run_finished', { summary: 'Agent stopped by user.' });
+          } else {
+            this.setPhase('failed');
+            this.emit('phase_changed', { phase: 'failed', detail: message.errorMessage ?? 'Pi agent failed.' });
+            this.emit('run_failed', { error: message.errorMessage ?? 'Pi agent failed.', recoverable: false });
+          }
         }
         break;
       }
@@ -366,6 +378,13 @@ export class PiEventBridge {
           toolCall: this.toAppToolCall(event.toolCallId, event.toolName, pending?.args ?? {}),
           result: this.toAppToolResult(event.isError, event.result),
         });
+        // report_progress 工具结果同时映射为现有 progress_reported 事件（RunBoard 进度显示与
+        // v3 事件消费依赖它；pi 桥接在此补上旧引擎直接发出的 progress_reported）。
+        if (event.toolName === 'report_progress' && !event.isError) {
+          const content = Array.isArray(event.result?.content) ? event.result.content as Array<{ type: string; text?: string }> : [];
+          const text = content.filter(isTextPart).map((part) => part.text).join('');
+          if (text) this.emit('progress_reported', { message: text });
+        }
         break;
       }
       case 'turn_end':
@@ -549,6 +568,7 @@ export class PiSession {
       onEvent,
       onRunChange,
       getUserAttachments: () => this.pendingUserAttachments,
+      isAborted: () => this.abortSignal?.aborted ?? false,
     });
     this.unsubscribe = this.agent.subscribe((event, _signal) => {
       // P1 事件桥接逻辑不动；P2 仅在桥接之后追加会话持久化（尽力而为）。

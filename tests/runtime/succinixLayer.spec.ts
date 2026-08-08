@@ -7,7 +7,14 @@ import { expect, test } from '@playwright/test';
 // 的落盘效果，避免测试依赖外网 PyPI；持久化机制与真实 pip 包一致）。
 
 function streamResponse(delta: object): string {
-  return `data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`;
+  const hasToolCalls = Array.isArray((delta as { tool_calls?: unknown[] }).tool_calls) && (delta as { tool_calls: unknown[] }).tool_calls.length > 0;
+  const finishReason = hasToolCalls ? 'tool_calls' : 'stop';
+  return [
+    `data: ${JSON.stringify({ choices: [{ delta }] })}`,
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finishReason }] })}`,
+    'data: [DONE]',
+    '',
+  ].join('\n\n');
 }
 
 function streamTools(calls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>): string {
@@ -48,27 +55,19 @@ test('refresh keeps workspace + /etc state + .pyodide package, with a correct v3
       return;
     }
     if (turn === 2) {
-      await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
-        { id: 'plan-done', name: 'update_plan', arguments: { items: [{ id: 'create', title: 'Create data across both snapshot layers', status: 'completed' }] } },
-        { id: 'complete', name: 'complete_task', arguments: { summary: 'Created workspace, /etc state, and .pyodide package.', evidence: ['phase 1 files written.'] } },
-      ]) });
+      // pi 自治循环：complete_task 不终止 run，需以纯文本收尾（stopReason='stop'）结束当前阶段。
+      await route.fulfill({ contentType: 'text/event-stream', body: streamResponse({ content: 'Created workspace, /etc state, and .pyodide package.' }) });
       return;
     }
     // Phase 2（刷新后）：验证三类数据都恢复。命令输出 M3_OK（全部命中）或 M3_X（有缺失），
     // 两者都只出现在命令输出里（源码用字符码拼 token，不落字面量），判定稳定。
     const transcript = JSON.stringify(body.messages ?? []);
     if (transcript.includes('M3_OK')) {
-      await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
-        { id: 'plan-verify-done', name: 'update_plan', arguments: { items: [{ id: 'verify', title: 'Verify refresh recovery', status: 'completed' }] } },
-        { id: 'complete', name: 'complete_task', arguments: { summary: 'Refresh recovery verified.', evidence: ['Workspace, /etc state, and .pyodide package survived the refresh.'] } },
-      ]) });
+      await route.fulfill({ contentType: 'text/event-stream', body: streamResponse({ content: 'Refresh recovery verified.' }) });
       return;
     }
     if (transcript.includes('M3_X')) {
-      await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
-        { id: 'plan-verify-fail', name: 'update_plan', arguments: { items: [{ id: 'verify', title: 'Verify refresh recovery', status: 'failed' }] } },
-        { id: 'complete', name: 'complete_task', arguments: { summary: 'Refresh recovery FAILED: a required file is missing.', evidence: ['M3_X marker observed.'] } },
-      ]) });
+      await route.fulfill({ contentType: 'text/event-stream', body: streamResponse({ content: 'Refresh recovery FAILED: a required file is missing.' }) });
       return;
     }
     await route.fulfill({ contentType: 'text/event-stream', body: streamTools([

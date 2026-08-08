@@ -1,7 +1,14 @@
 import { expect, test } from '@playwright/test';
 
 function sse(delta: object): string {
-  return `data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`;
+  const hasToolCalls = Array.isArray((delta as { tool_calls?: unknown[] }).tool_calls) && (delta as { tool_calls: unknown[] }).tool_calls.length > 0;
+  const finishReason = hasToolCalls ? 'tool_calls' : 'stop';
+  return [
+    `data: ${JSON.stringify({ choices: [{ delta }] })}`,
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finishReason }] })}`,
+    'data: [DONE]',
+    '',
+  ].join('\n\n');
 }
 
 function sseText(content: string): string {

@@ -17,7 +17,7 @@ test('UX1: half-expanded sidebar + default 终端 segment accepts typed commands
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'UX1 verify' } }] }) });
       return;
     }
-    await route.fulfill({ contentType: 'text/event-stream', body: 'data: [DONE]\n\n' });
+    await route.fulfill({ contentType: 'text/event-stream', body: 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n' });
   });
   await page.goto('/');
   await expect(page.locator('textarea[placeholder="问 Sunam 任何问题..."]')).toBeEnabled({ timeout: 100_000 });

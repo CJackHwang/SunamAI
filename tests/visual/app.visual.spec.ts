@@ -1,7 +1,12 @@
 import { expect, test } from '@playwright/test';
 
 function streamToolCalls(calls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>): string {
-  return `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: calls.map((call, index) => ({ index, id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } })) } }] })}\n\ndata: [DONE]\n\n`;
+  return [
+    `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: calls.map((call, index) => ({ index, id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } })) } }] })}`,
+    'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}',
+    'data: [DONE]',
+    '',
+  ].join('\n\n');
 }
 
 async function openResourceSubagentWorkspace(page: import('@playwright/test').Page, viewport: { width: number; height: number }) {

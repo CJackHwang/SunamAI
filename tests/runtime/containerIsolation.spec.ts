@@ -10,7 +10,14 @@ import { expect, test } from '@playwright/test';
 //  BAD          = [66,65,68]
 
 function streamResponse(delta: object): string {
-  return `data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`;
+  const hasToolCalls = Array.isArray((delta as { tool_calls?: unknown[] }).tool_calls) && (delta as { tool_calls: unknown[] }).tool_calls.length > 0;
+  const finishReason = hasToolCalls ? 'tool_calls' : 'stop';
+  return [
+    `data: ${JSON.stringify({ choices: [{ delta }] })}`,
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finishReason }] })}`,
+    'data: [DONE]',
+    '',
+  ].join('\n\n');
 }
 
 function streamTools(calls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>): string {
@@ -64,10 +71,8 @@ test('real WebContainer isolates two virtual containers (files + cwd) across swi
       const match = transcript.match(/PATH_AT_A=(\/home\/workspace\/c-[A-Za-z0-9_-]+)/);
       if (!match) throw new Error('Container A did not report SUNAM_WORKSPACE.');
       pathAtA = match[1]!;
-      await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
-        { id: 'plan-a-done', name: 'update_plan', arguments: { items: [{ id: 'a', title: 'Set up isolation marker', status: 'completed' }] } },
-        { id: 'complete-a', name: 'complete_task', arguments: { summary: 'Container A setup complete', evidence: [`Marker written in ${pathAtA}`] } },
-      ]) });
+      // pi 自治循环：complete_task 不终止 run，需以纯文本收尾（stopReason='stop'）结束当前阶段。
+      await route.fulfill({ contentType: 'text/event-stream', body: streamResponse({ content: 'Container A setup complete' }) });
       return;
     }
 
@@ -91,10 +96,7 @@ test('real WebContainer isolates two virtual containers (files + cwd) across swi
       if (!match) throw new Error('Container B did not report SUNAM_WORKSPACE.');
       pathAtB = match[1]!;
       if (pathAtB === pathAtA) throw new Error('Container B shares the same workspace root as container A.');
-      await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
-        { id: 'plan-b-done', name: 'update_plan', arguments: { items: [{ id: 'b', title: 'Verify boundary from container B', status: 'completed' }] } },
-        { id: 'complete-b', name: 'complete_task', arguments: { summary: 'Isolation boundary verified from container B', evidence: [`cwd ${pathAtB}`, 'file not visible'] } },
-      ]) });
+      await route.fulfill({ contentType: 'text/event-stream', body: streamResponse({ content: 'Isolation boundary verified from container B' }) });
       return;
     }
 
@@ -110,10 +112,7 @@ test('real WebContainer isolates two virtual containers (files + cwd) across swi
       if (!transcript.includes('OK|PATH_BACK_A=')) throw new Error('Container A lost its isolation marker after switching away and back.');
       const back = transcript.match(/PATH_BACK_A=(\/home\/workspace\/c-[A-Za-z0-9_-]+)/)?.[1] ?? '';
       if (back !== pathAtA) throw new Error('Container A cwd changed after switching containers.');
-      await route.fulfill({ contentType: 'text/event-stream', body: streamTools([
-        { id: 'plan-a2-done', name: 'update_plan', arguments: { items: [{ id: 'a2', title: 'Verify container A marker after switch', status: 'completed' }] } },
-        { id: 'complete-a2', name: 'complete_task', arguments: { summary: 'Container A retains its marker after switching', evidence: ['marker still present'] } },
-      ]) });
+      await route.fulfill({ contentType: 'text/event-stream', body: streamResponse({ content: 'Container A retains its marker after switching' }) });
       return;
     }
     throw new Error(`Unexpected model turn ${turn} in container isolation test.`);
