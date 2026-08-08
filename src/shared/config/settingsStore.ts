@@ -1,5 +1,5 @@
 import { readText, writeText, removeText, STORAGE_KEYS } from '@/shared/lib/storage';
-import { DEFAULT_SETTINGS, isSunamModel } from '@/shared/config/models';
+import { DEFAULT_SETTINGS } from '@/shared/config/models';
 import {
   createProviderConfig,
   deriveProviderIdFromUrl,
@@ -95,7 +95,8 @@ export function migrateLegacyPersona(): void {
   const savedModel = readText(STORAGE_KEYS.sunamModel, DEFAULT_SETTINGS.sunamModel);
   const personas = builtinPersonas();
   writeText(STORE_KEYS.personas, JSON.stringify(personas));
-  const matched = isSunamModel(savedModel) && personas.some((persona) => persona.name === savedModel)
+  // L3：savedModel 已带非空默认值，isSunamModel 是 string 别名上的重言式门卫——直接按皮套名匹配。
+  const matched = personas.some((persona) => persona.name === savedModel)
     ? personas.find((persona) => persona.name === savedModel)?.id
     : undefined;
   if (matched) writeText(STORE_KEYS.activePersona, matched);

@@ -20,18 +20,19 @@ export const CHILD_TASK_TOOLS = [...CHILD_COMMON_TOOLS, 'materialize_resource', 
  *
  * pi 框架（@earendil-works/pi-agent-core）没有原生子 agent API——子 agent 是
  * 一个独立的 pi Agent 实例（PiSession），由本编排器管理生命周期：
- * - `spawn`：创建子 run/任务，进入并发池；**并发上限 3**（对齐现有
- *   AgentFamilyCoordinator 的三路并发），超限排队，前一个终态后启动；
+ * - `spawn`：创建子 run/任务，进入并发池；**并发上限 3**（对齐已删除的旧引擎
+ *   AgentFamilyCoordinator 三路并发，见下历史说明），超限排队，前一个终态后启动；
  * - `wait`：逐条消费子 agent 生命周期通知（blocked/终态），对齐现有语义；
  * - `message`：向运行中的子 agent 注入父协调消息（pi Agent.steer 队列，
  *   当前 assistant turn 后注入）——R5 边界见下；
  * - `stop`/`stopAll`：abort 子 agent（pi Agent.abort）；根 signal abort → 全停；
  * - 通知：子 agent 事件桥 → `SubagentNotification`（对齐现有结构）。
  *
- * 物理边界（TASK-P4）：
- * - 现有 `AgentFamilyCoordinator`（subagentCoordinator.ts）一字不动——本模块是
- *   pi 通道的并行实现；
- * - 两个 contracts 文件、UI、零新增依赖均不越界。
+ * 历史说明（L1 终审组2）：旧引擎的 `AgentFamilyCoordinator`（subagentCoordinator.ts）
+ * 已在 R4 删除，本模块是 pi 通道唯一实现——「并行实现」的表述不再成立，并发上限沿用
+ * 旧引擎语义（三路并发）作向后兼容，不再有可对比的并行实现。
+ *
+ * 物理边界（TASK-P4）：两个 contracts 文件、UI、零新增依赖均不越界。
  *
  * R5 边界如实记录：
  * - **内存成本**：每个子 agent 都是一个独立 pi Agent 实例（完整转录 + 上下文窗口，
@@ -50,7 +51,7 @@ export const CHILD_TASK_TOOLS = [...CHILD_COMMON_TOOLS, 'materialize_resource', 
  *   各自处理，写冲突风险如实保留。
  */
 
-/** 并发上限：对齐现有 AgentFamilyCoordinator 的「三路并发」。 */
+/** 并发上限：沿用旧引擎 AgentFamilyCoordinator 的「三路并发」语义（历史继承，见上）。 */
 const MAX_CONCURRENT_SUBAGENTS = 3;
 /** 每根 run 最大子 agent 数：对齐现有上限。 */
 const MAX_CHILDREN_PER_ROOT = 6;

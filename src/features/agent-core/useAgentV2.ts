@@ -12,6 +12,7 @@ import { isActiveAgentPhase, normalizeSubagentRole, type AgentEvent, type AgentR
 import { toErrorMessage } from '@/shared/lib/errors';
 import { registerWorkspaceDeletionPreparation } from '@/entities/workspace/deletionCoordinator';
 import { createId } from '@/shared/lib/ids';
+import { isPiEngineEnabled } from './pi/featureFlag';
 import { createChaosContract } from './prompt';
 import { initialTask, rebuildTaskForResume, type AgentResumeState } from './task';
 import { createAgentDriver } from './driver/create';
@@ -225,6 +226,8 @@ export function useAgentV2(
     const now = Date.now();
     // R2：resume 时恢复原任务的 TaskContract（plan/evidence），否则从新目标构造。
     const task = resume?.task ? rebuildTaskForResume(resume.task) : initialTask(userPrompt.trim());
+    // M3（终审组2）：把 chaos contract 解析提前，供 driver systemPrompt 回填（见下）。
+    const chaos = createChaosContract(sunamModel, personaStyle);
     const run: AgentRun = {
       id: runId,
       sessionId,
@@ -235,7 +238,7 @@ export function useAgentV2(
       createdAt: now,
       updatedAt: now,
       task,
-      chaos: createChaosContract(sunamModel, personaStyle),
+      chaos,
       // v3 isRun 要求 maxToolCalls > 0（旧引擎默认 150）；pi 通道自治循环不强制预算，
       // 但该 run 会持久化到 v3（刷新恢复/断点续跑依赖），必须通过 schema 校验。
       budget: { maxModelTurns: 1, maxToolCalls: 1, maxDurationMs: 5 * 60_000 },
@@ -257,7 +260,10 @@ export function useAgentV2(
         apiKey,
         baseUrl,
         apiModel,
-        ...(personaStyle ? { systemPrompt: personaStyle } : {}),
+        // M3（终审组2）：内置皮套提示词生效——personaStyle 为空时回填 createChaosContract
+        // 解析出的 styleDirective（已按皮套名回填 BUILTIN_PERSONA_PROMPTS 全文），
+        // 使 piSession 收到对应皮套系统提示词（否则空 systemPrompt → DEFAULT_SYSTEM_PROMPT）。
+        ...(personaStyle ? { systemPrompt: personaStyle } : { systemPrompt: chaos.styleDirective }),
         ...(samplingParams ? { samplingParams } : {}),
         ...(providerApi ? { providerApi } : {}),
         sessionId,
@@ -291,6 +297,9 @@ export function useAgentV2(
   }, [apiKey, apiModel, appendEvent, baseUrl, capabilities.containerAvailable, enabledTools, personaStyle, providerApi, runtime, samplingParams, sunamModel, updateRun]);
 
   const launchTask = useCallback((userPrompt: string, overrideSessionId?: string, overrideContainerId?: string, attachments?: ChatAttachment[], resume?: AgentResumeState) => {
+    // R4 逃生门（M1 终审组2）：localStorage 关 pi → 不启动 Agent 运行（聊天-only），
+    // 对齐 featureFlag 注释语义。所有启动路径（startTask / resumeDriverRun）都经本入口。
+    if (!isPiEngineEnabled()) return;
     const sessionId = overrideSessionId ?? activeSessionId;
     const containerAvailable = capabilities.containerAvailable;
     const containerId = overrideContainerId ?? activeContainerId ?? (containerAvailable ? undefined : CHAT_ONLY_CONTAINER_ID);

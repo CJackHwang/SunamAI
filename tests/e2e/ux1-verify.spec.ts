@@ -8,7 +8,8 @@ test('UX1: half-expanded sidebar + default 终端 segment accepts typed commands
     localStorage.setItem('sunam_v2_api_key', 'e2e-no-network');
     localStorage.setItem('sunam_v2_base_url', url);
     localStorage.setItem('sunam_v2_api_model', 'e2e-model');
-    localStorage.setItem('sunam_v2_feature_pi_engine', '0');
+    // R4 后旧引擎已删除、pi 为唯一实现；M1 逃生门落地后关 pi 会阻断 Agent 运行，本用例走 pi 驱动。
+    localStorage.setItem('sunam_v2_feature_pi_engine', '1');
   }, { url: baseUrl });
   await page.route(`${baseUrl}/chat/completions`, async (route) => {
     const body = route.request().postDataJSON() as { stream?: boolean };

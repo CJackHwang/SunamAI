@@ -65,3 +65,33 @@ test('persona creation hot-swaps into the top model selector', async ({ page }) 
   await page.getByRole('button', { name: 'Custom Agent' }).click();
   await expect(page.locator('.model-selector-btn')).toContainText('Custom Agent');
 });
+
+test('builtin persona switch changes the driver system prompt (M3)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const bodies: string[] = [];
+  await page.route('https://e2e.invalid/v1/chat/completions', async (route) => {
+    const body = route.request().postDataJSON() as { stream?: boolean };
+    if (body.stream) bodies.push(JSON.stringify(body));
+    await route.fulfill({ contentType: 'text/event-stream', body: sse({ content: 'pong' }) });
+  });
+  await configureE2E(page);
+  const composer = page.locator('textarea[placeholder*="问 Sunam"]');
+  await expect(composer).toBeEnabled({ timeout: 100_000 });
+
+  // 默认皮套 Sunam 6.9 Pron → 系统提示词含其全文特征串（SunamDC）。
+  await composer.fill('hello');
+  await composer.press('Enter');
+  await expect(page.locator('.chat-answer').first()).toContainText('pong', { timeout: 30_000 });
+  await expect.poll(() => bodies.length).toBeGreaterThan(0);
+  expect(JSON.stringify(bodies)).toContain('SunamDC');
+
+  // 切换到内置皮套 Sunam 11.4 Homo → 系统提示词切换为另一份全文（114514）。
+  await page.locator('.model-selector-btn').click();
+  await page.getByRole('button', { name: 'Sunam 11.4 Homo' }).click();
+  await expect(page.locator('.model-selector-btn')).toContainText('Sunam 11.4 Homo');
+  await composer.fill('hello again');
+  await composer.press('Enter');
+  await expect(page.locator('.chat-answer').last()).toContainText('pong', { timeout: 30_000 });
+  await expect.poll(() => bodies.length).toBeGreaterThanOrEqual(2);
+  expect(JSON.stringify(bodies)).toContain('114514');
+});

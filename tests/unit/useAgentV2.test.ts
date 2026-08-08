@@ -1,7 +1,36 @@
-import { describe, expect, it } from 'vitest';
-import { detectEventTailDrift, detectWorkspaceDrift, mergeSessionRecords, projectConversationEvents, recoveredSessionStatus, selectMessageWindow } from '@/features/agent-core/useAgentV2';
+import { describe, expect, it, vi } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
+import { detectEventTailDrift, detectWorkspaceDrift, mergeSessionRecords, projectConversationEvents, recoveredSessionStatus, selectMessageWindow, useAgentV2 } from '@/features/agent-core/useAgentV2';
 import type { AgentEvent } from '@/features/agent-core/types';
 import type { AgentRun } from '@/features/agent-core/types';
+import { DEFAULT_CAPABILITY_CONFIG } from '@/shared/contracts/capability';
+import type { AgentWorkspaceRuntime } from '@/shared/contracts/agentRuntime';
+import { BUILTIN_PERSONA_PROMPTS } from '@/shared/config/personaPrompts';
+import { STORAGE_KEYS } from '@/shared/lib/storage';
+import { setPiEngineEnabled } from '@/features/agent-core/pi/featureFlag';
+
+/** 捕获 createAgentDriver 收到的驱动入参（M1/M3 用），避免单测走真实 pi 动态 import。 */
+const driverInputs = vi.hoisted(() => {
+  const inputs: Array<Record<string, unknown>> = [];
+  return {
+    inputs,
+    createAgentDriver: vi.fn(async (input: Record<string, unknown>) => {
+      inputs.push(input);
+      return {
+        id: 'pi',
+        capabilities: { steer: true, subagents: true, requiresLocalEnvironment: false },
+        prompt: async () => undefined,
+        abort: () => undefined,
+        steer: () => true,
+        destroy: () => undefined,
+      };
+    }),
+  };
+});
+
+vi.mock('@/features/agent-core/driver/create', () => ({
+  createAgentDriver: driverInputs.createAgentDriver,
+}));
 
 describe('useAgentV2 session isolation', () => {
   it('retains concurrent records for the active session without leaking the previous session', () => {
@@ -64,5 +93,70 @@ describe('useAgentV2 session isolation', () => {
     expect(selectMessageWindow(messages, null)).toEqual(messages.slice(4_750));
     expect(selectMessageWindow(messages, 2_500)).toEqual(messages.slice(2_250, 2_500));
     expect(selectMessageWindow(messages, 100)).toHaveLength(100);
+  });
+});
+
+describe('useAgentV2 pi engine escape hatch (M1)', () => {
+  // 只作启动门禁的 truthiness 检查；驱动层已被 mock，不触碰 runtime 方法。
+  const fakeRuntime = { ensureContainer: async () => undefined } as unknown as AgentWorkspaceRuntime;
+
+  function renderAgent() {
+    return renderHook(() => useAgentV2(
+      'key', 'https://api.test/v1', 'model-a', 'Sunam 6.9 Pron', fakeRuntime,
+      's1', 'c1', () => undefined, { kind: 'root' },
+      { config: DEFAULT_CAPABILITY_CONFIG, containerAvailable: true },
+      '',
+    ));
+  }
+
+  it('does not launch an Agent run when the pi engine is disabled (chat-only)', () => {
+    setPiEngineEnabled(false);
+    localStorage.setItem(STORAGE_KEYS.piEngine, '0');
+    const rendered = renderAgent();
+    act(() => rendered.result.current.startTask('hello'));
+    expect(rendered.result.current.runs).toHaveLength(0);
+    expect(rendered.result.current.activeRun).toBeNull();
+    expect(driverInputs.inputs).toHaveLength(0);
+  });
+
+  it('launches an Agent run when the pi engine is enabled', () => {
+    setPiEngineEnabled(true);
+    localStorage.setItem(STORAGE_KEYS.piEngine, '1');
+    const rendered = renderAgent();
+    act(() => rendered.result.current.startTask('hello'));
+    expect(rendered.result.current.runs).toHaveLength(1);
+    expect(driverInputs.inputs).toHaveLength(1);
+    expect(driverInputs.inputs[0]!.apiModel).toBe('model-a');
+  });
+});
+
+describe('useAgentV2 builtin persona system prompt (M3)', () => {
+  const fakeRuntime = { ensureContainer: async () => undefined } as unknown as AgentWorkspaceRuntime;
+
+  function renderAgent(persona: string) {
+    return renderHook(() => useAgentV2(
+      'key', 'https://api.test/v1', 'model-a', persona, fakeRuntime,
+      's1', 'c1', () => undefined, { kind: 'root' },
+      { config: DEFAULT_CAPABILITY_CONFIG, containerAvailable: true },
+      '',
+    ));
+  }
+
+  it('passes the builtin Sunam 6.9 Pron prompt as the driver systemPrompt when personaStyle is empty', () => {
+    localStorage.setItem(STORAGE_KEYS.piEngine, '1');
+    driverInputs.inputs.length = 0;
+    const rendered = renderAgent('Sunam 6.9 Pron');
+    act(() => rendered.result.current.startTask('hello'));
+    expect(driverInputs.inputs).toHaveLength(1);
+    expect(driverInputs.inputs[0]!.systemPrompt).toBe(BUILTIN_PERSONA_PROMPTS['Sunam 6.9 Pron']);
+  });
+
+  it('switches to the Sunam 11.4 Homo prompt when the persona changes', () => {
+    localStorage.setItem(STORAGE_KEYS.piEngine, '1');
+    driverInputs.inputs.length = 0;
+    const rendered = renderAgent('Sunam 11.4 Homo');
+    act(() => rendered.result.current.startTask('hello'));
+    expect(driverInputs.inputs).toHaveLength(1);
+    expect(driverInputs.inputs[0]!.systemPrompt).toBe(BUILTIN_PERSONA_PROMPTS['Sunam 11.4 Homo']);
   });
 });

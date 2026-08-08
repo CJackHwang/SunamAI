@@ -19,8 +19,9 @@ async function openConfigured(page: import('@playwright/test').Page, baseUrl: st
     localStorage.setItem('sunam_v2_api_key', 'e2e-no-network');
     localStorage.setItem('sunam_v2_base_url', url);
     localStorage.setItem('sunam_v2_api_model', 'e2e-model');
-    // TASK-PISWITCH R3：pi 引擎默认开启；这批 e2e 验证旧引擎行为，显式关闭 pi 走逃生门。
-    localStorage.setItem('sunam_v2_feature_pi_engine', '0');
+    // R4 后旧引擎已删除、pi 为唯一实现；M1 逃生门（终审组2）落地后关 pi 会阻断 Agent 运行，
+    // 这批 e2e 走 pi 驱动（mock /chat/completions），显式开启 pi 引擎。
+    localStorage.setItem('sunam_v2_feature_pi_engine', '1');
   }, { url: baseUrl });
   await page.goto('/');
   const composer = page.locator('textarea[placeholder="问 Sunam 任何问题..."]');

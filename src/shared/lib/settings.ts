@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, isSunamModel, type SunamModel } from '@/shared/config/models';
+import { DEFAULT_SETTINGS, type SunamModel } from '@/shared/config/models';
 import { STORAGE_KEYS, readText, writeText } from '@/shared/lib/storage';
 
 export interface AppSettings {
@@ -14,7 +14,8 @@ export function readAppSettings(): AppSettings {
     apiKey: readText(STORAGE_KEYS.apiKey),
     baseUrl: readText(STORAGE_KEYS.baseUrl, DEFAULT_SETTINGS.baseUrl),
     apiModel: readText(STORAGE_KEYS.apiModel, DEFAULT_SETTINGS.apiModel),
-    sunamModel: isSunamModel(savedModel) ? savedModel : DEFAULT_SETTINGS.sunamModel,
+    // L3：SunamModel 是 string 别名，isSunamModel 门卫已删——只保留空串回退。
+    sunamModel: savedModel || DEFAULT_SETTINGS.sunamModel,
   };
 }
 

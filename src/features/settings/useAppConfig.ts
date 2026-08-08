@@ -14,7 +14,7 @@ import {
   setGlobalModel,
   setActivePersona,
 } from '@/shared/config/settingsStore';
-import { createProviderConfig, type ProviderConfig } from '@/shared/config/providers';
+import { createProviderConfig, type ProviderApi, type ProviderConfig } from '@/shared/config/providers';
 import { createPersonaConfig, type PersonaConfig } from '@/shared/config/personas';
 
 export interface AddProviderInput {
@@ -23,6 +23,8 @@ export interface AddProviderInput {
   baseUrl?: string;
   apiKey?: string;
   defaultModel?: string;
+  /** R4：渠道请求 API（preset 派生；缺省 openai-completions）。 */
+  api?: ProviderApi;
 }
 
 export interface AddPersonaInput {

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, RefreshCw, Check } from 'lucide-react';
 import { useI18n } from '@/shared/i18n';
 import type { AppConfig } from '@/features/settings/useAppConfig';
-import type { ProviderConfig } from '@/shared/config/providers';
+import type { ProviderApi, ProviderConfig } from '@/shared/config/providers';
 import { PROVIDER_PRESETS, getProviderPreset } from '@/features/settings/providerPresets';
 import { listModels } from '@/shared/api/models';
 
@@ -12,12 +12,14 @@ interface ProviderFormState {
   baseUrl: string;
   apiKey: string;
   defaultModel: string;
+  /** R4：渠道请求 API（预设选择时一并写入，随表单提交）。 */
+  api: ProviderApi;
 }
 
-const EMPTY_FORM: ProviderFormState = { presetId: 'deepseek', name: '', baseUrl: '', apiKey: '', defaultModel: '' };
+const EMPTY_FORM: ProviderFormState = { presetId: 'deepseek', name: '', baseUrl: '', apiKey: '', defaultModel: '', api: 'openai-completions' };
 
 function toFormState(provider: ProviderConfig): ProviderFormState {
-  return { presetId: provider.presetId, name: provider.name, baseUrl: provider.baseUrl, apiKey: provider.apiKey, defaultModel: provider.defaultModel };
+  return { presetId: provider.presetId, name: provider.name, baseUrl: provider.baseUrl, apiKey: provider.apiKey, defaultModel: provider.defaultModel, api: provider.api };
 }
 
 export function ProvidersPanel({ config }: { config: AppConfig }) {
@@ -40,12 +42,15 @@ export function ProvidersPanel({ config }: { config: AppConfig }) {
 
   const handlePresetChange = (presetId: string) => {
     const preset = getProviderPreset(presetId);
-    setForm((current) => ({ ...current, presetId, baseUrl: preset?.defaultBaseUrl ?? '', defaultModel: preset?.defaultModel ?? '' }));
+    // M2（终审组2）：预设选择时把 preset.api 一并写入表单，避免 Anthropic 等预设
+    // 落库后仍打 openai-completions（https://api.anthropic.com/v1/chat/completions 404）。
+    setForm((current) => ({ ...current, presetId, baseUrl: preset?.defaultBaseUrl ?? '', defaultModel: preset?.defaultModel ?? '', api: preset?.api ?? 'openai-completions' }));
   };
 
   const startAdd = () => {
     setEditingId(null);
-    setForm({ ...EMPTY_FORM, baseUrl: getProviderPreset('deepseek')?.defaultBaseUrl ?? '', defaultModel: getProviderPreset('deepseek')?.defaultModel ?? '' });
+    const deepseek = getProviderPreset('deepseek');
+    setForm({ ...EMPTY_FORM, baseUrl: deepseek?.defaultBaseUrl ?? '', defaultModel: deepseek?.defaultModel ?? '', api: deepseek?.api ?? 'openai-completions' });
     setIsFormOpen(true);
   };
 

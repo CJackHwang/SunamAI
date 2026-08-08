@@ -2,7 +2,8 @@ import { expect, test } from '@playwright/test';
 import { configureE2E } from './configure';
 
 async function configure(page: import('@playwright/test').Page) {
-  await configureE2E(page, { routeChat: true, piEngineOff: true });
+  // M1 逃生门（终审组2）后关 pi 会阻断 Agent 运行；本用例要验证聊天完成，需开启 pi 引擎。
+  await configureE2E(page, { routeChat: true, piEngineOff: false });
 }
 
 async function openCapabilityTab(page: import('@playwright/test').Page) {
